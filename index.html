@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="start">Start</button>
     <button class="tab" data-tab="merkmale">Merkmale</button>
     <button class="tab" data-tab="pruef">Prüfmerkmale</button>
+    <button class="tab" data-tab="poly">Polygonbearbeitung</button>
     <button class="tab" data-tab="ansicht">Ansicht</button>
     <button class="tab" data-tab="hilfe">Hilfe</button>
   </nav>
@@ -50,6 +51,19 @@
         <button class="big" id="btn-report2"><span class="ico">▤</span>Tabelle erzeugen</button>
         <button class="big" id="btn-csv2" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>Liste CSV</button>
       </div><div class="glabel">Bericht · Prüfmerkmale im Katalog unter der 3D-Ansicht abhaken</div></div>
+    </div>
+    <div class="panel hidden" data-tab="poly">
+      <div class="group"><div class="btns">
+        <button class="big" data-pe="reduce" title="Dreiecksreduktion mit Toleranz zum Original"><span class="ico">◭</span>Reduktion</button>
+        <button class="big" data-pe="subdiv" title="Dreiecksunterteilung (Loop) mit Toleranz"><span class="ico">⟁</span>Unterteilung</button>
+        <button class="big" data-pe="smooth" title="Glättung (Taubin)"><span class="ico">≈</span>Glättung</button>
+        <button class="big" data-pe="erase" title="Magischer Radierer: Loch stanzen und schließen"><span class="ico">✧</span>Magischer Radierer</button>
+      </div><div class="glabel">Polygonmodell bearbeiten</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-pe-cmp" title="Farbvergleich zum Original-Polygonmodell"><span class="ico">◐</span>Farbvergleich</button>
+        <button class="big" id="btn-pe-undo"><span class="ico">↶</span>Rückgängig</button>
+        <button class="big" id="btn-pe-reset"><span class="ico">⟲</span>Original</button>
+      </div><div class="glabel">Vergleich · <span id="pe-info">Original</span></div></div>
     </div>
     <div class="panel hidden" data-tab="hilfe">
       <div class="group"><div class="btns">

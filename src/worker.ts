@@ -7,6 +7,8 @@ import type { Vec3 } from './core/linalg';
 import { autoExtract, extractWithAuxPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
+import { buildBVH, compareToOriginal } from './core/polyedit';
+import * as THREE from 'three';
 
 /** Freiformfläche aus Auswahl (Indizes) oder Klick (Regionenwachstum; Krümmungsband/Knickprüfung stoppen an Verrundungen). */
 function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }) {
@@ -28,10 +30,34 @@ function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3
 
 let mesh: MeshData | null = null;
 let topo: MeshTopology | null = null;
+/** Unverändertes Original (für Farbvergleich und „Original wiederherstellen“). */
+let orig: { positions: Float32Array; indices: Uint32Array } | null = null;
+let origBVH: ReturnType<typeof buildBVH> | null = null;
+
+/** Bearbeitetes Netz übernehmen; Merkmals-Indexlisten auf die nächsten Knoten des neuen Netzes umrechnen (sortiert, eindeutig). */
+function setMesh(positions: Float32Array, indices: Uint32Array, remap: (Uint32Array | null)[]) {
+  const old = mesh!;
+  const nm: MeshData = { name: old.name, positions, indices }; computeNormals(nm);
+  const bvh = buildBVH(nm); const p = new THREE.Vector3(); const tgt: any = {};
+  const cache = new Map<number, number>();
+  const nearest = (v: number) => {
+    let r = cache.get(v); if (r !== undefined) return r;
+    p.set(old.positions[3 * v], old.positions[3 * v + 1], old.positions[3 * v + 2]);
+    const h = bvh.closestPointToPoint(p, tgt); r = 0;
+    if (h) { let bd = Infinity; for (let k = 0; k < 3; k++) { const w = indices[3 * h.faceIndex + k]; const d = (positions[3 * w] - p.x) ** 2 + (positions[3 * w + 1] - p.y) ** 2 + (positions[3 * w + 2] - p.z) ** 2; if (d < bd) { bd = d; r = w; } } }
+    cache.set(v, r); return r;
+  };
+  const out = remap.map((L) => (L ? Uint32Array.from(new Set(Array.from(L, nearest))).sort() : null));
+  mesh = nm; topo = new MeshTopology(nm);
+  return out;
+}
 
 export type Req =
   | { op: 'load'; name: string; buffer: ArrayBuffer }
   | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
+  | { op: 'setMesh'; positions: Float32Array; indices: Uint32Array; remap: (Uint32Array | null)[] }
+  | { op: 'compare' }
+  | { op: 'getOriginal' }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
@@ -74,11 +100,25 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       if (req.op === 'load') mesh = parseByName(req.name, req.buffer);
       else { mesh = { name: req.name, positions: req.positions, indices: req.indices }; if (mesh.indices.length) computeNormals(mesh); }
       topo = mesh.indices.length ? new MeshTopology(mesh) : null;
+      orig = { positions: mesh.positions.slice(), indices: mesh.indices.slice() }; origBVH = null;
       const b = bounds(mesh);
       const positions = mesh.positions.slice(), indices = mesh.indices.slice();
       const normals = mesh.vertexNormals ? mesh.vertexNormals.slice() : null;
       result = { name: mesh.name, positions, indices, normals, bounds: b, vertexCount: positions.length / 3, triCount: indices.length / 3 };
       transfer = [positions.buffer, indices.buffer, ...(normals ? [normals.buffer] : [])];
+    } else if (req.op === 'setMesh') {
+      const remap = setMesh(req.positions, req.indices, req.remap);
+      const normals = mesh!.vertexNormals!.slice();
+      result = { remap, normals, bounds: bounds(mesh!), vertexCount: mesh!.positions.length / 3, triCount: mesh!.indices.length / 3 };
+      transfer = [normals.buffer];
+    } else if (req.op === 'compare') {
+      if (!orig || !mesh) throw new Error('Kein Netz');
+      origBVH ??= buildBVH(orig);
+      const c = compareToOriginal({ positions: mesh.positions, indices: mesh.indices }, orig, origBVH);
+      result = c; transfer = [c.dev.buffer];
+    } else if (req.op === 'getOriginal') {
+      if (!orig) throw new Error('Kein Original');
+      result = { positions: orig.positions.slice(), indices: orig.indices.slice() };
     } else if (req.op === 'grow') {
       if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell (Dreiecke). Für Punktwolken den Pinsel verwenden.');
       if (req.type === 'auto') {

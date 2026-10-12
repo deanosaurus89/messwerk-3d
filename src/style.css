@@ -251,3 +251,6 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 #dev-legend .ticks{display:flex;justify-content:space-between}
 @media (max-width:700px){#dev-legend{top:auto;bottom:8px;right:auto;left:50%;transform:translateX(-50%);width:150px}}
 @media (max-width:700px){body.previewing #btn-center{display:none}}
+.pe-tol input[type=range]{width:100%}
+.pe-tol input[type=number]{width:90px}
+.pe-live{margin:8px 0;padding:6px 8px;background:#eef3fa;border:1px solid #c9d6e8;border-radius:5px;font-size:12px}

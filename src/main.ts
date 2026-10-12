@@ -1,6 +1,6 @@
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
-import { Engine } from './engine';
+import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType } from './core/fit';
 import {
@@ -57,6 +57,17 @@ const state = {
   addFeat: null as number | null,
 };
 (window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
+type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase';
+const PE_NAME: Record<PeTool, string> = { reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
+const pe = {
+  tool: null as PeTool | null,
+  tol: 0.02, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
+  cmp: false, dev: null as Float32Array | null, devStats: null as null | { maxPos: number; maxNeg: number },
+  undo: [] as { positions: Float32Array; indices: Uint32Array; label: string }[], edits: [] as string[],
+  live: '', running: false, origTris: 0,
+};
+const polyEngine = new PolyEngine();
+(window as any).__app.pe = pe;
 
 const featMap = () => new Map<number, Feature>(state.features.map((f) => [f.id, f]));
 // Punkte eines Merkmals (für Richtungs-/Lauftoleranzen mit Bezug) aus dem Netz, max. 6000, zwischengespeichert
@@ -113,11 +124,13 @@ $('#btn-distance').onclick = () => startDistanceMode();
 
 function startFitMode(t: GeomType | 'auto') {
   if (!state.data) { status('Bitte zuerst ein Polygonmodell laden.'); return; }
+  pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
   state.preview = null; clearBrush(); renderAll();
 }
 function startDistanceMode() {
+  pe.tool = null;
   if (state.features.filter((f) => f.type !== 'Abstand').length < 2) { toast('Für einen Abstand werden zwei Merkmale benötigt.'); return; }
   const s = state.sel.filter((id) => state.features.find((f) => f.id === id)?.type !== 'Abstand');
   state.mode = { kind: 'dist', a: s[0] ?? null, b: s[1] ?? null, slot: s[0] != null && s[1] == null ? 1 : 0 };
@@ -180,7 +193,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer) {
   try {
     const t0 = performance.now();
     const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf }, [buf]));
-    viewer.setModel(r.positions, r.indices, r.normals);
+    viewer.setModel(r.positions, r.indices, r.normals); peReset();
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = []; state.controls = []; state.sel = []; state.mode = null; state.preview = null;
     state.hidden.clear(); state.labelOffsets.clear(); state.modelVisible = true; state.typeCount = {};
@@ -206,6 +219,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (pe.tool === 'erase') { viewer.showCursor(viewer.pick(e.clientX, e.clientY), pe.radius); return; }
   if (state.mode?.kind !== 'fit' || state.mode.method !== 'Pinsel') return;
   const h = viewer.pick(e.clientX, e.clientY);
   viewer.showCursor(h, state.opts.brush);
@@ -219,7 +233,8 @@ window.addEventListener('pointerup', async (e) => {
   if (moved > 8 || dt > 700) return;
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) return;
-  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
+  if (pe.tool === 'erase') await peErase(h);
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
   else { const f = featureAtHit(h); if (f) selectFeature(f.id); }
 });
@@ -738,6 +753,7 @@ function renderPreviewCard() {
 
 function renderDialog() {
   const d = $('#dialog'); d.innerHTML = '';
+  if (pe.tool) { renderPolyDialog(d); return; }
   const m = state.mode;
   if (m?.kind === 'dist') {
     const opts = (sel: number | null) => `<option value="">— wählen —</option>` + state.features.filter((f) => f.type !== 'Abstand')
@@ -1010,7 +1026,8 @@ function renderScene() {
   if (viewer.model) viewer.model.visible = state.modelVisible;
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
-  if (state.colorPts) for (const f of state.features) {
+  const peOn = paintPolyCompare();
+  if (state.colorPts && !peOn) for (const f of state.features) {
     if (f.type === 'Abstand' || !vis(f)) continue;
     const c = rgb(f.color), s = state.sel.includes(f.id);
     if (s && f.dev && state.devMap && f.dev.length === f.indices.length) viewer.paintScalar(f.indices, f.dev, devRange(f.dev));
@@ -1024,7 +1041,7 @@ function renderScene() {
   if (p?.aux?.indices.length) viewer.paint(p.aux.indices, rgb(AUX_COLOR));
   if (p && p.indices.length) { if (p.dev && state.devMap) viewer.paintScalar(p.indices, p.dev, devRange(p.dev)); else viewer.paint(p.indices, rgb(PREVIEW_COLOR)); }
   const lg = [p?.dev && state.devMap ? p.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
-  renderDevLegend(lg ?? null);
+  if (!peOn) renderDevLegend(lg ?? null);
   viewer.commitColors();
   viewer.clearPrims();
   if (state.showPrims) for (const f of state.features) {
@@ -1148,7 +1165,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
   restoring = true;
   try {
     const r = await busy(engine.call<any>({ op: 'loadRaw', name: json.mesh.name, positions: mesh.positions.slice(), indices: mesh.indices.slice() }));
-    viewer.setModel(r.positions, r.indices, r.normals);
+    viewer.setModel(r.positions, r.indices, r.normals); peReset();
     const st = json.state;
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id), src: unpackIndex(idx, 's' + f.id), dev: ((d) => (d ? new Float32Array(d.slice().buffer) : undefined))(unpackIndex(idx, 'd' + f.id)) }));
@@ -1368,3 +1385,187 @@ function nurbsAccuracy(fit: FitResult) {
 }
 Object.assign((window as any).__app, { nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
+
+
+// ------------------------------------------------------------------ Polygonbearbeitung
+
+const TOL_MIN = 0.001, TOL_MAX = 1;
+const tolToRange = (t: number) => Math.round(1000 * Math.log10(Math.max(TOL_MIN, Math.min(TOL_MAX, t)) / TOL_MIN) / 3);
+const rangeToTol = (r: number) => +(TOL_MIN * 10 ** (3 * r / 1000)).toPrecision(2);
+
+function peReset() { pe.undo = []; pe.edits = []; pe.dev = null; pe.devStats = null; pe.cmp = false; pe.origTris = 0; pe.live = ''; }
+function curMesh() { const m = meshArrays(); return { positions: m.positions.slice(), indices: m.indices.slice() }; }
+
+document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.onclick = () => {
+  if (!state.data) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
+  if (!state.data.triCount) { toast('Polygonbearbeitung benötigt ein Dreiecksnetz (keine Punktwolke).'); return; }
+  const t = b.dataset.pe as PeTool;
+  if (pe.tool === t) { peExit(); return; }
+  state.mode = null; state.preview = null; clearBrush();
+  pe.tool = t; if (t === 'erase') pe.radius = pe.radius || +(state.data.diag / 40).toFixed(1);
+  viewer.controls.enabled = true; viewer.showCursor(null, 1);
+  renderAll(); if (isPhone()) togglePanel('dialog', true);
+}));
+$('#btn-pe-cmp').onclick = () => peToggleCompare();
+$('#btn-pe-undo').onclick = () => peUndo();
+$('#btn-pe-reset').onclick = () => peResetOriginal();
+function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; viewer.showCursor(null, 1); renderAll(); }
+
+function renderPolyRibbon() {
+  document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => b.classList.toggle('on', pe.tool === b.dataset.pe));
+  $('#btn-pe-cmp').classList.toggle('on', pe.cmp);
+  ($('#btn-pe-undo') as HTMLButtonElement).disabled = !pe.undo.length;
+  ($('#btn-pe-reset') as HTMLButtonElement).disabled = !pe.undo.length;
+  const i = $('#pe-info'); if (i) i.textContent = pe.edits.length ? `${pe.edits.length} Bearbeitung(en) · ${state.data?.triCount.toLocaleString('de-DE')} Dreiecke` : 'Original';
+}
+
+/** Toleranz: Zahlenfeld und Schieberegler (logarithmisch 0,001…1 mm), gegenseitig synchronisiert. */
+function tolRow(id: string, label: string, val: number) {
+  return `<div class="row pe-tol"><label>${label}</label><input type="number" id="${id}-n" value="${val}" min="${TOL_MIN}" max="${TOL_MAX}" step="0.001" inputmode="decimal"><span class="unit">mm</span></div>
+    <div class="row pe-tol"><input type="range" id="${id}-r" min="0" max="1000" step="1" value="${tolToRange(val)}" aria-label="${label}"></div>`;
+}
+function bindTol(d: HTMLElement, id: string, set: (v: number) => void) {
+  const n = d.querySelector<HTMLInputElement>(`#${id}-n`)!, r = d.querySelector<HTMLInputElement>(`#${id}-r`)!;
+  n.addEventListener('input', () => { const v = Number(n.value.replace(',', '.')); if (isFinite(v) && v > 0) { r.value = String(tolToRange(v)); set(Math.min(TOL_MAX, Math.max(TOL_MIN, v))); } });
+  r.addEventListener('input', () => { const v = rangeToTol(+r.value); n.value = String(v); set(v); });
+}
+
+function renderPolyDialog(d: HTMLElement) {
+  const t = pe.tool!, tris = state.data?.triCount ?? 0;
+  const run = pe.running ? `<button class="btn" id="pe-cancel">✕ Abbrechen</button>` : `<button class="btn primary" id="pe-run">▶ Anwenden</button>`;
+  let body = '';
+  if (t === 'reduce') body = `<p class="note">Entfernt Dreiecke, solange jeder Originalpunkt höchstens um die Toleranz vom reduzierten Netz abweicht – wie die Sehnenhöhe beim Polygonisieren eines Kreises. Ebene Bereiche werden stark, Radien und Kanten kaum reduziert.</p>
+    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}<div class="row">${run}</div>`;
+  else if (t === 'subdiv') body = `<p class="note">Teilt jedes Dreieck in vier (Loop). Neue Punkte werden geglättet, aber höchstens um die Toleranz von der ursprünglichen Fläche verschoben.</p>
+    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
+    <div class="row"><label>Stufen</label><select id="pe-lv">${[1, 2].map((x) => `<option ${x === pe.levels ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="row"><span class="note">Ergebnis: ≈ ${(tris * 4 ** pe.levels).toLocaleString('de-DE')} Dreiecke${tris * 4 ** pe.levels > 3e6 ? ' – über 3 Mio., wird begrenzt' : ''}</span></div><div class="row">${run}</div>`;
+  else if (t === 'smooth') body = `<p class="note">Taubin-Glättung (schrumpft nicht). Rauschen wird reduziert; jeder Punkt bewegt sich höchstens um die Toleranz (0 = unbegrenzt). Ränder bleiben fest.</p>
+    <div class="row"><label>Stärke λ</label><input type="number" id="pe-lam" value="${pe.lambda}" min="0.05" max="0.9" step="0.05"></div>
+    <div class="row"><label>Iterationen</label><input type="number" id="pe-it" value="${pe.iters}" min="1" max="100" step="1"></div>
+    ${tolRow('pe-stol', 'Max. Verschiebung', pe.smoothTol)}<div class="row">${run}</div>`;
+  else body = `<p class="note">In das Netz tippen/klicken: alle Dreiecke im Pinselradius werden ausgestanzt, das Loch wird sofort wieder geschlossen und an die umgebende Krümmung angeglichen (biharmonisch). Entfernt z. B. Markierungen, Spikes oder Löcher-Artefakte.</p>
+    <div class="row"><label>Pinselradius</label><input type="number" id="pe-rad-n" value="${pe.radius}" min="0.1" step="0.1" inputmode="decimal"><span class="unit">mm</span></div>
+    <div class="row pe-tol"><input type="range" id="pe-rad-r" min="0.2" max="${Math.max(1, +((state.data?.diag ?? 100) / 8).toFixed(1))}" step="0.1" value="${pe.radius}" aria-label="Pinselradius"></div>`;
+  d.innerHTML = `<h3>${PE_NAME[t]}</h3>${body}
+    <div class="pe-live" id="pe-live">${pe.live || `Aktuell: <b>${tris.toLocaleString('de-DE')}</b> Dreiecke`}</div>
+    <h4>Vergleich</h4>
+    <div class="row"><button class="btn ${pe.cmp ? 'on' : ''}" id="pe-cmp">◐ Farbvergleich zum Original ${pe.cmp ? 'an' : 'aus'}</button></div>
+    ${pe.cmp && pe.devStats ? `<div class="row"><span class="note">Abweichung zum Original: +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm</span></div>` : ''}
+    <div class="row"><button class="btn" id="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶ Rückgängig</button><button class="btn" id="pe-reset" ${pe.undo.length ? '' : 'disabled'}>⟲ Original</button><button class="btn" id="pe-exit">Schließen</button></div>
+    ${pe.edits.length ? `<p class="note">Verlauf: ${pe.edits.join(' → ')}</p>` : ''}
+    <p class="note">Merkmale bleiben erhalten; ihre Punkte werden auf das bearbeitete Netz übertragen. Ist-Werte bei Bedarf in den Eigenschaften neu fitten.</p>`;
+  if (t === 'reduce' || t === 'subdiv') bindTol(d, 'pe-tol', (v) => (pe.tol = v));
+  if (t === 'smooth') {
+    bindTol(d, 'pe-stol', (v) => (pe.smoothTol = v));
+    d.querySelector<HTMLInputElement>('#pe-lam')!.onchange = (e) => { const v = +(e.target as HTMLInputElement).value; if (v > 0 && v < 1) pe.lambda = v; };
+    d.querySelector<HTMLInputElement>('#pe-it')!.onchange = (e) => { const v = Math.round(+(e.target as HTMLInputElement).value); if (v >= 1) pe.iters = Math.min(100, v); };
+  }
+  if (t === 'erase') {
+    const n = d.querySelector<HTMLInputElement>('#pe-rad-n')!, r = d.querySelector<HTMLInputElement>('#pe-rad-r')!;
+    n.addEventListener('input', () => { const v = Number(n.value.replace(',', '.')); if (v > 0) { pe.radius = v; r.value = String(v); } });
+    r.addEventListener('input', () => { pe.radius = +r.value; n.value = r.value; });
+  }
+  d.querySelector<HTMLSelectElement>('#pe-lv')?.addEventListener('change', (e) => { pe.levels = +(e.target as HTMLSelectElement).value; renderDialog(); });
+  d.querySelector('#pe-run')?.addEventListener('click', () => peRun());
+  d.querySelector('#pe-cancel')?.addEventListener('click', () => { polyEngine.cancel(); });
+  d.querySelector('#pe-cmp')?.addEventListener('click', () => peToggleCompare());
+  d.querySelector('#pe-undo')?.addEventListener('click', () => peUndo());
+  d.querySelector('#pe-reset')?.addEventListener('click', () => peResetOriginal());
+  d.querySelector('#pe-exit')?.addEventListener('click', () => peExit());
+}
+function setLive(html: string) { pe.live = html; const e = document.getElementById('pe-live'); if (e) e.innerHTML = html; }
+
+async function peRun() {
+  if (!state.data || pe.running) return;
+  const t = pe.tool!, before = state.data.triCount, t0 = performance.now();
+  const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels }
+    : { op: 'smooth', iterations: pe.iters, lambda: pe.lambda, tol: pe.smoothTol };
+  req.mesh = curMesh();
+  pe.running = true; setLive(`Läuft … <b>${before.toLocaleString('de-DE')}</b> Dreiecke`); renderDialog(); status(`${PE_NAME[t]} läuft …`);
+  try {
+    const r = await polyEngine.run<any>(req, (p) => setLive(t === 'smooth' ? `Iteration ${p.done} / ${pe.iters}` :
+      `Läuft … <b>${p.tris.toLocaleString('de-DE')}</b> Dreiecke (${(100 * p.tris / before).toFixed(1)} %)`));
+    pe.running = false;
+    const label = t === 'reduce' ? `Reduktion ${pe.tol} mm` : t === 'subdiv' ? `Unterteilung ×${pe.levels} (${pe.tol} mm)` : `Glättung ${pe.iters}×λ${pe.lambda}${pe.smoothTol ? ` ≤${pe.smoothTol} mm` : ''}`;
+    await applyEditedMesh(r.positions, r.indices, label);
+    const after = state.data!.triCount;
+    setLive(`${before.toLocaleString('de-DE')} → <b>${after.toLocaleString('de-DE')}</b> Dreiecke (${(100 * after / before).toFixed(1)} %) in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    toast(`✔ ${label}: ${before.toLocaleString('de-DE')} → ${after.toLocaleString('de-DE')} Dreiecke`);
+  } catch (e: any) {
+    pe.running = false;
+    setLive(e.message === 'abgebrochen' ? 'Abgebrochen – Netz unverändert.' : 'Fehler: ' + e.message);
+    status(e.message === 'abgebrochen' ? `${PE_NAME[t]} abgebrochen.` : 'Fehler: ' + e.message);
+  }
+  renderDialog();
+}
+
+async function peErase(h: Hit) {
+  if (pe.running || !state.data) return;
+  const cam = viewer.camera.position, f = [cam.x - h.point[0], cam.y - h.point[1], cam.z - h.point[2]], l = Math.hypot(f[0], f[1], f[2]) || 1;
+  pe.running = true; setLive('Stanze und schließe Loch …');
+  try {
+    const r = await busy(polyEngine.run<any>({ op: 'erase', mesh: curMesh(), center: h.point, radius: pe.radius, tri: h.tri, facing: f.map((x) => x / l) }));
+    pe.running = false;
+    if (!r.loops) { setLive(r.skipped ? 'Bereich berührt einen offenen Rand – nicht gefüllt.' : 'Nichts entfernt.'); return; }
+    await applyEditedMesh(r.positions, r.indices, `Radierer r=${pe.radius} mm`);
+    setLive(`Loch geschlossen: ${r.removed} Dreiecke entfernt, ${r.added} Punkte neu${r.skipped ? ` · ${r.skipped} offene Ränder übersprungen` : ''}`);
+  } catch (e: any) { pe.running = false; setLive('Fehler: ' + e.message); }
+  renderDialog();
+}
+
+/** Neues Netz übernehmen: Rückgängig-Stapel, Worker-Netz + Merkmalspunkte umrechnen, Anzeige ohne Kamerasprung, ggf. Farbvergleich neu. */
+async function applyEditedMesh(positions: Float32Array, indices: Uint32Array, label: string | null, pushUndo = true) {
+  if (pushUndo) { pe.undo.push({ ...curMesh(), label: label ?? '' }); if (pe.undo.length > 8) pe.undo.shift(); }
+  if (!pe.origTris) pe.origTris = state.data!.triCount;
+  const lists: (Uint32Array | null)[] = [];
+  for (const f of state.features) lists.push(f.indices ?? null, f.auxIndices ?? null, f.src ?? null);
+  const r = await busy(engine.call<any>({ op: 'setMesh', positions: positions.slice(), indices: indices.slice(), remap: lists }));
+  state.features.forEach((f, i) => {
+    const [a, b, c] = [r.remap[3 * i], r.remap[3 * i + 1], r.remap[3 * i + 2]];
+    if (a) f.indices = a; f.auxIndices = b ?? undefined; f.src = c ?? undefined;
+    if (f.dev && f.dev.length !== f.indices.length) f.dev = undefined;
+  });
+  ptsCache.clear();
+  viewer.setModel(positions, indices, r.normals, true);
+  if (label) pe.edits.push(label); else pe.edits.pop();
+  state.data!.vertexCount = r.vertexCount; state.data!.triCount = r.triCount;
+  $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
+  state.preview = null; clearBrush();
+  pe.dev = null; pe.devStats = null;
+  if (pe.cmp) await peCompute();
+  storeMeshForAutosave(state.data!.name);
+  renderAll();
+}
+async function peCompute() {
+  const c = await busy(engine.call<any>({ op: 'compare' }));
+  pe.dev = c.dev; pe.devStats = { maxPos: c.maxPos, maxNeg: c.maxNeg };
+}
+async function peToggleCompare() {
+  if (!state.data) return;
+  pe.cmp = !pe.cmp;
+  if (pe.cmp && !pe.dev) await peCompute();
+  renderAll();
+  if (pe.cmp && pe.devStats) status(`Farbvergleich zum Original: max. +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm`);
+}
+async function peUndo() {
+  const u = pe.undo.pop(); if (!u) { toast('Nichts rückgängig zu machen.'); return; }
+  await applyEditedMesh(u.positions, u.indices, null, false); toast('Bearbeitung rückgängig gemacht.');
+}
+async function peResetOriginal() {
+  if (!pe.undo.length) return;
+  const o = await busy(engine.call<any>({ op: 'getOriginal' }));
+  pe.undo = []; await applyEditedMesh(o.positions, o.indices, null, false); pe.edits = []; pe.origTris = 0; renderAll();
+  toast('Original-Polygonmodell wiederhergestellt.');
+}
+/** Farbkarte über das ganze Netz; liefert true, wenn aktiv (dann keine Merkmalsfarben). */
+function paintPolyCompare(): boolean {
+  if (!pe.cmp || !pe.dev || !viewer.colors || pe.dev.length !== viewer.colors.length / 3) return false;
+  const all = new Uint32Array(pe.dev.length); for (let i = 0; i < all.length; i++) all[i] = i;
+  const s = pe.devStats!, r = Math.max(1e-3, Math.max(s.maxPos, -s.maxNeg));
+  viewer.paintScalar(all, pe.dev, r);
+  let el = document.getElementById('dev-legend');
+  if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
+  el.innerHTML = `<b>Abweichung zum Original [mm]</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
+  return true;
+}

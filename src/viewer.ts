@@ -89,7 +89,7 @@ export class Viewer {
       this.wire.raycast = () => {}; this.wire.visible = this.model.visible; this.scene.add(this.wire);
     }
   }
-  setModel(positions: Float32Array, indices: Uint32Array, normals: Float32Array | null) {
+  setModel(positions: Float32Array, indices: Uint32Array, normals: Float32Array | null, keepView = false) {
     const hadWire = !!this.wire; this.setWireframe(false);
     if (this.model) { this.scene.remove(this.model); this.model.geometry.dispose(); }
     const geo = new THREE.BufferGeometry();
@@ -111,7 +111,7 @@ export class Viewer {
     geo.computeBoundingSphere();
     this.center.copy(geo.boundingSphere!.center); this.radius = geo.boundingSphere!.radius;
     this.ray.params.Points = { threshold: this.radius / 300 };
-    this.view('iso');
+    if (!keepView) this.view('iso');
   }
 
   resetColors() { if (!this.colors) return; for (let i = 0; i < this.colors.length / 3; i++) this.colors.set(BASE_COLOR, 3 * i); }
