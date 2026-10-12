@@ -108,8 +108,8 @@ $('#btn-distance').onclick = () => startDistanceMode();
 
 function startFitMode(t: GeomType | 'auto') {
   if (!state.data) { status('Bitte zuerst ein Polygonmodell laden.'); return; }
-  const method = state.mode?.kind === 'fit' ? state.mode.method : 'Klick';
-  state.mode = { kind: 'fit', type: t, method };
+  // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
+  state.mode = { kind: 'fit', type: t, method: 'Klick' };
   state.preview = null; clearBrush(); renderAll();
 }
 function startDistanceMode() {
@@ -197,7 +197,7 @@ canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
   if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel' && e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
     const h = viewer.pick(e.clientX, e.clientY);
-    if (h) { painting = true; viewer.controls.enabled = false; brushAt(h); }
+    if (h) { painting = true; strokeErase = brushErase || e.shiftKey; brushUndo.push([]); viewer.controls.enabled = false; brushAt(h); }
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -238,18 +238,61 @@ function featureAtHit(h: Hit): FeatureView | null {
 }
 
 let brushBusy = false;
+let brushErase = false, strokeErase = false;
+/** Undo-Stapel: je Pinselstrich die geänderten Knoten (Vorzeichen: + gemalt, − radiert). */
+const brushUndo: number[][] = [];
 async function brushAt(h: Hit) {
   if (brushBusy || !state.brushMask) return;
   brushBusy = true;
   try {
     const r = await engine.call<any>({ op: 'brush', center: h.point, radius: state.opts.brush, facing: h.normal });
-    const add: number[] = [];
-    for (const v of r.indices as Uint32Array) if (!state.brushMask[v]) { state.brushMask[v] = 1; add.push(v); state.brushCount++; }
-    viewer.paint(Uint32Array.from(add), [1, 0.85, 0]); viewer.commitColors();
-    renderDialog();
+    const stroke = brushUndo[brushUndo.length - 1] ?? [];
+    const ch: number[] = [];
+    for (const v of r.indices as Uint32Array) {
+      if (!strokeErase && !state.brushMask[v]) { state.brushMask[v] = 1; state.brushCount++; ch.push(v); stroke.push(v + 1); }
+      else if (strokeErase && state.brushMask[v]) { state.brushMask[v] = 0; state.brushCount--; ch.push(v); stroke.push(-(v + 1)); }
+    }
+    if (strokeErase) renderScene(); else { viewer.paint(Uint32Array.from(ch), [1, 0.85, 0]); viewer.commitColors(); }
+    renderDialog(); renderModeBar();
   } finally { brushBusy = false; }
 }
-function clearBrush() { state.brushMask = state.data ? new Uint8Array(state.data.vertexCount) : null; state.brushCount = 0; }
+function undoBrush() {
+  while (brushUndo.length && !brushUndo[brushUndo.length - 1].length) brushUndo.pop();
+  const st = brushUndo.pop(); if (!st || !state.brushMask) { toast('Nichts rückgängig zu machen.'); return; }
+  for (let i = st.length - 1; i >= 0; i--) { const v = Math.abs(st[i]) - 1; const was = st[i] > 0 ? 0 : 1; if (state.brushMask[v] !== was) { state.brushMask[v] = was; state.brushCount += was ? 1 : -1; } }
+  state.preview = null; renderAll(); status(`Pinselstrich rückgängig – ${state.brushCount} Punkte markiert.`);
+}
+function clearBrush() { state.brushMask = state.data ? new Uint8Array(state.data.vertexCount) : null; state.brushCount = 0; brushUndo.length = 0; }
+function clearSelectionAll() {
+  const had = state.brushCount > 0 || !!state.preview;
+  clearBrush(); state.preview = null; renderAll(); status(had ? 'Auswahl gelöscht.' : 'Keine Auswahl.');
+}
+function setMethod(m: 'Klick' | 'Pinsel') {
+  if (state.mode?.kind !== 'fit') return;
+  state.mode.method = m; state.preview = null; clearBrush(); brushErase = false; viewer.showCursor(null, 1); renderAll();
+}
+/** Immer sichtbare Modusanzeige über der 3D-Ansicht (aktives Werkzeug + Aktionen). */
+const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
+modeBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+function renderModeBar() {
+  const m = state.mode;
+  if (!state.data || !m) { modeBar.className = 'hidden'; return; }
+  let html = '';
+  if (m.kind === 'dist') html = `<span class="mb-tool">↔ Abstand</span><button data-a="exit">✕ Beenden (Esc)</button>`;
+  else if (m.method === 'Klick') html = `<span class="mb-tool">👆 Klick + Wachstum · ${m.type === 'auto' ? 'Automatisch' : m.type}</span><button data-a="brush">🖌 Pinsel</button><button data-a="exit">✕ Beenden (Esc)</button>`;
+  else html = `<span class="mb-tool ${brushErase ? 'erase' : 'paint'}">${brushErase ? '🧽 Radierer' : '🖌 Pinsel'} · ${m.type === 'auto' ? 'Automatisch' : m.type} · <b>${state.brushCount}</b> Punkte</span>
+    <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 Malen</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="Radierer (oder Shift beim Malen)">🧽 Radieren</button>
+    <button data-a="undo" title="Strg+Z">↶ Rückgängig</button><button data-a="clear" class="warn">🗑 Auswahl löschen</button>
+    <button data-a="fit" class="primary" ${state.brushCount ? '' : 'disabled'}>Fitten</button><button data-a="click">👆 Zurück zu Klick</button>`;
+  modeBar.className = m.kind === 'fit' && m.method === 'Pinsel' ? 'brush' : '';
+  modeBar.innerHTML = html;
+  modeBar.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === 'exit') stopMode(); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'click') setMethod('Klick');
+    else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); }
+    else if (a === 'undo') undoBrush(); else if (a === 'clear') clearSelectionAll(); else if (a === 'fit') previewFromBrush();
+  }));
+}
 
 // ------------------------------------------------------------------ Vorschau
 const usesAux = (t: GeomType | 'auto') => (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none';
@@ -469,7 +512,12 @@ function deleteSelected() {
 }
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'INPUT') return;
-  if (e.key === 'Escape') { if (state.preview) discardPreview(); else stopMode(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { e.preventDefault(); undoBrush(); return; }
+  if (e.key === 'Escape') {
+    if (state.preview) discardPreview();
+    else if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { if (state.brushCount) clearSelectionAll(); else setMethod('Klick'); }
+    else stopMode();
+  }
   if (e.key === 'Enter' && state.preview) commitPreview();
   if (e.key === 'Delete') deleteSelected();
 });
@@ -491,7 +539,7 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 }
 
 // ------------------------------------------------------------------ Darstellung
-function renderAll() { renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
+function renderAll() { renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
@@ -508,7 +556,7 @@ function renderHint() {
   if (m.kind === 'dist') return hint(`Abstand: ${m.slot === 0 ? 'erstes' : 'zweites'} Merkmal im 3D-Bild antippen oder im Baum/Dialog wählen.`);
   if (state.preview) return hint('Vorschau – Werte prüfen, dann „Erzeugen“ oder „Verwerfen“.');
   if (m.method === 'Klick') return hint(`${m.type === 'auto' ? 'Automatische Erkennung' : m.type}: auf die Fläche klicken/tippen.`);
-  hint('Pinsel: Bereich überstreichen, dann „Fitten“.');
+  hint('');
 }
 
 function eyeBtn(visible: boolean, onToggle: () => void) {
@@ -654,14 +702,18 @@ function renderDialog() {
       <p class="note">Klick nahe dem Übergang Fläche/Wand (oder nur auf die Wand): die Wandpunkte werden in die Ebene projiziert, ${m.type} wird in der Ebene gefittet. Mittelpunkt liegt in der Ebene, Orientierung = Ebenennormale.</p>` : ''}`
       : `<h4>Pinsel</h4><div class="row"><label>Pinselradius [mm]</label><input id="d-brush" value="${state.opts.brush}" inputmode="decimal"></div>
       <div class="row"><label>Markiert</label><b>${state.brushCount} Punkte</b></div>
-      <button class="btn primary" id="d-fit">Fitten (Vorschau)</button><button class="btn" id="d-clear">Markierung löschen</button>`}
+      <div class="row"><button class="btn ${brushErase ? 'on' : ''}" id="d-erase">🧽 Radierer ${brushErase ? 'an' : 'aus'}</button><button class="btn" id="d-undo">↶ Rückgängig</button></div>
+      <p class="note">Malen: über das Netz streichen. Radieren: Radierer einschalten oder <b>Shift</b> gedrückt halten. Rückgängig: <b>Strg+Z</b>. <b>Esc</b> löscht die Auswahl, ein zweites Esc wechselt zurück zu „Klick“.</p>
+      <button class="btn primary" id="d-fit">Fitten (Vorschau)</button><button class="btn warn" id="d-clear">🗑 Auswahl löschen</button>`}
       ${p ? `<h4>Vorschau: ${p.fit.type}</h4>${p.aux ? auxStats(p) : ''}${kv(fitRows(p.fit, p.indices.length))}
         ${p.candidates.length ? `<h4>Erkennung (RMS je Typ)</h4>${kv(p.candidates.map((c) => [c.type, fmt(c.rms)] as [string, string]))}` : ''}
         <div class="row"><select id="d-retype">${['auto', ...FIT_TYPES].map((t) => `<option value="${t}" ${t === p.fit.type ? 'selected' : ''}>${t === 'auto' ? 'Automatisch' : t}</option>`).join('')}</select><button class="btn" id="d-refit">Neu fitten</button></div>
         <button class="btn primary" id="d-create">✔ Erzeugen</button><button class="btn" id="d-discard">✕ Verwerfen</button>`
       : `<p class="note">Klick erzeugt zunächst eine <b>Vorschau</b> (Punkte + Geometrie + Kennwerte). Erst „Erzeugen“ legt das Merkmal an.</p>`}
       <div><button class="btn" id="d-close">Schließen</button></div>`;
-    d.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => { (state.mode as FitMode).method = b.dataset.m as any; state.preview = null; clearBrush(); renderAll(); }));
+    d.querySelectorAll<HTMLButtonElement>('[data-m]').forEach((b) => (b.onclick = () => setMethod(b.dataset.m as any)));
+    d.querySelector('#d-erase')?.addEventListener('click', () => { brushErase = !brushErase; renderAll(); });
+    d.querySelector('#d-undo')?.addEventListener('click', undoBrush);
     ($('#d-type') as HTMLSelectElement).onchange = (e) => { (state.mode as FitMode).type = (e.target as HTMLSelectElement).value as any; if (state.preview) refitPreview((state.mode as FitMode).type); else renderAll(); };
     const bind = (id: string, key: 'maxAngleDeg' | 'radius' | 'brush') => { const el = d.querySelector<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x)) state.opts[key] = x; }; };
     bind('#d-ang', 'maxAngleDeg'); bind('#d-rad', 'radius'); bind('#d-brush', 'brush');
@@ -670,7 +722,7 @@ function renderDialog() {
       if (state.preview?.hit) refitPreview(state.preview.fit.type); else renderAll();
     });
     d.querySelector('#d-fit')?.addEventListener('click', previewFromBrush);
-    d.querySelector('#d-clear')?.addEventListener('click', () => { clearBrush(); state.preview = null; renderAll(); });
+    d.querySelector('#d-clear')?.addEventListener('click', clearSelectionAll);
     d.querySelector('#d-refit')?.addEventListener('click', () => refitPreview(($('#d-retype') as HTMLSelectElement).value as any));
     d.querySelector('#d-create')?.addEventListener('click', commitPreview);
     d.querySelector('#d-discard')?.addEventListener('click', discardPreview);

@@ -230,3 +230,14 @@ body.training .lbl { pointer-events:none !important; }
 .sd-grid { align-items:start; grid-auto-rows:auto; }
 .sample-card { height:auto; overflow:visible; }
 body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #labels, body.thumb #hint, body.thumb #toast { display:none !important; }
+
+/* Modusanzeige */
+#mode-bar { position:absolute; left:50%; transform:translateX(-50%); top:8px; z-index:7; display:flex; flex-wrap:wrap; gap:4px; align-items:center; max-width:calc(100% - 140px);
+  background:#ffffffee; border:2px solid #1d64c8; border-radius:8px; padding:4px 6px; box-shadow:0 3px 10px rgba(0,0,0,.2); font-size:12.5px; }
+#mode-bar.hidden { display:none; } #mode-bar.brush { border-color:#d97706; background:#fff8e6f2; }
+#mode-bar .mb-tool { font-weight:700; padding:0 6px; color:#1e3a5c; } #mode-bar .mb-tool.paint { color:#b45309; } #mode-bar .mb-tool.erase { color:#7c3aed; }
+#mode-bar button { border:1px solid #9fb2c8; background:#fff; border-radius:5px; padding:4px 8px; font:inherit; min-height:30px; cursor:pointer; }
+#mode-bar button.on { background:#1d64c8; color:#fff; border-color:#1d64c8; } #mode-bar button.primary { background:#1d64c8; color:#fff; }
+#mode-bar button.warn, .btn.warn { border-color:#dc2626; color:#b91c1c; font-weight:600; } #mode-bar button:disabled { opacity:.45; }
+#hint:empty { display:none; }
+@media (max-width: 900px), (max-height: 560px) { #mode-bar { left:6px; right:84px; transform:none; max-width:none; top:6px; font-size:11.5px; } #mode-bar button { min-height:34px; padding:4px 7px; } }
