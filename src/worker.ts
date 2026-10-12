@@ -2,7 +2,7 @@
 import { parseByName } from './core/io';
 import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
-import { autoFit, fitType, FitResult, GeomType } from './core/fit';
+import { autoFit, fitType, FitResult, GeomType, normalFilter, NormalFilter } from './core/fit';
 import type { Vec3 } from './core/linalg';
 import { autoExtract, extractWithAuxPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
@@ -15,9 +15,25 @@ export type Req =
   | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
-  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto' }
+  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult };
 
+export interface FitParams { k: number; nf?: NormalFilter | null; }
+function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
+  let { p, n } = gather(mesh!, idx);
+  if (p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0;
+  if (prm.nf && n.length === p.length) {
+    const keep = normalFilter(fit, p, n, prm.nf);
+    removed = p.length - keep.length;
+    if (removed && keep.length >= 6) {
+      use = Uint32Array.from(keep, (i) => idx[i]); p = keep.map((i) => p[i]); n = keep.map((i) => n[i]);
+      fit = fitType(type, p, n, prm.k);
+    } else removed = 0;
+  }
+  delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
+  return { indices: use, fit, candidates: [] };
+}
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
@@ -62,7 +78,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
     } else if (req.op === 'fit') {
-      result = { indices: req.indices, ...doFit(req.indices, req.type) };
+      result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
     }
     result.ms = performance.now() - t0;
     (self as any).postMessage({ id, result }, transfer);

@@ -65,6 +65,7 @@ try {
       if (!shotDone && /Bohrung/.test(t.title)) { await shot('training-schritt'); shotDone = true; }
       await tapXY(t.marker[0], t.marker[1]);
     } else if (/Bezug [ABC] zuweisen/.test(t.title)) await page.click('#dt-apply');
+    else if (/Normalenrichtungsfilter/.test(t.title)) await page.locator('#fp-nf').check();
     else if (/Positionstoleranz/.test(t.title)) await page.locator('#catalog .cat-item[data-kind="Position"] input[type=checkbox]').check();
     else if (/Erzeugen/.test(t.title)) { await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 }); await page.click('#pc-create'); }
     else if (/Beispielteil/.test(t.title)) { await page.click('#btn-sample'); await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 }); }

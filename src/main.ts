@@ -8,7 +8,7 @@ import {
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
-import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, isDatumControl, toLocal } from './core/datum';
+import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
 import { datumText } from './core/features';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
@@ -19,7 +19,9 @@ import { ICON } from './icons';
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
 type DistMode = { kind: 'dist'; a: number | null; b: number | null; slot: 0 | 1 };
 type Mode = FitMode | DistMode | null;
-interface FeatureView extends Feature { color: number; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array; }
+interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'none' | number; }
+interface FeatureView extends Feature { color: number; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
+  src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
   aux?: PreviewAux; hit?: Hit; }
@@ -52,7 +54,7 @@ const state = {
   nextId: 1, nextCtrl: 1, typeCount: {} as Record<string, number>,
   addFeat: null as number | null,
 };
-(window as any).__app = { state, viewer, engine };
+(window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
 
 const featMap = () => new Map<number, Feature>(state.features.map((f) => [f.id, f]));
 // Punkte eines Merkmals (für Richtungs-/Lauftoleranzen mit Bezug) aus dem Netz, max. 6000, zwischengespeichert
@@ -356,6 +358,7 @@ function commitPreview() {
   const f: FeatureView = {
     id: state.nextId++, name: `${t} ${n}`, type: t, measured: p.fit, pointCount: p.indices.length,
     method: p.method, color: PALETTE[(state.nextId - 2) % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
+    src: p.indices, hit: p.hit, fp: defaultFp(),
   };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -369,6 +372,36 @@ function commitPreview() {
   const node = document.querySelector<HTMLElement>(`#tree [data-fid="${f.id}"]`);
   node?.classList.add('flash'); node?.scrollIntoView({ block: 'nearest' });
   toast(`✔ ${f.name} erzeugt (${p.method === 'Konstruiert' ? 'Abstand ' + fmt(p.fit.distance, 3) + ' mm' : p.indices.length + ' Punkte'})`);
+}
+const defaultFp = (): FitParamsUI => ({ k: 3, nf: { on: false, angleDeg: 30, maxPct: 10 }, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, aux: state.opts.aux });
+/** Merkmal mit seinen Fit-Parametern neu berechnen (Extraktion + Fit) und alles Abhängige aktualisieren. */
+async function refitFeature(f: FeatureView, type: GeomType = f.type) {
+  if (f.type === 'Abstand') return;
+  const fp = (f.fp ??= defaultFp());
+  try {
+    let idx = f.src ?? f.indices, auxR: any = null;
+    const inPlane = (type === 'Kreis' || type === 'Langloch') && fp.aux !== 'none';
+    if (f.hit && f.method === 'Klick') {
+      if (inPlane) {
+        const ref = typeof fp.aux === 'number' ? state.features.find((g) => g.id === fp.aux) : undefined;
+        auxR = await busy(engine.call<any>({ op: 'aux', tri: f.hit.tri, point: f.hit.point, maxAngleDeg: fp.maxAngleDeg, type, plane: ref?.measured }));
+        auxR.source = ref ? ref.name : 'automatisch (angrenzende Fläche)'; auxR.refId = ref?.id;
+      } else idx = (await busy(engine.call<any>({ op: 'grow', tri: f.hit.tri, point: f.hit.point, maxAngleDeg: fp.maxAngleDeg, radius: fp.radius, type }))).indices;
+    }
+    if (auxR) {
+      f.measured = auxR.fit; f.indices = auxR.indices; f.src = auxR.indices;
+      f.aux = { plane: auxR.aux.plane, pointCount: auxR.aux.indices.length, source: auxR.source, refId: auxR.refId } as AuxPlane; f.auxIndices = auxR.aux.indices;
+    } else {
+      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null } }));
+      f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined;
+    }
+    f.type = f.measured!.type; f.pointCount = f.indices.length; ptsCache.delete(f.id);
+    state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
+    recomputeDistances();
+    const m = f.measured!;
+    status(`${f.name} neu gefittet: ${f.pointCount} Punkte, RMS ${fmt(m.rms, 4)}${m.outliers ? `, ${m.outliers} Ausreißer` : ''}${m.nfRemoved ? `, ${m.nfRemoved} durch Normalenfilter verworfen` : ''}.`);
+  } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); toast('Fit fehlgeschlagen: ' + e.message); }
+  renderAll(); scheduleAutosave();
 }
 function discardPreview() { state.preview = null; clearBrush(); status('Vorschau verworfen.'); renderAll(); }
 
@@ -447,7 +480,12 @@ function defaultBasic(kind: ControlKind, f: FeatureView, datumIds: number[]): nu
   }
   if (kind === 'Position' || kind === 'Profil (Bezug)') {
     const F = buildDRF(datumIds.map((i) => fm.get(i)!).filter(Boolean));
-    return toLocal(F, f.measured!.center).map((v) => Math.round(v * 10) / 10);
+    const loc = toLocal(F, f.measured!.center);
+    // Achse: Lage entlang der Achse ist für die Position bedeutungslos → Soll-Koordinate 0 (in der Bezugsebene)
+    if (datumKind(f.type) === 'axis' && f.type !== 'Torus') {
+      const a = dirLocal(F, f.measured!.normal); const ax = [0, 1, 2].reduce((q, k) => (Math.abs(a[k]) > Math.abs(a[q]) ? k : q), 0); loc[ax] = 0;
+    }
+    return loc.map((v) => Math.round(v * 10) / 10 + 0);
   }
   return undefined;
 }
@@ -744,7 +782,7 @@ function renderDialog() {
     <h4>Ist-Komponente</h4>${kv([['Typ', f.type], ['Methode', f.method], ...fitRows(f.measured!, f.pointCount)])}
     ${f.aux ? `<h4>${ICON.aux} Hilfsebene</h4>${kv([['Quelle', f.aux.source], ['Punkte', f.aux.refId ? '—' : String(f.aux.pointCount)], ['RMS', fmt(f.aux.plane.rms)], ['Ebenheit', fmt(f.aux.plane.form)],
       ['Punkt', f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], ['Normale', f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}
-    ${f.type !== 'Abstand' && !f.aux ? `<h4>Typ ändern (Neuberechnung)</h4><div class="row"><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="btn" id="d-refit">Neu fitten</button></div>` : ''}
+    ${f.type !== 'Abstand' ? fitParamsHTML(f) : ''}
     ${datumKind(f.type) ? `<h4><span class="dflag sm">${f.datum ?? '?'}</span> Bezug (ISO 5459)</h4>
       <div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
         return `<option value="${l}" ${(f.datum ?? nextFreeLetter()) === l ? 'selected' : ''}>${l}${o ? ` (tauschen mit ${o.name})` : ''}</option>`; }).join('')}</select>
@@ -760,15 +798,37 @@ function renderDialog() {
   ($('#d-name') as HTMLInputElement).onchange = (e) => { f.name = (e.target as HTMLInputElement).value; renderAll(); };
   ($('#d-del') as HTMLButtonElement).onclick = () => { state.selControl = null; deleteSelected(); };
   ($('#d-addctrl') as HTMLButtonElement).onclick = () => { state.addFeat = f.id; state.ctab = 'katalog'; renderTable(); togglePanel('table', true); };
-  d.querySelector('#d-refit')?.addEventListener('click', async () => {
-    const t = ($('#d-retype') as HTMLSelectElement).value as GeomType;
-    try {
-      const r = await busy(engine.call<any>({ op: 'fit', indices: f.indices, type: t }));
-      f.type = r.fit.type; f.measured = r.fit; ptsCache.delete(f.id);
-      state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
-      recomputeDistances(); renderAll();
-    } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); }
-  });
+  bindFitParams(d, f);
+}
+
+function fitParamsHTML(f: FeatureView) {
+  const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
+  const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
+  const m = f.measured!;
+  return `<h4>⚙ Fit-Parameter <span class="note">(Änderung ⇒ automatisch neu fitten)</span></h4><div id="fp-box">
+    <div class="row"><label>Geometrietyp</label><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="row"><label>Methode</label><select id="fp-method"><option value="lsq" ${fp.k ? '' : 'selected'}>Gauß (kleinste Quadrate)</option><option value="rob" ${fp.k ? 'selected' : ''}>Gauß robust (Ausreißer entfernen)</option></select></div>
+    ${fp.k ? `<div class="row"><label>Ausreißer &gt; k·σ, k =</label><input id="fp-k" value="${fp.k}" inputmode="decimal"></div>` : ''}
+    ${grow ? `<div class="row"><label>Regionenwachstum: max. Winkel [°]</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
+      <div class="row"><label>Suchradius [mm] (0 = ∞)</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">Punkte aus ${f.method === 'Pinsel' ? 'Pinselauswahl' : 'Projektdatei'} – kein Regionenwachstum.</p>`}
+    <div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> Normalenrichtungsfilter</label></div>
+    ${fp.nf.on ? `<div class="row"><label>max. Normalenabweichung [°]</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
+      <div class="row"><label>höchstens verwerfen [%]</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
+    <p class="note">Normalenfilter: Punkte, deren gemessene Flächennormale mehr als den Winkel von der Normalen des gefitteten Elements abweicht (Kanten, Fasen, Nachbarflächen), werden verworfen – die schlimmsten zuerst, höchstens der Prozentsatz.${m.nfRemoved ? ` <b>Aktuell ${m.nfRemoved} Punkte verworfen.</b>` : ''}</p>
+    ${(f.type === 'Kreis' || f.type === 'Langloch') && grow ? `<div class="row"><label>Hilfsebene</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>Automatisch</option>
+      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>Keine (3D-Fit)</option></select></div>` : ''}
+    </div>`;
+}
+function bindFitParams(d: HTMLElement, f: FeatureView) {
+  const fp = f.fp!; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
+  const num = (id: string, set: (x: number) => void, min = 0) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && x >= min) { set(x); refitFeature(f); } else el.value = ''; }; };
+  q<HTMLSelectElement>('#d-retype')?.addEventListener('change', (e) => refitFeature(f, (e.target as HTMLSelectElement).value as GeomType));
+  q<HTMLSelectElement>('#fp-method')?.addEventListener('change', (e) => { fp.k = (e.target as HTMLSelectElement).value === 'rob' ? 3 : 0; refitFeature(f); });
+  num('#fp-k', (x) => (fp.k = Math.max(1, x)));
+  num('#fp-ang', (x) => (fp.maxAngleDeg = x)); num('#fp-rad', (x) => (fp.radius = x));
+  q<HTMLInputElement>('#fp-nf')?.addEventListener('change', (e) => { fp.nf.on = (e.target as HTMLInputElement).checked; refitFeature(f); });
+  num('#fp-nfa', (x) => (fp.nf.angleDeg = Math.min(89, x))); num('#fp-nfp', (x) => (fp.nf.maxPct = Math.min(90, x)));
+  q<HTMLSelectElement>('#fp-aux')?.addEventListener('change', (e) => { const v = (e.target as HTMLSelectElement).value; fp.aux = v === 'auto' || v === 'none' ? v : +v; refitFeature(f); });
 }
 
 const CTRL_SYMBOL = (c: Control, f?: Feature) => {
@@ -970,7 +1030,7 @@ function attachContext(el: HTMLElement, fid: number | null) {
 // ------------------------------------------------------------------ Projekt speichern / öffnen / Autosave
 let loadCount = 0, meshKey = '', restoring = false;
 function projectJSON() {
-  const feats = state.features.map(({ indices, auxIndices, candidates, ...rest }) => { void indices; void auxIndices; void candidates; return rest; });
+  const feats = state.features.map(({ indices, auxIndices, candidates, src, ...rest }) => { void indices; void auxIndices; void candidates; void src; return rest; });
   return {
     savedAt: new Date().toISOString(), app: 'MessWerk 3D',
     mesh: { name: state.data!.name, vertexCount: state.data!.vertexCount, triCount: state.data!.triCount },
@@ -983,7 +1043,7 @@ function projectJSON() {
 }
 function featureIndexBlob() {
   const o: Record<string, Uint32Array | undefined> = {};
-  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; }
+  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; o['s' + f.id] = f.src; }
   return packIndices(o);
 }
 function meshArrays() {
@@ -1010,7 +1070,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     viewer.setModel(r.positions, r.indices, r.normals);
     const st = json.state;
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
-    state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id) }));
+    state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id), src: unpackIndex(idx, 's' + f.id) }));
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
@@ -1195,6 +1255,11 @@ function startTraining() {
     { auto: () => ensurePreview('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Bohrung Ø12 antippen', text: 'Tippe auf die <b>Wand der Bohrung</b> (gelber Ring).', world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
       check: () => !!findF(isHole) || pv((m) => m.type === 'Zylinder' && Math.abs(m.diameter! - 12.08) < 0.3)() },
     { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Erzeugen', text: 'Tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(isHole) },
+    { auto: async () => { await ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole); const f = findF(isHole)!; f.fp ??= defaultFp(); if (!f.fp.nf.on) { f.fp.nf.on = true; await refitFeature(f); } },
+      title: 'Normalenrichtungsfilter', text: 'Beim Antasten liegen oft Punkte von <b>Kanten und Fasen</b> in der Auswahl. Ihre Flächennormale passt nicht zur Bohrungswand. Der <b>Normalenrichtungsfilter</b> verwirft Punkte, deren Normale mehr als den eingestellten <b>Winkel</b> abweicht – die schlimmsten zuerst, aber höchstens den eingestellten <b>Prozentsatz</b>.<br>Setze im Dialog unter <b>⚙ Fit-Parameter</b> den Haken bei <b>Normalenrichtungsfilter</b>. Das Merkmal wird sofort neu gefittet; Winkel und % kannst du danach ändern.',
+      target: () => document.querySelector('#fp-nf')?.closest('.row') ?? null,
+      enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.mode = null; renderAll(); } if (isPhone()) togglePanel('dialog', true); },
+      check: () => !!findF(isHole)?.fp?.nf.on },
     { auto: ensurePosition, title: 'Positionstoleranz ⌖ A|B|C', text: 'Im Fenster <b>Prüfmerkmale</b> (Katalog) unter „Mit Bezug“ den Haken bei <b>⌖ Position</b> setzen. Die Bezüge A|B|C werden automatisch eingetragen.',
       target: () => document.querySelector('#catalog .cat-item[data-kind="Position"]'),
       enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.addFeat = f.id; state.ctab = 'katalog'; state.mode = null; renderAll(); } if (isPhone()) togglePanel('table', true); },

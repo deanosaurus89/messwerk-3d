@@ -23,6 +23,7 @@ export interface FitResult {
   maxNeg: number;        // größte negative Abweichung
   n: number;             // Anzahl verwendeter Punkte
   outliers?: number;     // vom robusten Fit verworfene Punkte
+  nfRemoved?: number;    // vom Normalenrichtungsfilter verworfene Punkte
   // nur Abstand
   distance?: number;
   delta?: Vec3;          // p2 - p1
@@ -337,7 +338,7 @@ function robust(fit: (p: Vec3[], n: Vec3[]) => FitResult, p: Vec3[], n: Vec3[], 
   return r;
 }
 
-export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit = true): FitResult {
+export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit: boolean | number = true): FitResult {
   const run = (pp: Vec3[], nn: Vec3[]): FitResult => {
     switch (type) {
       case 'Ebene': return fitPlane(pp, nn.length ? centroid(nn) : undefined);
@@ -357,7 +358,45 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit = true):
       default: throw new Error('Typ nicht fitbar: ' + type);
     }
   };
-  return robustFit && type !== 'Punkt' ? robust(run, p, n) : run(p, n);
+  const k = robustFit === true ? 3 : robustFit === false ? 0 : robustFit;
+  return k > 0 && type !== 'Punkt' ? robust(run, p, n, k) : run(p, n);
+}
+
+/** Flächennormale des gefitteten Elements am Punkt p (Vorzeichen egal). */
+export function modelNormal(f: FitResult, p: Vec3): Vec3 {
+  const a = f.normal;
+  switch (f.type) {
+    case 'Kugel': return unit(sub(p, f.center));
+    case 'Zylinder': case 'Kreis': case 'Kegel': {
+      const d = sub(p, f.center); const r = sub(d, scale(a, dot(d, a)));
+      if (f.type !== 'Kegel' || f.halfAngle == null) return unit(r);
+      // Kegelmantel: radiale Richtung um den Halbwinkel zur Achse gekippt
+      const ru = unit(r), c = Math.cos(f.halfAngle), s = Math.sin(f.halfAngle);
+      const apexSide = f.apex ? Math.sign(dot(sub(f.center, f.apex), a)) || 1 : 1;
+      return unit(sub(scale(ru, c), scale(a, s * apexSide)));
+    }
+    case 'Torus': {
+      const d = sub(p, f.center); const r = unit(sub(d, scale(a, dot(d, a))));
+      return unit(sub(p, add(f.center, scale(r, f.radius ?? 0))));
+    }
+    default: return a;
+  }
+}
+
+export interface NormalFilter { angleDeg: number; maxPct: number; }
+/** Normalenrichtungsfilter: Punkte, deren Messnormale > angleDeg von der Elementnormalen abweicht, werden verworfen
+ *  (die schlimmsten zuerst, höchstens maxPct % der Punkte). Liefert die behaltenen Indizes (relativ zu p). */
+export function normalFilter(f: FitResult, p: Vec3[], n: Vec3[], o: NormalFilter): number[] {
+  const thr = Math.cos((o.angleDeg * Math.PI) / 180);
+  const bad: [number, number][] = [];
+  for (let i = 0; i < p.length; i++) {
+    const c = Math.abs(dot(unit(n[i]), modelNormal(f, p[i])));
+    if (c < thr) bad.push([c, i]);
+  }
+  bad.sort((x, y) => x[0] - y[0]);
+  const drop = new Set(bad.slice(0, Math.floor((p.length * o.maxPct) / 100)).map((b) => b[1]));
+  const keep: number[] = []; for (let i = 0; i < p.length; i++) if (!drop.has(i)) keep.push(i);
+  return keep;
 }
 
 /** Automatische Erkennung: alle plausiblen Typen fitten, einfachsten Typ wählen,

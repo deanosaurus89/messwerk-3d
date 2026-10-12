@@ -245,3 +245,4 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 .tc-btns { flex-wrap:wrap; gap:6px; } .tc-list { margin:8px 0 0; padding:0; list-style:none; max-height:40vh; overflow:auto; border-top:1px solid #dde2e8; }
 .tc-list button { display:block; width:100%; text-align:left; border:none; background:none; padding:6px 4px; font:inherit; border-radius:4px; cursor:pointer; min-height:32px; }
 .tc-list button.cur { background:#e6eef8; font-weight:700; } .tc-list button.done::after { content:' ✔'; color:var(--io); }
+.row.chk label{width:auto;flex:1;display:flex;gap:6px;align-items:center;max-width:none}

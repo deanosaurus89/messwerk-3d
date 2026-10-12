@@ -11,7 +11,9 @@ page.on('pageerror', (e) => errors.push(String(e))); page.on('console', (m) => m
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
 const S = (f, a) => page.evaluate(f, a);
 const result = () => S(() => { const { state } = window.__app; const fm = new Map(state.features.map((f) => [f.id, f]));
-  return { feats: state.features.map((f) => f.name + (f.datum ? `[${f.datum}]` : '')).join(', '), pos: state.controls.filter((c) => c.kind === 'Position').map((c) => c.datumIds.map((i) => fm.get(i)?.datum).join('|') + ' ' + JSON.stringify(c.basic)).join() }; });
+  const pc = state.controls.find((c) => c.kind === 'Position');
+  return { feats: state.features.map((f) => f.name + (f.datum ? `[${f.datum}]` : '')).join(', '), pos: pc ? pc.datumIds.map((i) => fm.get(i)?.datum).join('|') + ' ' + JSON.stringify(pc.basic) : '',
+    posVal: pc ? window.__app.evaluate(pc, fm, window.__app.ctx).measured : null }; });
 try {
   await page.goto(URL, { waitUntil: 'networkidle' });
   // A) alles überspringen
@@ -25,7 +27,7 @@ try {
     if (t.i === 1 && MODE === 'desktop') await page.screenshot({ path: `docs/${MODE}-training-ueberspringen.png` });
   }
   let r = await result(); console.log('Alles übersprungen:', JSON.stringify(r));
-  if (!/Ebene 1\[A\].*Ebene 2\[B\].*Ebene 3\[C\].*Zylinder 1/.test(r.feats) || !r.pos.startsWith('A|B|C [20,20')) fail('Überspringen erzeugt nicht alle Ergebnisse');
+  if (!/Ebene 1\[A\].*Ebene 2\[B\].*Ebene 3\[C\].*Zylinder 1/.test(r.feats) || r.pos !== 'A|B|C [20,20,0]' || !(r.posVal < 0.05)) fail('Überspringen erzeugt nicht alle Ergebnisse');
   // B) neu laden, Training, Schrittliste → direkt zu „Positionstoleranz“
   await page.reload({ waitUntil: 'networkidle' }); await page.click('#rb-discard').catch(() => {});
   await S(() => window.__app.startTraining()); await page.click('#tc-list'); await sleep(200);
