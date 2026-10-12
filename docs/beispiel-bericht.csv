@@ -1,0 +1,31 @@
+﻿Tabelle 1
+Erstellt;12.10.2026, 13:57:57
+Datei;beispielteil
+
+Merkmale
+Name;Typ;X;Y;Z;I;J;K;Maß;Form;Formwert;RMS;Punkte;Hilfsebene
+Ebene 1;Ebene;52,6973;27,3366;20,0001;-0,0000;0,0000;1,0000;;Ebenheit;0,0430;0,0071;14881,0000;
+Zylinder 1;Zylinder;19,9999;20,0001;9,9993;-0,0001;0,0000;1,0000;⌀ 12.0777;Zylindrizität;0,0429;0,0072;6238,0000;
+Zylinder 2;Zylinder;84,9998;9,9998;9,9964;0,0000;-0,0000;1,0000;⌀ 5.9986;Zylindrizität;0,0378;0,0064;1889,0000;
+Langloch 1;Langloch;19,9999;44,9999;9,9998;-0,0000;0,0000;1,0000;29.9973 × 9.9991;Profil;0,0428;0,0072;5250,0000;
+Zylinder 3;Zylinder;55,0503;30,0001;26,7351;0,0000;0,0000;1,0000;⌀ 15.9973;Zylindrizität;0,0451;0,0076;3155,0000;
+Kegel 1;Kegel;82,0000;37,9997;25,6154;0,0001;0,0001;-1,0000;∢ 61.927° / ⌀ 13.2605;Kegelform;0,0449;0,0078;707,0000;
+Kugel 1;Kugel;60,0002;7,9997;16,9993;0,0032;0,0006;1,0000;⌀ 14.0013;Kugelform;0,0468;0,0078;2416,0000;
+Abstand 1;Abstand;37,5251;25,0001;18,3672;0,8739;0,2493;0,4173;40.1077;;;;0,0000;
+Abstand 2;Abstand;60,0002;7,9997;18,4997;0,0000;-0,0000;-1,0000;3.0008;;;;0,0000;
+Kreis 1;Kreis;19,9999;20,0001;20,0000;-0,0000;0,0000;1,0000;⌀ 12.0777;Rundheit;0,0436;0,0072;6238,0000;Hilfsebene (automatisch (angrenzende Fläche), Ebenheit 0.0430)
+Kreis 2;Kreis;84,9998;9,9998;20,0001;-0,0000;0,0000;1,0000;⌀ 5.9987;Rundheit;0,0367;0,0064;1889,0000;Hilfsebene (Ebene 1, Ebenheit 0.0430)
+
+Prüfmerkmale;10 IO;1 NIO
+Merkmal;Prüfmerkmal;Soll;Ist;Abweichung;Tol +;Tol -;Status
+Ebene 1;Ebenheit;0,0000;0,0430;0,0430;0,0500;0,0000;IO
+Zylinder 1;Durchmesser;12,0000;12,0777;0,0777;0,0500;-0,0500;NIO
+Zylinder 1;Position X;20,0000;19,9999;-0,0001;0,1000;-0,1000;IO
+Langloch 1;Länge;30,0000;29,9973;-0,0027;0,1000;-0,1000;IO
+Langloch 1;Breite;10,0000;9,9991;-0,0009;0,1000;-0,1000;IO
+Zylinder 3;Durchmesser;16,0000;15,9973;-0,0027;0,1000;-0,1000;IO
+Kegel 1;Kegelwinkel;61,9300;61,9272;-0,0028;0,5000;-0,5000;IO
+Kugel 1;Durchmesser;14,0000;14,0013;0,0013;0,1000;-0,1000;IO
+Abstand 1;Abstand 3D;40,1000;40,1077;0,0077;0,1000;-0,1000;IO
+Abstand 1;Abstand X;35,0000;35,0505;0,0505;0,1000;-0,1000;IO
+Abstand 2;Abstand Z;3,0000;3,0008;0,0008;0,1000;-0,1000;IO

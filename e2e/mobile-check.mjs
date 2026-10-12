@@ -63,16 +63,64 @@ async function run(browserType, devName, landscape, label) {
     await page.screenshot({ path: `${prefix}${label}-baum.png` });
     await page.tap('#mobile-bar [data-panel="tree"]');
     await page.tap('#mobile-bar [data-panel="table"]'); await page.waitForTimeout(300);
+    // Katalog (Bottom-Sheet, Register „Katalog“): Haken setzen, Soll eintragen
     for (const [f, k, n] of [['Zylinder 1', 'Durchmesser', '12'], ['Abstand 1', 'Abstand X', '35'], ['Abstand 1', 'Abstand 3D', '40,1']]) {
-      await page.selectOption('#ca-feat', { label: f }); await page.selectOption('#ca-kind', { label: k }); await page.tap('#ca-add');
-      const inp = page.locator('#ctrl-table tbody tr').last().locator('td input').first(); await inp.fill(n); await inp.press('Enter');
+      await page.selectOption('#cat-feat', { label: f });
+      await page.locator(`#catalog .cat-item[data-kind="${k}"] input[type=checkbox]`).tap();
+      const inp = page.locator(`#catalog .cat-item[data-kind="${k}"] .cat-ed input`).first(); await inp.fill(n); await inp.press('Enter');
     }
-    await page.waitForTimeout(400);
+    await page.selectOption('#cat-feat', { label: 'Zylinder 1' });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${prefix}${label}-katalog.png` });
+    await page.tap('#table-pane button[data-ctab="liste"]');    await page.waitForTimeout(400);
     await page.screenshot({ path: `${prefix}${label}-liste.png` });
     const st = await page.evaluate(() => [...document.querySelectorAll('#ctrl-table .st')].map((e) => e.textContent).join(','));
     console.log('   Liste:', st);
     if (st !== 'IO,IO,IO') errs.push('Liste unerwartet: ' + st);
     const tree = await page.textContent('#tree'); if (/Durchmesser|Abstand X/.test(tree)) errs.push('Prüfmerkmale im Baum');
+    await page.tap('#mobile-bar [data-panel="table"]'); await page.waitForTimeout(300);
+    // Labels + ViewCube
+    await page.evaluate(() => window.__app.viewer.view('iso')); await page.waitForTimeout(400);
+    const nl = await page.evaluate(() => document.querySelectorAll('#labels .lbl').length);
+    const lz = await page.evaluate(() => document.querySelector('#labels .lbl[data-fid="1"]')?.textContent ?? '');
+    if (nl !== 3 || !lz.includes('Durchmesser')) errs.push(`Labels: ${nl} / ${lz}`);
+    const cb = await page.locator('#navcube').boundingBox();
+    // Tap auf die Mitte der OBEN-Fläche
+    const top = await page.evaluate(() => { const c = window.__app.viewer.cube; c.syncCam(); const r = c.el.getBoundingClientRect(); const v = c.cam.position.clone().set(0, 0, 1).project(c.cam); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; });
+    await page.touchscreen.tap(top[0], top[1]); await page.waitForTimeout(300);
+    const dz = await page.evaluate(() => { const { viewer } = window.__app; return viewer.camera.position.clone().sub(viewer.controls.target).normalize().z; });
+    if (dz < 0.999 || cb.x > 20) errs.push('ViewCube-Tap OBEN: ' + dz);
+    await page.evaluate(() => window.__app.viewer.view('iso')); await page.waitForTimeout(300);
+    await page.screenshot({ path: `${prefix}${label}-labels-viewcube.png` });
+    // Augen-Symbol im Baum
+    await page.tap('#mobile-bar [data-panel="tree"]'); await page.waitForTimeout(300);
+    await page.locator('#tree [data-fid="2"] .eye').tap();
+    await page.screenshot({ path: `${prefix}${label}-baum-augen.png` });
+    if (!(await page.evaluate(() => window.__app.state.hidden.has(2)))) errs.push('Auge ohne Wirkung');
+    await page.locator('#tree [data-fid="2"] .eye').tap();
+    await page.tap('#mobile-bar [data-panel="tree"]');
+    // Hilfsebene: Kreis-Modus, Tap auf die Oberseite neben der Bohrung -> zweifarbige Vorschau
+    await page.evaluate(() => { document.querySelector('.tab[data-tab="merkmale"]').click(); document.querySelector('[data-ftype="Kreis"]').click(); });
+    await page.evaluate(() => { const { viewer } = window.__app; viewer.controls.target.set(22, 22, 17); viewer.camera.position.set(37, -8, 50); viewer.controls.update(); });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => { document.querySelectorAll('#labels .lbl').forEach((e) => (e.style.pointerEvents = 'none')); });
+    const hp = await page.evaluate(() => { const { viewer } = window.__app; const r = viewer.renderer.domElement.getBoundingClientRect();
+      for (const p of [[27.2, 20, 20], [20, 27.2, 20], [12.8, 20, 20], [20, 12.8, 20]]) {
+        const v = viewer.camera.position.clone().set(...p).project(viewer.camera); const x = r.left + (v.x + 1) / 2 * r.width, y = r.top + (1 - v.y) / 2 * r.height;
+        const h = viewer.pick(x, y);
+        if (h && document.elementFromPoint(x, y) === viewer.renderer.domElement && Math.hypot(h.point[0] - p[0], h.point[1] - p[1], h.point[2] - p[2]) < 0.6) return [x, y]; }
+      return [0, 0]; });
+    await page.touchscreen.tap(hp[0], hp[1]);
+    await page.waitForFunction(() => window.__app.state.preview?.aux, null, { timeout: 30000 }).catch(async () => errs.push('Hilfsebene: ' + await page.textContent('#status')));
+    await page.waitForTimeout(300);
+    console.log('   Hilfsebene:', await page.evaluate(() => { const p = window.__app.state.preview; return p?.aux ? [p.indices.length, p.aux.indices.length, p.fit.diameter.toFixed(4), p.fit.form.toFixed(4)].join(' / ') : 'keine'; }));
+    await page.screenshot({ path: `${prefix}${label}-hilfsebene-vorschau.png` });
+    if (await page.evaluate(() => window.__app.state.preview?.aux)) { await page.tap('#pc-create'); }
+    // Bericht
+    await page.evaluate(() => { document.querySelector('.tab[data-tab="pruef"]').click(); });
+    await page.tap('#btn-report2'); await page.waitForTimeout(400);
+    await page.screenshot({ path: `${prefix}${label}-bericht.png` });
+    const rep = await page.textContent('#report-view'); if (!rep.includes('Tabelle 1') || !rep.includes('Kreis 1')) errs.push('Bericht unvollständig');
   }
   const ok = visible && feat?.startsWith('Zylinder') && !errs.length;
   if (!ok) failed = true;

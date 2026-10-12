@@ -4,6 +4,7 @@ import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
 import { autoFit, fitType, FitResult, GeomType } from './core/fit';
 import type { Vec3 } from './core/linalg';
+import { extractWithAuxPlane } from './core/aux';
 
 let mesh: MeshData | null = null;
 let topo: MeshTopology | null = null;
@@ -12,7 +13,8 @@ export type Req =
   | { op: 'load'; name: string; buffer: ArrayBuffer }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
-  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto' };
+  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto' }
+  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult };
 
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
@@ -45,6 +47,10 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       const use = v.interior.length >= 20 ? v.interior : v.all;
       const f = doFit(use, req.type);
       result = { indices: use, ...f };
+    } else if (req.op === 'aux') {
+      if (!topo) throw new Error('Hilfsebene benötigt ein Polygonmodell (Dreiecke).');
+      const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane);
+      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
     } else if (req.op === 'fit') {

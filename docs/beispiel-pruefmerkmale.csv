@@ -1,7 +1,7 @@
 ﻿Merkmal;Prüfmerkmal;Soll;Ist;Abweichung;Tol +;Tol -;Status
 Ebene 1;Ebenheit;0,0000;0,0430;0,0430;0,0500;0,0000;IO
 Zylinder 1;Durchmesser;12,0000;12,0777;0,0777;0,0500;-0,0500;NIO
-Zylinder 1;X;20,0000;19,9999;-0,0001;0,1000;-0,1000;IO
+Zylinder 1;Position X;20,0000;19,9999;-0,0001;0,1000;-0,1000;IO
 Langloch 1;Länge;30,0000;29,9973;-0,0027;0,1000;-0,1000;IO
 Langloch 1;Breite;10,0000;9,9991;-0,0009;0,1000;-0,1000;IO
 Zylinder 3;Durchmesser;16,0000;15,9973;-0,0027;0,1000;-0,1000;IO

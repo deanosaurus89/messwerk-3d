@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
+import { Labels, ViewCube } from './overlay';
 
 (THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as any).disposeBoundsTree = disposeBoundsTree;
@@ -24,6 +25,8 @@ export class Viewer {
   private ray = new THREE.Raycaster();
   radius = 100;
   center = new THREE.Vector3();
+  cube!: ViewCube;
+  labels!: Labels;
 
   constructor(public el: HTMLElement) {
     const mobile = matchMedia('(pointer: coarse)').matches;
@@ -58,7 +61,14 @@ export class Viewer {
     glc.addEventListener('webglcontextlost', (e) => { e.preventDefault(); console.warn('WebGL-Kontext verloren'); });
     glc.addEventListener('webglcontextrestored', () => { this.resize(); });
     this.resize();
-    const loop = () => { this.renderer.render(this.scene, this.camera); requestAnimationFrame(loop); };
+    this.cube = new ViewCube(this);
+    this.labels = new Labels(this);
+    const loop = () => {
+      this.renderer.render(this.scene, this.camera);
+      this.cube.render(this.renderer);
+      this.labels.update();
+      requestAnimationFrame(loop);
+    };
     loop();
   }
 
@@ -96,6 +106,18 @@ export class Viewer {
   paint(idx: Uint32Array, rgb: number[]) { if (!this.colors) return; for (const v of idx) this.colors.set(rgb, 3 * v); }
   commitColors() { if (this.model) (this.model.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true; }
 
+  /** Ansicht aus beliebiger Richtung (ViewCube: Flächen, Kanten, Ecken); Zielpunkt und Abstand bleiben erhalten. */
+  viewDir(v: [number, number, number]) {
+    const d = new THREE.Vector3(...v).normalize();
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    // Z bleibt "oben" (OrbitControls); Draufsicht minimal nach −Y geneigt -> X rechts, Y oben (XY-Ebene)
+    if (Math.abs(d.z) > 0.999) d.set(0, -1e-4, Math.sign(d.z)).normalize();
+    this.camera.position.copy(this.controls.target).addScaledVector(d, dist);
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
+    this.camera.updateMatrixWorld();
+  }
+
   view(dir: 'iso' | '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z' | 'fit') {
     const d = new THREE.Vector3();
     const cur = this.camera.position.clone().sub(this.controls.target).normalize();
@@ -107,8 +129,7 @@ export class Viewer {
     }
     const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
     const dist = (this.radius / Math.sin(Math.min(vf, hf) / 2)) * 0.9; // Hochformat: horizontaler Öffnungswinkel begrenzt
-    this.camera.up.set(0, 0, 1);
-    if (Math.abs(d.z) > 0.99) this.camera.up.set(0, 1, 0);
+    if (Math.abs(d.z) > 0.999) d.set(0, -1e-4, Math.sign(d.z)).normalize();
     this.controls.target.copy(this.center);
     this.camera.position.copy(this.center).addScaledVector(d, dist);
     this.camera.near = dist / 100; this.camera.far = dist * 10; this.camera.updateProjectionMatrix();
@@ -117,7 +138,7 @@ export class Viewer {
   }
 
   pick(clientX: number, clientY: number): Hit | null {
-    if (!this.model) return null;
+    if (!this.model || !this.model.visible) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(ndc, this.camera);
@@ -190,7 +211,7 @@ export class Viewer {
   }
 
   /** Abstand: Linie p1→p2, gestrichelte X/Y/Z-Komponenten, Beschriftung. */
-  addDistance(p1: number[], p2: number[], label: string, color: number, selected: boolean) {
+  addDistance(p1: number[], p2: number[], color: number, selected: boolean) {
     const a = new THREE.Vector3(...p1), b = new THREE.Vector3(...p2);
     const main = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 1, this.radius / (selected ? 260 : 400), 6), new THREE.MeshBasicMaterial({ color, depthTest: false }));
     main.renderOrder = 7; this.prims.add(main);
@@ -206,17 +227,6 @@ export class Viewer {
       const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 160, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
       d.position.copy(p); d.renderOrder = 8; this.prims.add(d);
     }
-    // Beschriftung als Sprite
-    const cv = document.createElement('canvas'), g = cv.getContext('2d')!;
-    g.font = 'bold 34px system-ui, sans-serif';
-    const w = Math.ceil(g.measureText(label).width) + 24; cv.width = w; cv.height = 52;
-    g.font = 'bold 34px system-ui, sans-serif';
-    g.fillStyle = selected ? 'rgba(31,95,168,.92)' : 'rgba(30,40,55,.85)'; g.fillRect(0, 0, w, 52);
-    g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(label, 12, 27);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, sizeAttenuation: false }));
-    const h = 0.028; sp.scale.set((h * w) / 52, h, 1);
-    sp.center.set(0, -0.3); // Beschriftung neben/über der Linienmitte, Linie bleibt sichtbar
-    sp.position.copy(a).add(b).multiplyScalar(0.5); sp.renderOrder = 9; this.prims.add(sp);
   }
 
   snapshot(): string { return this.renderer.domElement.toDataURL('image/png'); }

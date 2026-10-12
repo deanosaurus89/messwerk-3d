@@ -11,11 +11,21 @@ export interface Feature {
   pointCount: number;
   method: 'Klick' | 'Pinsel' | 'Konstruiert';
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
+  aux?: AuxPlane;            // Hilfsebene (Projektionsebene) für Kreis/Langloch
+}
+
+/** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */
+export interface AuxPlane {
+  plane: FitResult;          // gefittete Ebene (Ist)
+  pointCount: number;
+  source: string;            // 'automatisch (angrenzende Fläche)' oder Name einer vorhandenen Ebene
+  refId?: number;            // ID der verwendeten vorhandenen Ebene
 }
 
 export type ControlKind =
   | 'Durchmesser' | 'Radius' | 'X' | 'Y' | 'Z' | 'Länge' | 'Breite' | 'Kegelwinkel'
-  | 'Form' | 'Abstand 3D' | 'Abstand X' | 'Abstand Y' | 'Abstand Z';
+  | 'Form' | 'Winkel X' | 'Winkel Y' | 'Winkel Z' | 'Std.-Abw.'
+  | 'Abstand 3D' | 'Abstand X' | 'Abstand Y' | 'Abstand Z';
 
 export interface Control {
   id: number;
@@ -33,25 +43,51 @@ export const FORM_NAME: Record<GeomType, string> = {
   Kegel: 'Kegelform', Kugel: 'Kugelform', Punkt: 'Form', Abstand: 'Form',
 };
 
+/** ISO-1101-Symbol der Formtoleranz je Merkmalstyp. */
+export const FORM_SYMBOL: Record<GeomType, string> = {
+  Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Punkt: '', Abstand: '',
+};
+
+export interface CatalogItem { kind: ControlKind; label: string; symbol: string; note?: string; }
+export interface CatalogGroup { group: string; items: CatalogItem[]; }
+
+/**
+ * Prüfmerkmal-Katalog je Merkmalstyp, gegliedert nach DIN EN ISO 1101 (Form, Richtung, Ort) plus Maße.
+ * Richtungs- und Ortstoleranzen mit Bezug (Parallelität, Rechtwinkligkeit, Neigung, Position) benötigen
+ * ein Bezugssystem; v3 bietet dafür die Winkel der Achse/Normalen zu den Koordinatenachsen und X/Y/Z an.
+ */
+export function controlCatalog(t: GeomType): CatalogGroup[] {
+  const form = (note: string): CatalogGroup => ({ group: 'Form (ISO 1101)', items: [{ kind: 'Form', label: FORM_NAME[t], symbol: FORM_SYMBOL[t], note },
+    { kind: 'Std.-Abw.', label: 'Standardabweichung', symbol: 'σ', note: 'RMS der Abstände zum Ausgleichselement' }] });
+  const pos: CatalogGroup = { group: 'Ort (Koordinaten)', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: k, label: `Position ${k}`, symbol: '⌖' })) };
+  const dir = (what: string): CatalogGroup => ({ group: 'Richtung', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: `Winkel ${k}` as ControlKind, label: `Winkel ${what} zur ${k}-Achse`, symbol: '∠' })) });
+  const dia: CatalogItem[] = [{ kind: 'Durchmesser', label: 'Durchmesser', symbol: '⌀' }, { kind: 'Radius', label: 'Radius', symbol: 'R' }];
+  switch (t) {
+    case 'Ebene': return [form('zwei parallele Ebenen'), pos, dir('Normale')];
+    case 'Kreis': return [form('zwei konzentrische Kreise'), { group: 'Maß', items: dia }, pos, dir('Normale')];
+    case 'Zylinder': return [form('zwei koaxiale Zylinder'), { group: 'Maß', items: dia }, pos, dir('Achse')];
+    case 'Kugel': return [form('Flächenprofil (zwei Kugelschalen)'), { group: 'Maß', items: dia }, pos];
+    case 'Kegel': return [form('Flächenprofil'), { group: 'Maß', items: [{ kind: 'Kegelwinkel', label: 'Kegelwinkel', symbol: '∢' }, ...dia] }, pos, dir('Achse')];
+    case 'Langloch': return [form('Linienprofil der Kontur'), { group: 'Maß', items: [{ kind: 'Länge', label: 'Länge', symbol: '↔' }, { kind: 'Breite', label: 'Breite', symbol: '↕' }] }, pos, dir('Normale')];
+    case 'Punkt': return [pos];
+    case 'Abstand': return [{ group: 'Abstand', items: (['3D', 'X', 'Y', 'Z'] as const).map((k) => ({ kind: `Abstand ${k}` as ControlKind, label: `Abstand ${k}`, symbol: '↔' })) }];
+  }
+}
+
 export function controlLabel(c: Control, f?: Feature): string {
   if (c.kind === 'Form' && f) return FORM_NAME[f.type];
+  if (c.kind === 'X' || c.kind === 'Y' || c.kind === 'Z') return 'Position ' + c.kind;
+  if (c.kind.startsWith('Winkel ')) return `Winkel zur ${c.kind.slice(7)}-Achse`;
   return c.kind;
 }
 
 /** Welche Prüfmerkmale sind für einen Merkmalstyp verfügbar? */
 export function availableControls(t: GeomType): ControlKind[] {
-  const pos: ControlKind[] = ['X', 'Y', 'Z'];
-  switch (t) {
-    case 'Ebene': return ['Form', ...pos];
-    case 'Kreis': case 'Zylinder': case 'Kugel': return ['Durchmesser', 'Radius', ...pos, 'Form'];
-    case 'Langloch': return ['Länge', 'Breite', ...pos, 'Form'];
-    case 'Kegel': return ['Kegelwinkel', 'Durchmesser', ...pos, 'Form'];
-    case 'Punkt': return pos;
-    case 'Abstand': return ['Abstand 3D', 'Abstand X', 'Abstand Y', 'Abstand Z'];
-  }
+  return controlCatalog(t).flatMap((g) => g.items.map((i) => i.kind));
 }
 
 export const DEG = 180 / Math.PI;
+const axisAngle = (n: Vec3, k: number) => Math.acos(Math.min(1, Math.abs(n[k]) / (norm(n) || 1))) * DEG;
 
 /**
  * Abstand zwischen zwei Merkmalen (Ist). Regel:
@@ -87,6 +123,10 @@ export function measuredValue(c: Control, feats: Map<number, Feature>): number |
     case 'Breite': return f.width ?? null;
     case 'Kegelwinkel': return f.halfAngle != null ? 2 * f.halfAngle * DEG : null;
     case 'Form': return f.form;
+    case 'Std.-Abw.': return f.rms;
+    case 'Winkel X': return axisAngle(f.normal, 0);
+    case 'Winkel Y': return axisAngle(f.normal, 1);
+    case 'Winkel Z': return axisAngle(f.normal, 2);
     case 'Abstand 3D': return f.distance ?? null;
     case 'Abstand X': return f.delta ? Math.abs(f.delta[0]) : null;
     case 'Abstand Y': return f.delta ? Math.abs(f.delta[1]) : null;
@@ -104,7 +144,8 @@ export function evaluate(c: Control, feats: Map<number, Feature>): ControlResult
 }
 
 export function defaultTolerance(kind: ControlKind): { nominal: number | null; up: number; lo: number } {
-  if (kind === 'Form') return { nominal: 0, up: 0.05, lo: 0 };
+  if (kind === 'Form' || kind === 'Std.-Abw.') return { nominal: 0, up: 0.05, lo: 0 };
+  if (kind.startsWith('Winkel')) return { nominal: null, up: 0.5, lo: -0.5 };
   if (kind === 'Kegelwinkel') return { nominal: null, up: 0.5, lo: -0.5 };
   return { nominal: null, up: 0.1, lo: -0.1 };
 }

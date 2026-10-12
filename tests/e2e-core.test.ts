@@ -72,3 +72,38 @@ describe('E2E Beispielteil', () => {
     expect(pe.distance!).toBeCloseTo(3, 2); expect(Math.abs(pe.delta![0])).toBeLessThan(1e-3);
   });
 });
+
+import { extractWithAuxPlane } from '../src/core/aux';
+describe('Hilfsebene (Kreis/Langloch)', () => {
+  const run = (pt: Vec3, nrm: Vec3, type: 'Kreis' | 'Langloch') => extractWithAuxPlane(mesh, topo, seed(pt, nrm), pt, { maxAngleDeg: 20, radius: 0 }, type);
+  it('Klick auf Oberseite neben der Bohrung -> Kreis in Ebene z=20', () => {
+    const r = run([27.5, 20, 20], [0, 0, 1], 'Kreis');
+    expect(r.fit.type).toBe('Kreis'); expect(r.fit.diameter!).toBeCloseTo(12.08, 2);
+    expect(r.fit.center[2]).toBeCloseTo(20, 2); expect(r.fit.center[0]).toBeCloseTo(20, 2);
+    expect(Math.abs(r.plane.normal[2])).toBeGreaterThan(0.9999); expect(r.planeIdx.length).toBeGreaterThan(1000);
+  });
+  it('Klick auf Bohrungswand -> Ebene automatisch (nächstgelegene Planfläche)', () => {
+    const r = run([20, 26.04, 17], [0, -1, 0], 'Kreis');
+    expect(r.fit.center[2]).toBeCloseTo(20, 2); expect(r.fit.diameter!).toBeCloseTo(12.08, 2);
+  });
+  it('Langloch in Hilfsebene', () => {
+    const r = run([20, 51.5, 20], [0, 0, 1], 'Langloch');
+    expect(r.fit.length!).toBeCloseTo(30, 1); expect(r.fit.width!).toBeCloseTo(10, 2); expect(r.fit.center[2]).toBeCloseTo(20, 2);
+  });
+  it('vorhandene Ebene als Hilfsebene (Unterseite z=0)', () => {
+    const bottom = extract([50, 30, 0], [0, 0, -1]);
+    const r = extractWithAuxPlane(mesh, topo, seed([20, 26.04, 5], [0, -1, 0]), [20, 26.04, 5], { maxAngleDeg: 20, radius: 0 }, 'Kreis', bottom);
+    expect(r.fit.center[2]).toBeCloseTo(0, 2); expect(r.planeIdx.length).toBe(0);
+  });
+});
+
+describe('Hilfsebene: Wandklick an vielen Stellen', () => {
+  it('Ebene bleibt die Oberseite (z=20)', () => {
+    for (const a of [0, 1, 2, 3, 4, 5]) {
+      const ang = a * Math.PI / 3, z = 19.6 - a * 0.05;
+      const pt: Vec3 = [20 + 6.04 * Math.cos(ang), 20 + 6.04 * Math.sin(ang), z];
+      const r = extractWithAuxPlane(mesh, topo, seed(pt, [-Math.cos(ang), -Math.sin(ang), 0]), pt, { maxAngleDeg: 20, radius: 0 }, 'Kreis');
+      expect(r.fit.center[2]).toBeCloseTo(20, 2); expect(r.planeIdx.length).toBeGreaterThan(1000); expect(r.fit.form).toBeLessThan(0.08);
+    }
+  });
+});

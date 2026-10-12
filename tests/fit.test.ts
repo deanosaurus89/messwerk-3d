@@ -92,3 +92,38 @@ describe('Abstand', () => {
     expect(f.form).toBeCloseTo(f.maxPos - f.maxNeg, 9);
   });
 });
+
+describe('Katalog', () => {
+  it('Formtoleranz je Typ und Winkel', async () => {
+    const F = await import('../src/core/features');
+    expect(F.controlCatalog('Kreis')[0].items[0].label).toBe('Rundheit');
+    expect(F.controlCatalog('Ebene')[0].items[0].symbol).toBe('⏥');
+    expect(F.availableControls('Abstand')).toEqual(['Abstand 3D', 'Abstand X', 'Abstand Y', 'Abstand Z']);
+    const f = { id: 1, name: 'E', type: 'Ebene' as const, pointCount: 0, method: 'Klick' as const,
+      measured: { type: 'Ebene' as const, center: [0, 0, 0] as any, normal: [0, Math.sin(0.1), Math.cos(0.1)] as any, rms: 0, form: 0, maxPos: 0, maxNeg: 0, n: 0 } };
+    const v = F.measuredValue({ id: 1, kind: 'Winkel Z', featureIds: [1], nominal: 0, tolUp: 1, tolLo: -1 }, new Map([[1, f]]));
+    expect(v!).toBeCloseTo(0.1 * 180 / Math.PI, 6);
+  });
+});
+
+describe('Bericht', () => {
+  it('Momentaufnahme, CSV und HTML', async () => {
+    const F = await import('../src/core/features');
+    const R = await import('../src/core/report');
+    const m = { type: 'Kreis' as const, center: [1, 2, 3] as any, normal: [0, 0, 1] as any, radius: 5, diameter: 10.02, rms: 0.01, form: 0.03, maxPos: 0.01, maxNeg: -0.02, n: 100 };
+    const f: any = { id: 1, name: 'Kreis 1', type: 'Kreis', measured: m, pointCount: 100, method: 'Klick',
+      aux: { plane: { ...m, type: 'Ebene', form: 0.004 }, pointCount: 50, source: 'automatisch' } };
+    const c = [{ id: 1, kind: 'Durchmesser' as const, featureIds: [1], nominal: 10, tolUp: 0.01, tolLo: -0.01 },
+      { id: 2, kind: 'Form' as const, featureIds: [1], nominal: 0, tolUp: 0.05, tolLo: 0 }];
+    const r = R.buildReport(1, [f], c, 'teil.stl');
+    expect(r.name).toBe('Tabelle 1'); expect(r.nio).toBe(1); expect(r.io).toBe(1);
+    expect(r.controls[1].control).toBe('Rundheit');
+    m.diameter = 99; // Momentaufnahme bleibt unverändert
+    expect(r.controls[0].measured).toBeCloseTo(10.02, 6);
+    const csv = R.reportCSV(r);
+    expect(csv).toContain('Kreis 1;Durchmesser;10,0000;10,0200;0,0200;0,0100;-0,0100;NIO');
+    expect(csv).toContain('Hilfsebene (automatisch');
+    expect(R.reportHTML(r)).toContain('<span class="st NIO">NIO</span>');
+    void F;
+  });
+});

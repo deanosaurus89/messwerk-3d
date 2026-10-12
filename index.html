@@ -27,6 +27,7 @@
       <div class="group"><div class="btns">
         <button class="big" id="btn-csv"><span class="ico">⎙</span>Tabelle CSV</button>
         <button class="big" id="btn-csv-feat"><span class="ico">⎙</span>Merkmale CSV</button>
+        <button class="big" id="btn-report"><span class="ico">▤</span>Tabelle erzeugen</button>
       </div><div class="glabel">Bericht</div></div>
     </div>
     <div class="panel hidden" data-tab="merkmale">
@@ -39,7 +40,10 @@
       </div><div class="glabel">Bearbeiten</div></div>
     </div>
     <div class="panel hidden" data-tab="pruef">
-      <div class="group"><div class="btns" id="ctrl-btns"></div><div class="glabel">Prüfmerkmal zum gewählten Merkmal hinzufügen</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-report2"><span class="ico">▤</span>Tabelle erzeugen</button>
+        <button class="big" id="btn-csv2" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>Liste CSV</button>
+      </div><div class="glabel">Bericht · Prüfmerkmale im Katalog unter der 3D-Ansicht abhaken</div></div>
     </div>
     <div class="panel hidden" data-tab="ansicht">
       <div class="group"><div class="btns">
@@ -54,25 +58,25 @@
       <div class="group"><div class="btns">
         <button class="big" id="btn-toggle-prims"><span class="ico">◎</span>Primitive</button>
         <button class="big" id="btn-toggle-pts"><span class="ico">⁘</span>Punkte färben</button>
+        <button class="big" id="btn-toggle-labels"><span class="ico">🏷</span>Labels</button>
       </div><div class="glabel">Anzeige</div></div>
     </div>
   </section>
   <main id="workspace">
     <aside id="tree-pane"><div class="pane-title">Baumansicht</div><div id="tree"></div></aside>
     <div id="center">
-      <div id="scene"><div id="viewcube">
-        <button data-view="+Z">Oben</button><button data-view="-Y">Vorne</button><button data-view="+X">Rechts</button><button data-view="iso">Iso</button>
-      </div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
-      <div id="table-pane"><div class="pane-title">Prüfmerkmal-Liste <span id="summary"></span></div>
-        <div id="ctrl-add"><select id="ca-feat"></select><select id="ca-kind"></select><button class="btn primary" id="ca-add">＋ Prüfmerkmal</button></div>
-        <div id="table-wrap"><table id="ctrl-table"><thead><tr>
+      <div id="scene"><div id="viewcube"><button data-view="iso" title="Isometrisch">Iso</button><button data-view="fit" title="Einpassen">⤢</button></div><div id="report-view" class="hidden"></div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
+      <div id="table-pane" data-ctab="katalog"><div class="pane-title">Prüfmerkmale <span id="summary"></span>
+          <span class="ctabs"><button data-ctab="katalog">Katalog</button><button data-ctab="liste">Alle <span id="ctab-n"></span></button></span></div>
+        <div id="ctrl-body"><div id="catalog"></div>
+          <div id="ctrl-list"><div class="sub-title">Alle Prüfmerkmale</div><div id="table-wrap"><table id="ctrl-table"><thead><tr>
           <th>Merkmal</th><th>Prüfmerkmal</th><th>Soll</th><th>Ist</th><th>Abw.</th><th>Tol +</th><th>Tol −</th><th>Status</th><th></th>
-        </tr></thead><tbody></tbody></table></div></div>
+          </tr></thead><tbody></tbody></table></div></div></div></div>
     </div>
     <aside id="dialog-pane"><div class="pane-title">Dialogbereich</div><div id="dialog"></div></aside>
   </main>
   <nav id="mobile-bar">
-    <button data-panel="tree">☰ Baum</button><button data-panel="dialog">ⓘ Dialog</button><button data-panel="table">▤ Tabelle <span id="mb-sum"></span></button>
+    <button data-panel="tree">☰ Baum</button><button data-panel="dialog">ⓘ Dialog</button><button data-panel="table">▤ Prüfmerkmale <span id="mb-sum"></span></button>
   </nav>
   <footer id="statusbar"><span id="status">Bereit. Polygonmodell importieren oder „Beispiel laden“.</span><span id="stats"></span></footer>
 </div>

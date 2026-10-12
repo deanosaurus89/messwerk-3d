@@ -1,4 +1,4 @@
-# MessWerk 3D – Inspektion im Browser (v1)
+# MessWerk 3D – Inspektion im Browser (v3)
 
 **Live:** https://deanosaurus89.github.io/messwerk-3d/
 
@@ -36,7 +36,8 @@ node e2e/ui-check.mjs   # Browser-Test der dist/-Version (Playwright + Chrome)
 ## Bedienung (Kurzanleitung)
 1. **Start → Importieren** (STL ASCII/binär, PLY ASCII/binär, OBJ, XYZ/TXT-Punktwolke) oder **Beispiel laden**.
 2. Navigation: linke Maustaste/1 Finger = Drehen, rechte Maustaste/2 Finger = Verschieben, Mausrad/Pinch = Zoom.
-   Standardansichten im Register **Ansicht** bzw. oben rechts in der Szene.
+   **Navigationswürfel** unten links: Fläche antippen = Normalansicht (OBEN = XY-Ebene, X rechts, Y oben), Kante oder Ecke
+   = Zwischenansicht; der Würfel dreht synchron mit der Kamera. Weitere Standardansichten im Register **Ansicht**.
 3. **Merkmale** → Typ wählen: *Automatisch* oder fest *Ebene, Kreis, Zylinder, Langloch, Kegel, Kugel, Punkt*.
    - **Klick + Wachstum:** auf die Fläche tippen. Vom Klickpunkt aus wachsen die Dreiecke, solange der Normalenwinkel
      zwischen Nachbarn unter dem Grenzwert liegt (Standard 20°); optional mit Suchradius. Kanten beenden das Wachstum.
@@ -45,17 +46,30 @@ node e2e/ui-check.mjs   # Browser-Test der dist/-Version (Playwright + Chrome)
      Standardabweichung, Formabweichung (Ebenheit, Rundheit, Zylindrizität, Kugelform, Kegelform, Profil), Max. +/−,
      entfernte Ausreißer, Hauptmaße. Typ kann in der Vorschau überschrieben werden (Neuberechnung).
    - **Erzeugen** (oder Enter) legt das Merkmal an (Meldung + Markierung im Baum), **Verwerfen** (oder Esc) verwirft.
-4. **Baumansicht** zeigt nur Objekte: Daten und Merkmale; unter jedem Merkmal nur seine Komponenten **Ist** (gemessen)
-   und später **Soll** (Nominal). Prüfmerkmale stehen bewusst nicht im Baum.
-5. **Abstand** (Register Merkmale › Konstruieren): zwei Merkmale über Dropdown, Baumansicht oder Antippen im 3D-Bild wählen,
-   Vorschau prüfen, Erzeugen. Darstellung: Linie, gestrichelte X/Y/Z-Komponenten (rot/grün/blau) und Beschriftung.
+4. **Baumansicht** zeigt nur Objekte: Daten und Merkmale; unter jedem Merkmal nur seine Komponenten **Ist**, ggf. **Hilfsebene**
+   und später **Soll**. Prüfmerkmale stehen bewusst nicht im Baum. Das **Auge** vor Polygonmodell und jedem Merkmal blendet
+   es in 3D aus/ein (inkl. Punkte, Geometrie und Label). Unter **Berichte** liegen erzeugte Tabellen.
+5. **Hilfsebene (Kreis/Langloch):** im Kreis- oder Langloch-Modus nahe dem Übergang Planfläche/Bohrungswand tippen (oder nur
+   auf die Wand). Die angrenzende Planfläche wird automatisch erkannt, die Wandpunkte werden senkrecht in diese Ebene projiziert
+   und Kreis bzw. Langloch in der Ebene gefittet (Mittelpunkt in der Ebene, Orientierung = Ebenennormale). Vorschau zweifarbig:
+   Wand = orange, Ebene = blau, mit Kennwerten beider Punktmengen. Alternativ im Dialog eine **vorhandene Ebene** als Hilfsebene
+   wählen oder „Keine (3D-Fit)“.
+6. **Abstand** (Register Merkmale › Konstruieren): zwei Merkmale über Dropdown, Baumansicht oder Antippen im 3D-Bild wählen,
+   Vorschau prüfen, Erzeugen. Darstellung: Linie und gestrichelte X/Y/Z-Komponenten (rot/grün/blau).
    **Regel:** Mittelpunkt–Mittelpunkt; ist eine Ebene beteiligt, wird der Mittelpunkt des anderen Merkmals senkrecht auf die
-   Ebene projiziert (Punkt-Ebene-Abstand; bei Ebene–Ebene: Mittelpunkt von B auf Ebene A). X/Y/Z sind die Beträge der Komponenten.
-   Abstände werden neu berechnet, wenn ein Bezugsmerkmal neu gefittet wird, und mitgelöscht, wenn es gelöscht wird.
-6. **Prüfmerkmal-Liste** (unten bzw. „Tabelle“ am Telefon): Merkmal + Prüfmerkmal wählen, **＋ Prüfmerkmal**. Verfügbar je Typ:
-   Durchmesser, Radius, X/Y/Z, Länge/Breite, Kegelwinkel, Form; bei Abständen Abstand 3D/X/Y/Z. Es werden keine Prüfmerkmale
-   automatisch angelegt. Soll, Tol +, Tol − eintragen (Komma oder Punkt) → Abweichung und IO/NIO (grün/rot).
-7. **Start → Tabelle CSV / Merkmale CSV** (Semikolon, Dezimalkomma, für Excel).
+   Ebene projiziert. X/Y/Z sind die Beträge der Komponenten.
+7. **Prüfmerkmale** (Fenster unter der 3D-Ansicht; am Telefon Bottom-Sheet mit Registern Katalog/Alle):
+   - **Katalog** für das gewählte Merkmal, gegliedert nach DIN EN ISO 1101: Form (Ebenheit ⏥, Rundheit ○, Zylinderform ⌭,
+     Flächenprofil ⌓ für Kugel/Kegel, Linienprofil ⌒ für Langloch, Standardabweichung), Maß (⌀, R, Länge, Breite, Kegelwinkel),
+     Ort (Position X/Y/Z), Richtung (Winkel der Normale/Achse zur X/Y/Z-Achse), bei Abständen Abstand 3D/X/Y/Z.
+   - Haken setzen = Prüfmerkmal anlegen (Soll, Tol +, Tol − direkt editierbar, IO/NIO), Haken entfernen = löschen.
+   - Rechts bzw. Register „Alle“: Liste aller Prüfmerkmale.
+8. **3D-Labels** für alle Merkmale: Kopf = Name, darunter genau die abgehakten Prüfmerkmale (Ist, Soll, Abw., grün/rot).
+   Automatische Platzierung mit Führungslinie und Überlappungsvermeidung; Label ziehen = eigene Position (als 3D-Versatz
+   gespeichert, bleibt bei Drehen/Zoomen erhalten); Antippen wählt das Merkmal. Ein/aus: Ansicht › Labels.
+9. **Tabelle erzeugen** (Start › Bericht oder Prüfmerkmale): Momentaufnahme aller Merkmale (Typ, Ist-Lage, Maß, Form, RMS,
+   Hilfsebene) und aller Prüfmerkmale mit IO/NIO als **Berichte › Tabelle n** im Baum; Ansicht mit Export **CSV**, **HTML** und **Drucken**.
+10. **Start → Tabelle CSV / Merkmale CSV** (Semikolon, Dezimalkomma, für Excel).
 
 Tasten: `Esc` beendet den Erstellmodus, `Entf` löscht die Auswahl.
 
@@ -102,9 +116,12 @@ Ausrichtung (Best-Fit/ICP) und Farbvergleich setzen auf denselben Kern (KD-Baum,
 Bolzen Ø16 (um +0,05 in X versetzt), Kegelstumpf (Ø20→Ø8, Höhe 10, Kegelwinkel 61,93°), Kugelkalotte R7; Rauschen σ = 8 µm.
 Neu erzeugen: `pip install cadquery-ocp numpy` und `python scripts/make_sample.py`.
 
-## Grenzen v1
+## Grenzen v3
 - Kein CAD-Import, keine Ausrichtung, kein Farbvergleich (bewusst ausgelassen, Architektur vorbereitet).
 - Sollwerte werden von Hand eingetragen; Projekte können noch nicht gespeichert/geladen werden (nur CSV-Export).
 - Punktwolken ohne Dreiecke: nur Pinsel-Auswahl (kein Regionenwachstum), Normalen werden noch nicht geschätzt → Zylinder/Kegel/Langloch dort unzuverlässig.
-- Kreis wird aus einer Bohrung/einem Bolzen (Zylindermantel) berechnet; Kreise an ebenen Kanten ohne Mantelfläche werden nicht erkannt.
+- Hilfsebene automatisch: es wird die dem Klickpunkt nächstgelegene angrenzende Planfläche verwendet (Klick nahe der Unterseite einer
+  Durchgangsbohrung → Unterseite). Wände ohne angrenzende Planfläche (z. B. Freiform) → vorhandene Ebene wählen.
+- Richtungs-/Ortstoleranzen mit Bezug (∥, ⟂, ∠, ⌖ nach ISO 1101) benötigen ein Bezugssystem; v3 bietet ersatzweise Winkel zu den Achsen und X/Y/Z.
+- Label-Positionen, Sichtbarkeit und Berichte werden noch nicht in einer Projektdatei gespeichert.
 - Bei sehr großen Netzen (≈1 Mio. Punkte) dauert der Import einige Sekunden, ein Klick-Fit 2–4 s.
