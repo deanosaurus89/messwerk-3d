@@ -21,12 +21,5 @@ for (const s of list) {
   await p.screenshot({ path: `public/samples/thumb-${s.key}.jpg`, type: 'jpeg', quality: 80, clip: { x, y: bb.y, width: w, height: bb.height }, scale: 'css' });
   await p.evaluate(() => document.body.classList.remove('thumb'));
   const c = close[s.key];
-  if (c) { // Nahaufnahme mit Drahtgitter (zeigt das gleichmäßige Netz)
-    await p.evaluate(([t, d, r]) => { const { viewer } = window.__app; viewer.viewDir(d); viewer.focus(t, r); viewer.setWireframe?.(true); }, c);
-    await sleep(700); await p.screenshot({ path: `docs/scan-${s.key}-netz.png` });
-    await p.evaluate(() => window.__app.viewer.setWireframe?.(false));
-    await p.evaluate(([t, d]) => { const { viewer } = window.__app; viewer.viewDir(d); viewer.view('fit'); viewer.viewDir(d); }, [c[0], [1, -1.3, 1.1]]);
-    await sleep(500); await p.screenshot({ path: `docs/scan-${s.key}.png` });
-  }
 }
 await b.close(); srv.kill(); console.log('ok');

@@ -11,7 +11,7 @@ async function run(browserType, devName, landscape, label) {
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', (e) => errs.push(String(e))); page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
   await page.goto(URL, { waitUntil: 'networkidle' });
-  await page.click('#btn-sample');
+  await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]');
   await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 });
   await page.waitForTimeout(800);
   const info = await page.evaluate(() => {

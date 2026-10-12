@@ -67,7 +67,7 @@ try {
     } else if (/Bezug [ABC] zuweisen/.test(t.title)) await page.click('#dt-apply');
     else if (/Positionstoleranz/.test(t.title)) await page.locator('#catalog .cat-item[data-kind="Position"] input[type=checkbox]').check();
     else if (/Erzeugen/.test(t.title)) { await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 }); await page.click('#pc-create'); }
-    else if (/Beispielteil/.test(t.title)) { await page.click('#btn-sample'); await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 }); }
+    else if (/Beispielteil/.test(t.title)) { await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]'); await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 }); }
     else if (/Register/.test(t.title)) await page.click('.tab[data-tab="merkmale"]');
     else if (/Ebene/.test(t.title)) await page.click('[data-ftype="Ebene"]');
     else if (/Zylinder/.test(t.title)) await page.click('[data-ftype="Zylinder"]');

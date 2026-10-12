@@ -36,7 +36,7 @@ async function addCtrl(feat, kind, nominal, up, lo) {
 }
 try {
   await page.goto(URL);
-  await page.click('#btn-sample');
+  await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]');
   await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 });
   console.log('Geladen:', await page.textContent('#stats'));
   await page.click('.tab[data-tab="merkmale"]');

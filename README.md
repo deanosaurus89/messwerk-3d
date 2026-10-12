@@ -9,6 +9,19 @@ Es werden keine fremden Icons oder Assets verwendet.
 **Umfang v1 (ohne CAD):** Polygonmodell importieren → Merkmale per Klick extrahieren (automatische Typerkennung) →
 Prüfmerkmale mit von Hand eingegebenen Sollwerten und Toleranzen → IO/NIO → CSV-Export.
 
+## Beispielteile (Scan-/CT-ähnlich)
+**Start › Beispiel laden** öffnet eine Auswahl mit Vorschaubild, Beschreibung und Größe. Sie funktioniert auch auf iPhone/iPad. Es gibt vier Teile:
+- Beispielteil (Standard, wird vom Trainingsmodus genutzt)
+- **Prüfplatte**: Teilkreis, Langlöcher, Tasche, Kugel, Kegel, Rundungen und Fase
+- **Flansch/Welle**: koaxiale Durchmesser, Kegel, Torus-Einstich, Teilkreis
+- **Freiform-Demoteil**: B-Spline-Fläche plus Regelgeometrie
+
+Die drei neuen Teile sind dichte, isotrope Dreiecksnetze mit ca. 0,5 mm Kantenlänge, 8 µm Rauschen, leichter Welligkeit und kleinen Scanlücken. Sie liegen als `*.stl.gz` vor; der Import entpackt gzip automatisch, auch bei eigenen Dateien. Soll-Geometrie und Netzstatistik stehen in `public/samples/*.json` und `public/samples/README.md`.
+
+Für solche gleichmäßigen Netze prüft das Regionenwachstum zusätzlich die Krümmung: gegenüber der Saat-Umgebung und über einen Abstand von etwa 1 mm. Dadurch stoppt es auch an tangentialen Rundungen (z. B. R1,5 zwischen Flanschfläche und Umfang) und an flachen Knicken, die sich auf einzelne Dreiecke verteilen. Bei tessellierten CAD-Netzen bleibt das alte Verhalten.
+
+Ansicht › **Netz** zeigt das Dreiecksnetz als Drahtgitter.
+
 ## Neu in v4
 
 ### Projekt speichern / öffnen (.mw3d)
@@ -164,6 +177,8 @@ Bolzen Ø16 (um +0,05 in X versetzt), Kegelstumpf (Ø20→Ø8, Höhe 10, Kegelwi
 Neu erzeugen: `pip install cadquery-ocp numpy` und `python scripts/make_sample.py`.
 
 ## Grenzen v4
+
+* Regionenwachstum: Knicke unter ~25° zwischen Flächen, die von Dreieck zu Dreieck wachsen, können bei verrauschten Netzen überlaufen. Abhilfe: Normalenwinkel verkleinern, Suchradius setzen oder den Pinsel verwenden.
 
 * Profil mit Bezug ist eine konservative Abschätzung ohne CAD-Soll.
 * Position nutzt das DRF ohne Materialbedingungen (kein Ⓜ/Ⓛ).
