@@ -7,6 +7,7 @@ export interface TourStep {
   world?: () => { x: number; y: number } | null;         // Bildschirmpunkt einer 3D-Stelle (Markierung zum Antippen)
   check?: () => boolean;                                  // Schritt erledigt?
   enter?: () => void;
+  auto?: () => Promise<void>;                             // Überspringen: Ergebnis des Schritts automatisch herstellen
 }
 
 export class Tour {
@@ -26,6 +27,14 @@ export class Tour {
     document.body.classList.add('training');
   }
   start() { this.go(0); this.timer = window.setInterval(() => this.tick(), 250); const loop = () => { this.place(); this.raf = requestAnimationFrame(loop); }; loop(); }
+  private busy = false; private showList = false;
+  /** Schritte < k, deren Ergebnis fehlt, automatisch ausführen (z. B. Beispiel laden, Merkmal erzeugen, Bezug zuweisen). */
+  async ensureUpTo(k: number) {
+    for (let i = 0; i < k; i++) { const s = this.steps[i]; if (s.auto && !(s.check?.() ?? true)) { this.status(`Automatisch: ${s.title} …`); try { await s.auto(); } catch (e) { console.warn('Training auto', e); } } }
+  }
+  async skip() { if (this.busy) return; this.busy = true; try { await this.ensureUpTo(this.idx + 1); } finally { this.busy = false; } if (this.idx < this.steps.length - 1) this.go(this.idx + 1); else this.render(); }
+  async jump(k: number) { if (this.busy) return; this.busy = true; this.showList = false; try { if (k > this.idx) await this.ensureUpTo(k); } finally { this.busy = false; } this.go(k); }
+  private status(t: string) { const e = this.card.querySelector('.tc-state'); if (e) { e.textContent = t; e.className = 'tc-state'; } }
   go(i: number) {
     this.idx = Math.max(0, Math.min(this.steps.length - 1, i)); this.advanceAt = 0;
     const s = this.steps[this.idx]; s.enter?.(); this.render();
@@ -42,14 +51,20 @@ export class Tour {
       <div class="tc-title">${s.title}</div><div class="tc-text">${s.text}</div>
       ${s.check ? `<div class="tc-state ${ok ? 'ok' : ''}">${ok ? '✔ Erledigt' : '… warte auf deine Aktion'}</div>` : ''}
       <div class="tc-btns"><button class="btn" id="tc-back" ${this.idx === 0 ? 'disabled' : ''}>◀ Zurück</button>
-      <button class="btn primary" id="tc-next" ${ok ? '' : 'disabled'}>${last ? 'Fertig' : 'Weiter ▶'}</button></div>`;
+      <button class="btn" id="tc-list" title="Schrittliste">☰ Schritte</button>
+      ${!ok && !last ? `<button class="btn" id="tc-skip" title="Schritt überspringen – das Ergebnis wird automatisch erzeugt">Überspringen ⏭</button>` : ''}
+      <button class="btn primary" id="tc-next" ${ok ? '' : 'disabled'}>${last ? 'Fertig' : 'Weiter ▶'}</button></div>
+      ${this.showList ? `<ol class="tc-list">${this.steps.map((x, i) => `<li><button data-i="${i}" class="${i === this.idx ? 'cur' : ''} ${x.check && x.check() ? 'done' : ''}">${i + 1}. ${x.title}</button></li>`).join('')}</ol>` : ''}`;
     this.card.dataset.step = String(this.idx);
     this.card.querySelector<HTMLButtonElement>('.tc-x')!.onclick = () => this.end();
     this.card.querySelector<HTMLButtonElement>('#tc-back')!.onclick = () => this.go(this.idx - 1);
     this.card.querySelector<HTMLButtonElement>('#tc-next')!.onclick = () => (last ? this.end() : this.go(this.idx + 1));
+    this.card.querySelector<HTMLButtonElement>('#tc-skip')?.addEventListener('click', () => this.skip());
+    this.card.querySelector<HTMLButtonElement>('#tc-list')!.onclick = () => { this.showList = !this.showList; this.render(); };
+    this.card.querySelectorAll<HTMLButtonElement>('.tc-list button').forEach((b) => (b.onclick = () => this.jump(+b.dataset.i!)));
   }
   private tick() {
-    const s = this.steps[this.idx]; if (!s.check) return;
+    const s = this.steps[this.idx]; if (!s.check || this.busy) return;
     const ok = s.check();
     const shown = this.card.querySelector('.tc-state')?.classList.contains('ok');
     if (ok !== shown) this.render();

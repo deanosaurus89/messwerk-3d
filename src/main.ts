@@ -1114,21 +1114,64 @@ const isLeft = (f: FeatureView) => f.type === 'Ebene' && Math.abs(f.measured!.no
 const isHole = (f: FeatureView) => f.type === 'Zylinder' && Math.abs(f.measured!.diameter! - 12.08) < 0.3;
 const pv = (pred: (m: FitResult) => boolean) => () => !!state.preview && pred(state.preview.fit);
 const tab = (t: string) => () => (document.querySelector(`.tab[data-tab="${t}"]`) as HTMLButtonElement)?.click();
+// ---- Automatik für übersprungene Schritte
+/** Nächstes Dreieck zu p, dessen Normale ungefähr n entspricht (für automatisch erzeugte Merkmale). */
+function hitAt(p: Vec3, n: Vec3): Hit | null {
+  const g = viewer.model?.geometry; if (!g?.index) return null;
+  const P = g.getAttribute('position').array as Float32Array, I = g.index.array as Uint32Array;
+  let best = -1, bd = Infinity, bn: Vec3 = [0, 0, 1];
+  for (let t = 0; t < I.length / 3; t++) {
+    const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+    const cx = (P[a] + P[b] + P[c]) / 3, cy = (P[a + 1] + P[b + 1] + P[c + 1]) / 3, cz = (P[a + 2] + P[b + 2] + P[c + 2]) / 3;
+    const d = (cx - p[0]) ** 2 + (cy - p[1]) ** 2 + (cz - p[2]) ** 2; if (d >= bd) continue;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
+    if (nx * n[0] + ny * n[1] + nz * n[2] < 0.7) continue;
+    bd = d; best = t; bn = [nx, ny, nz];
+  }
+  return best < 0 ? null : { tri: best, point: [p[0], p[1], p[2]], normal: bn };
+}
+async function ensureSample() {
+  if (state.data?.name.startsWith('beispielteil')) return;
+  if (!samples) samples = await (await fetch('./samples/index.json')).json();
+  await loadSample(samples!.find((s) => s.key === 'beispielteil')!);
+}
+async function ensurePreview(type: GeomType, p: Vec3, n: Vec3, pred: (f: FeatureView) => boolean) {
+  await ensureSample(); if (findF(pred)) return;
+  tab('merkmale')(); if (state.mode?.kind !== 'fit' || state.mode.type !== type) startFitMode(type);
+  const h = hitAt(p, n); if (h) await previewByClick(h);
+}
+async function ensureFeature(type: GeomType, p: Vec3, n: Vec3, pred: (f: FeatureView) => boolean) {
+  await ensureSample(); if (findF(pred)) return;
+  if (!(state.preview && state.preview.fit.type === type)) await ensurePreview(type, p, n, pred);
+  if (state.preview) commitPreview();
+}
+const TRAIN_FEATS: Record<string, [GeomType, Vec3, Vec3]> = { A: ['Ebene', [70, 50, 20], [0, 0, 1]], B: ['Ebene', [50, 0, 10], [0, -1, 0]], C: ['Ebene', [0, 30, 10], [-1, 0, 0]], H: ['Zylinder', [20, 26.04, 15], [0, -1, 0]] };
+async function ensureDatum(letter: string, pred: (f: FeatureView) => boolean) {
+  const [t, p, n] = TRAIN_FEATS[letter]; await ensureFeature(t, p, n, pred);
+  const f = findF(pred); if (f && f.datum !== letter) setDatum(f, letter);
+}
+async function ensurePosition() {
+  await ensureDatum('A', isTop); await ensureDatum('B', isFront); await ensureDatum('C', isLeft);
+  const [t, p, n] = TRAIN_FEATS.H; await ensureFeature(t, p, n, isHole);
+  const f = findF(isHole)!; if (!state.controls.some((c) => c.kind === 'Position' && c.featureIds[0] === f.id)) toggleControl('Position', f.id, true);
+}
 function datumSteps(letter: string, pred: (f: FeatureView) => boolean, what: string): TourStep {
   return {
+    auto: () => ensureDatum(letter, pred),
     title: `Bezug ${letter} zuweisen`, text: `${what} ist ausgewählt. Wähle im Dialog unter <b>Bezug</b> den Buchstaben <b>${letter}</b> und tippe auf <b>Bezug zuweisen</b>.`,
     target: () => document.querySelector('#dt-box'),
     enter: () => { const f = findF(pred); if (f) { state.sel = [f.id]; state.mode = null; renderAll(); } if (isPhone()) togglePanel('dialog', true); setTimeout(() => { const s = document.querySelector<HTMLSelectElement>('#dt-letter'); if (s && !findF(pred)?.datum) s.value = letter; }, 50); },
     check: () => findF(pred)?.datum === letter,
   };
 }
-function planeSteps(name: string, p: Vec3, dir: [number, number, number] | null, pred: (f: FeatureView) => boolean, nPred: (m: FitResult) => boolean): TourStep[] {
+function planeSteps(name: string, p: Vec3, dir: [number, number, number] | null, pred: (f: FeatureView) => boolean, nPred: (m: FitResult) => boolean, n: Vec3 = [0, 0, 1]): TourStep[] {
   return [
-    { title: `${name} antippen`, text: `Modus <b>Ebene</b> ist aktiv. Tippe auf die markierte Stelle (gelber Ring) – die <b>${name}</b> des Teils. Es erscheint eine orange Vorschau.`,
+    { auto: () => ensurePreview('Ebene', p, n, pred), title: `${name} antippen`, text: `Modus <b>Ebene</b> ist aktiv. Tippe auf die markierte Stelle (gelber Ring) – die <b>${name}</b> des Teils. Es erscheint eine orange Vorschau.`,
       world: () => worldToScreen(p),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); if (state.mode?.kind !== 'fit' || state.mode.type !== 'Ebene') startFitMode('Ebene'); dir ? viewer.viewDir(dir) : viewer.view('iso'); },
       check: () => !!findF(pred) || pv(nPred)() },
-    { title: 'Erzeugen', text: 'Prüfe die Kennwerte (Punkte, RMS, Ebenheit) und tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(pred) },
+    { auto: () => ensureFeature('Ebene', p, n, pred), title: 'Erzeugen', text: 'Prüfe die Kennwerte (Punkte, RMS, Ebenheit) und tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(pred) },
   ];
 }
 function startTraining() {
@@ -1137,26 +1180,26 @@ function startTraining() {
   const steps: TourStep[] = [
     { title: 'Training: Bezüge & Position', text: 'In dieser geführten Übung legst du am Beispielteil das Bezugssystem <b>A|B|C</b> fest (Oberseite, Vorderseite, linke Seite) und prüfst die <b>Position</b> der Bohrung Ø12 mit Bezug auf A|B|C.<br>Jeder Schritt wird automatisch geprüft. Mit <b>Weiter</b> geht es los.' },
     { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b> – im Training wird direkt das Standard-Beispielteil geladen. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
-      target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
-      check: () => loadCount > lc0 && !!state.data?.name.startsWith('beispielteil') },
-    { title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
-    { title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => state.mode?.kind === 'fit' && state.mode.type === 'Ebene' },
+      auto: ensureSample, target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
+      check: () => (loadCount > lc0 || state.features.length > 0) && !!state.data?.name.startsWith('beispielteil') },
+    { auto: async () => tab('merkmale')(), title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
+    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Ebene'); }, title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Ebene') || !!findF(isTop) },
     ...planeSteps('Oberseite', [70, 50, 20], null, isTop, (m) => m.type === 'Ebene' && m.normal[2] > 0.99),
     datumSteps('A', isTop, 'Die Oberseite (primärer Bezug: legt die Orientierung fest)'),
-    ...planeSteps('Vorderseite', [50, 0, 10], null, isFront, (m) => m.type === 'Ebene' && Math.abs(m.normal[1]) > 0.99),
+    ...planeSteps('Vorderseite', [50, 0, 10], null, isFront, (m) => m.type === 'Ebene' && Math.abs(m.normal[1]) > 0.99, [0, -1, 0]),
     datumSteps('B', isFront, 'Die Vorderseite (sekundärer Bezug: Richtung in A und Ursprung in Y)'),
-    ...planeSteps('linke Seite', [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99),
+    ...planeSteps('linke Seite', [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99, [-1, 0, 0]),
     datumSteps('C', isLeft, 'Die linke Seite (tertiärer Bezug: Ursprung in X)'),
-    { title: 'Merkmalstyp Zylinder', text: 'Wähle im Register Merkmale den Typ <b>Zylinder</b>.', target: () => document.querySelector('[data-ftype="Zylinder"]'),
+    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Zylinder'); }, title: 'Merkmalstyp Zylinder', text: 'Wähle im Register Merkmale den Typ <b>Zylinder</b>.', target: () => document.querySelector('[data-ftype="Zylinder"]'),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); viewer.view('iso'); }, check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Zylinder') || !!findF(isHole) },
-    { title: 'Bohrung Ø12 antippen', text: 'Tippe auf die <b>Wand der Bohrung</b> (gelber Ring).', world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
+    { auto: () => ensurePreview('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Bohrung Ø12 antippen', text: 'Tippe auf die <b>Wand der Bohrung</b> (gelber Ring).', world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
       check: () => !!findF(isHole) || pv((m) => m.type === 'Zylinder' && Math.abs(m.diameter! - 12.08) < 0.3)() },
-    { title: 'Erzeugen', text: 'Tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(isHole) },
-    { title: 'Positionstoleranz ⌖ A|B|C', text: 'Im Fenster <b>Prüfmerkmale</b> (Katalog) unter „Mit Bezug“ den Haken bei <b>⌖ Position</b> setzen. Die Bezüge A|B|C werden automatisch eingetragen.',
+    { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Erzeugen', text: 'Tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(isHole) },
+    { auto: ensurePosition, title: 'Positionstoleranz ⌖ A|B|C', text: 'Im Fenster <b>Prüfmerkmale</b> (Katalog) unter „Mit Bezug“ den Haken bei <b>⌖ Position</b> setzen. Die Bezüge A|B|C werden automatisch eingetragen.',
       target: () => document.querySelector('#catalog .cat-item[data-kind="Position"]'),
       enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.addFeat = f.id; state.ctab = 'katalog'; state.mode = null; renderAll(); } if (isPhone()) togglePanel('table', true); },
       check: () => { const f = findF(isHole); const fm = featMap(); return !!f && state.controls.some((c) => c.kind === 'Position' && c.featureIds[0] === f.id && datumText(c, fm) === 'A|B|C'); } },
-    { title: 'Sollmaße [X] [Y] und Toleranz', text: 'Trage die theoretisch genauen Maße <b>[X] = 20</b> und <b>[Y] = 20</b> ein (bereits vorbelegt, bitte prüfen) und lasse die Toleranz <b>Ø 0,1</b>. Ergebnis: IO/NIO und Eintrag im 3D-Label.',
+    { auto: async () => { await ensurePosition(); const f = findF(isHole)!; const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f.id)!; c.basic = [20, 20, c.basic?.[2] ?? 0]; renderAll(); }, title: 'Sollmaße [X] [Y] und Toleranz', text: 'Trage die theoretisch genauen Maße <b>[X] = 20</b> und <b>[Y] = 20</b> ein (bereits vorbelegt, bitte prüfen) und lasse die Toleranz <b>Ø 0,1</b>. Ergebnis: IO/NIO und Eintrag im 3D-Label.',
       target: () => document.querySelector('#catalog .cat-item[data-kind="Position"] .cat-ed'),
       check: () => { const f = findF(isHole); const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f?.id); return !!c && Math.abs((c.basic?.[0] ?? 0) - 20) < 1e-6 && Math.abs((c.basic?.[1] ?? 0) - 20) < 1e-6; } },
     { title: 'Geschafft! 🎉', text: 'Die Bohrung ist jetzt mit <b>⌖ Ø0,1 | A | B | C</b> toleriert. Die Bezugsfahnen stehen im Baum und in den 3D-Labels. Bezüge lassen sich im Dialog umbenennen (Buchstaben tauschen) oder entfernen – abhängige Prüfmerkmale werden dann markiert.',
