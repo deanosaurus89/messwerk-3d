@@ -32,17 +32,14 @@
     <div class="panel hidden" data-tab="merkmale">
       <div class="group"><div class="btns" id="feat-type-btns"></div><div class="glabel">Merkmal erstellen (Klick auf das Netz)</div></div>
       <div class="group"><div class="btns">
+        <button class="big" id="btn-distance" data-ftype="Abstand"><span class="ico" id="ico-dist"></span>Abstand</button>
+      </div><div class="glabel">Konstruieren</div></div>
+      <div class="group"><div class="btns">
         <button class="big" id="btn-delete-feat"><span class="ico">✕</span>Löschen</button>
       </div><div class="glabel">Bearbeiten</div></div>
     </div>
     <div class="panel hidden" data-tab="pruef">
-      <div class="group"><div class="btns" id="ctrl-btns"></div><div class="glabel">Prüfmerkmal am gewählten Merkmal</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" data-dist="Abstand 3D"><span class="ico">↔</span>Abstand 3D</button>
-        <button class="big" data-dist="Abstand X"><span class="ico">X</span>Abstand X</button>
-        <button class="big" data-dist="Abstand Y"><span class="ico">Y</span>Abstand Y</button>
-        <button class="big" data-dist="Abstand Z"><span class="ico">Z</span>Abstand Z</button>
-      </div><div class="glabel">Abstand (2 Merkmale wählen, Strg/⌘ oder Mehrfachauswahl)</div></div>
+      <div class="group"><div class="btns" id="ctrl-btns"></div><div class="glabel">Prüfmerkmal zum gewählten Merkmal hinzufügen</div></div>
     </div>
     <div class="panel hidden" data-tab="ansicht">
       <div class="group"><div class="btns">
@@ -65,8 +62,9 @@
     <div id="center">
       <div id="scene"><div id="viewcube">
         <button data-view="+Z">Oben</button><button data-view="-Y">Vorne</button><button data-view="+X">Rechts</button><button data-view="iso">Iso</button>
-      </div><div id="hint"></div><div id="busy" class="hidden">Berechne …</div></div>
-      <div id="table-pane"><div class="pane-title">Prüfmerkmal-Tabelle <span id="summary"></span></div>
+      </div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
+      <div id="table-pane"><div class="pane-title">Prüfmerkmal-Liste <span id="summary"></span></div>
+        <div id="ctrl-add"><select id="ca-feat"></select><select id="ca-kind"></select><button class="btn primary" id="ca-add">＋ Prüfmerkmal</button></div>
         <div id="table-wrap"><table id="ctrl-table"><thead><tr>
           <th>Merkmal</th><th>Prüfmerkmal</th><th>Soll</th><th>Ist</th><th>Abw.</th><th>Tol +</th><th>Tol −</th><th>Status</th><th></th>
         </tr></thead><tbody></tbody></table></div></div>

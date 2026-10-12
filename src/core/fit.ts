@@ -1,7 +1,7 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Punkt';
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Punkt' | 'Abstand';
 export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
@@ -18,14 +18,23 @@ export interface FitResult {
   apex?: Vec3;
   rms: number;           // Standardabweichung der orth. Abstände
   form: number;          // Formabweichung max-min
+  maxPos: number;        // größte positive Abweichung (außerhalb Material bzw. vom Mittel weg)
+  maxNeg: number;        // größte negative Abweichung
   n: number;             // Anzahl verwendeter Punkte
+  outliers?: number;     // vom robusten Fit verworfene Punkte
+  // nur Abstand
+  distance?: number;
+  delta?: Vec3;          // p2 - p1
+  p1?: Vec3; p2?: Vec3;
+  rule?: string;
   residuals?: Float64Array;
 }
 
 const stats = (res: Float64Array) => {
   let s = 0, mn = Infinity, mx = -Infinity;
   for (const r of res) { s += r * r; if (r < mn) mn = r; if (r > mx) mx = r; }
-  return { rms: res.length ? Math.sqrt(s / res.length) : 0, form: res.length ? mx - mn : 0, n: res.length };
+  const k = res.length > 0;
+  return { rms: k ? Math.sqrt(s / res.length) : 0, form: k ? mx - mn : 0, maxPos: k ? mx : 0, maxNeg: k ? mn : 0, n: res.length };
 };
 
 export function centroid(p: Vec3[]): Vec3 {
@@ -266,16 +275,20 @@ export function fitPoint(p: Vec3[], nrm?: Vec3[]): FitResult {
 
 // ---------------------------------------------------------------- Robust + Auto
 function robust(fit: (p: Vec3[], n: Vec3[]) => FitResult, p: Vec3[], n: Vec3[], k = 3): FitResult {
-  let r = fit(p, n);
-  const res = r.residuals!;
-  const abs = Array.from(res, Math.abs).sort((a, b) => a - b);
-  const mad = 1.4826 * abs[Math.floor(abs.length / 2)];
-  const thr = Math.max(k * mad, 1e-9);
-  const keep: number[] = [];
-  res.forEach((v, i) => { if (Math.abs(v) <= thr) keep.push(i); });
-  if (keep.length < p.length && keep.length > 10) {
-    r = fit(keep.map((i) => p[i]), keep.map((i) => n[i]));
+  // Iterativ: Fit, Ausreißer > k·σ (σ robust aus MAD) entfernen, neu fitten – bis stabil (max. 3 Runden).
+  let r = fit(p, n), P = p, N = n;
+  for (let iter = 0; iter < 3; iter++) {
+    const res = r.residuals!;
+    const abs = Array.from(res, Math.abs).sort((a, b) => a - b);
+    const sigma = 1.4826 * abs[Math.floor(abs.length / 2)];
+    const thr = Math.max(k * sigma, 1e-9);
+    const keep: number[] = [];
+    res.forEach((v, i) => { if (Math.abs(v) <= thr) keep.push(i); });
+    if (keep.length === P.length || keep.length < 10) break;
+    P = keep.map((i) => P[i]); N = N.length ? keep.map((i) => N[i]) : N;
+    r = fit(P, N);
   }
+  r.outliers = p.length - P.length;
   return r;
 }
 
@@ -295,6 +308,7 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit = true):
       case 'Langloch': return fitSlot(pp, axisFromNormals(nn).axis);
       case 'Kegel': return fitCone(pp, nn);
       case 'Punkt': return fitPoint(pp, nn);
+      default: throw new Error('Typ nicht fitbar: ' + type);
     }
   };
   return robustFit && type !== 'Punkt' ? robust(run, p, n) : run(p, n);
@@ -307,7 +321,12 @@ export function autoFit(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: Fi
   const cands: FitResult[] = [];
   const tryFit = (t: GeomType) => { try { cands.push(fitType(t, p, n)); } catch { /* ignorieren */ } };
   tryFit('Ebene');
-  // Ebene mit sehr kleiner Streuung der Normalen sofort akzeptieren
+  // Ebene: wenn (fast) alle Normalen innerhalb 3° um die Ebenennormale liegen, sofort akzeptieren
+  if (cands[0] && n.length) {
+    const pn = cands[0].normal; let inside = 0;
+    for (const q of n) if (Math.abs(dot(q, pn)) > Math.cos(3 * Math.PI / 180)) inside++;
+    if (inside > 0.95 * n.length) return { best: cands[0], candidates: cands };
+  }
   const nAx = axisFromNormals(n);
   const nCen = axisFromNormals(n, true);
   tryFit('Kugel'); tryFit('Zylinder'); tryFit('Kegel');

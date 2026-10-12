@@ -189,5 +189,35 @@ export class Viewer {
     dot.position.copy(c); dot.renderOrder = 6; this.prims.add(dot);
   }
 
+  /** Abstand: Linie p1→p2, gestrichelte X/Y/Z-Komponenten, Beschriftung. */
+  addDistance(p1: number[], p2: number[], label: string, color: number, selected: boolean) {
+    const a = new THREE.Vector3(...p1), b = new THREE.Vector3(...p2);
+    const main = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 1, this.radius / (selected ? 260 : 400), 6), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+    main.renderOrder = 7; this.prims.add(main);
+    const cx = new THREE.Vector3(b.x, a.y, a.z), cy = new THREE.Vector3(b.x, b.y, a.z);
+    const legs: [THREE.Vector3, THREE.Vector3, number][] = [[a, cx, 0xd32f2f], [cx, cy, 0x2e9d3a], [cy, b, 0x1f5fa8]];
+    for (const [u, v, c] of legs) {
+      if (u.distanceTo(v) < 1e-6) continue;
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([u, v]),
+        new THREE.LineDashedMaterial({ color: c, dashSize: this.radius / 80, gapSize: this.radius / 120, depthTest: false }));
+      l.computeLineDistances(); l.renderOrder = 6; this.prims.add(l);
+    }
+    for (const p of [a, b]) {
+      const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 160, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      d.position.copy(p); d.renderOrder = 8; this.prims.add(d);
+    }
+    // Beschriftung als Sprite
+    const cv = document.createElement('canvas'), g = cv.getContext('2d')!;
+    g.font = 'bold 34px system-ui, sans-serif';
+    const w = Math.ceil(g.measureText(label).width) + 24; cv.width = w; cv.height = 52;
+    g.font = 'bold 34px system-ui, sans-serif';
+    g.fillStyle = selected ? 'rgba(31,95,168,.92)' : 'rgba(30,40,55,.85)'; g.fillRect(0, 0, w, 52);
+    g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(label, 12, 27);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, sizeAttenuation: false }));
+    const h = 0.028; sp.scale.set((h * w) / 52, h, 1);
+    sp.center.set(0, -0.3); // Beschriftung neben/über der Linienmitte, Linie bleibt sichtbar
+    sp.position.copy(a).add(b).multiplyScalar(0.5); sp.renderOrder = 9; this.prims.add(sp);
+  }
+
   snapshot(): string { return this.renderer.domElement.toDataURL('image/png'); }
 }

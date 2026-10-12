@@ -20,5 +20,7 @@ export const ICON: Record<string, string> = {
   Breite: s('<path d="M12 3v18M8 3h8M8 21h8"/>'),
   Kegelwinkel: s('<path d="M4 20 L12 4 L20 20"/><path d="M8 13a6 6 0 0 0 8 0"/>'),
   Form: s('<path d="M3 14c3-5 5 3 9-2s5 3 9-2"/><path d="M3 18h18" stroke-dasharray="2 2"/>'),
+  ist: s('<path d="M5 19 L5 5 M5 19 L19 19"/><path d="M8 15l3-4 3 2 4-6"/>'),
+  soll: s('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/>'),
   'Abstand 3D': s('<path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"/>'),
 };

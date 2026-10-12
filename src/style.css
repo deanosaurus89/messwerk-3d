@@ -96,3 +96,27 @@ td.dev.IO { color:var(--io); font-weight:600; } td.dev.NIO { color:var(--nio); f
   td input { width:58px; }
 }
 #viewcube, #hint, #busy { z-index:5; }
+
+#ctrl-add { display:flex; gap:6px; padding:5px 8px; border-bottom:1px solid var(--line); align-items:center; flex-wrap:wrap; }
+#ctrl-add select { font:inherit; padding:4px; border:1px solid #c5ced8; border-radius:3px; max-width:200px; }
+#ctrl-add .btn { margin:0; padding:4px 10px; }
+#preview-card { position:absolute; left:10px; bottom:10px; z-index:6; background:rgba(255,255,255,.96); border:1px solid #9fb2c8; border-radius:6px;
+  box-shadow:0 4px 14px rgba(0,0,0,.25); padding:8px 10px; width:290px; font-size:12.5px; }
+#preview-card .pc-head { display:flex; align-items:center; gap:6px; font-weight:600; font-size:14px; }
+#preview-card .pc-head svg { width:20px; height:20px; }
+#preview-card .pc-n { font-size:22px; font-weight:700; color:var(--acc); margin:2px 0; }
+#preview-card .kv { grid-template-columns: 110px 1fr; }
+#preview-card .pc-btns { display:flex; gap:6px; margin-top:6px; } #preview-card .pc-btns .btn { flex:1; margin:0; padding:7px 6px; }
+#preview-card select { font:inherit; padding:3px; }
+#toast { position:absolute; left:50%; top:10px; transform:translateX(-50%); z-index:7; background:#1a9b3c; color:#fff; padding:7px 14px; border-radius:5px; font-weight:600; box-shadow:0 3px 10px rgba(0,0,0,.25); }
+.node.flash { animation: flash 1.6s ease; } @keyframes flash { 0%,40% { background:#ffe58a; } 100% { background:#cfe0f5; } }
+.node .sub { color:#5b6875; }
+.dist-slot { border:2px solid #c5ced8; border-radius:4px; padding:5px; margin:4px 0; cursor:pointer; }
+.dist-slot.active { border-color:var(--acc); background:var(--acc2); }
+@media (max-width: 900px), (max-height: 560px) {
+  #preview-card { left:6px; right:6px; bottom:6px; width:auto; padding:6px 8px; font-size:12px; }
+  #preview-card .kv { grid-template-columns: repeat(4, auto); gap:1px 6px; }
+  #preview-card .pc-n { font-size:18px; }
+  #hint { bottom:auto; top:46px; left:6px; }
+}
+@media (max-height: 560px) { #preview-card { left:auto; right:6px; width:330px; top:6px; bottom:auto; max-height:calc(100% - 12px); overflow:auto; } #hint { display:none; } }

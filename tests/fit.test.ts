@@ -72,3 +72,23 @@ describe('Automatische Typerkennung', () => {
   ];
   for (const [t, gen] of cases) it(t, () => { const { P, N } = gen(); expect(autoFit(P, N).best.type).toBe(t); });
 });
+
+describe('Abstand', () => {
+  it('Regeln Mittelpunkt/Ebene', async () => {
+    const { computeDistance } = await import('../src/core/features');
+    const base = { rms: 0, form: 0, maxPos: 0, maxNeg: 0, n: 0 };
+    const pl = { ...base, type: 'Ebene' as const, center: [0, 0, 0] as any, normal: [0, 0, 1] as any };
+    const c1 = { ...base, type: 'Zylinder' as const, center: [10, 5, 7] as any, normal: [0, 0, 1] as any };
+    const c2 = { ...base, type: 'Kugel' as const, center: [13, 9, 7] as any, normal: [0, 0, 1] as any };
+    expect(computeDistance(c1, c2).distance).toBeCloseTo(5);
+    const d = computeDistance(pl, c1);
+    expect(d.distance).toBeCloseTo(7); expect(d.p1).toEqual([10, 5, 0]);
+    expect(computeDistance(c1, pl).delta![2]).toBeCloseTo(-7);
+  });
+  it('Max. +/- Abweichung', () => {
+    const { P } = S.plane([0, 0, 0], [0, 0, 1], 10, 500, 0.01);
+    const f = fitPlane(P);
+    expect(f.maxPos).toBeGreaterThan(0); expect(f.maxNeg).toBeLessThan(0);
+    expect(f.form).toBeCloseTo(f.maxPos - f.maxNeg, 9);
+  });
+});

@@ -40,13 +40,21 @@ node e2e/ui-check.mjs   # Browser-Test der dist/-Version (Playwright + Chrome)
 3. **Merkmale** → Typ wählen: *Automatisch* oder fest *Ebene, Kreis, Zylinder, Langloch, Kegel, Kugel, Punkt*.
    - **Klick + Wachstum:** auf die Fläche tippen. Vom Klickpunkt aus wachsen die Dreiecke, solange der Normalenwinkel
      zwischen Nachbarn unter dem Grenzwert liegt (Standard 20°); optional mit Suchradius. Kanten beenden das Wachstum.
-   - **Pinsel:** Bereich überstreichen (während des Malens ist die Navigation pausiert), dann **Erstellen**.
-   - Das Merkmal erscheint in der Baumansicht (Objekte › Merkmale), die verwendeten Punkte werden eingefärbt, die gefittete Geometrie gezeichnet.
-4. Dialogbereich: Ist-Komponente (Mittelpunkt XYZ, Orientierung IJK, Durchmesser/Radius, Länge/Breite, Kegelwinkel,
-   Formabweichung, Standardabweichung, Punktanzahl), RMS je Kandidatentyp der Erkennung, **Typ ändern → Neu fitten**.
-5. **Prüfmerkmale**: je Merkmal Durchmesser, Radius, X/Y/Z, Länge/Breite, Kegelwinkel, Form (Ebenheit, Rundheit, Zylindrizität …).
-   **Abstand X/Y/Z/3D**: erstes Merkmal wählen, Abstand anklicken, dann zweites Merkmal in der Baumansicht wählen.
-6. **Prüfmerkmal-Tabelle** unten: Soll, Tol +, Tol − direkt eintragen (Komma oder Punkt). Abweichung und IO/NIO werden sofort berechnet und grün/rot markiert.
+   - **Pinsel:** Bereich überstreichen (während des Malens ist die Navigation pausiert), dann **Fitten**.
+   - Es erscheint zunächst eine **Vorschau** (Punkte + Geometrie orange) mit Kennwerten: erkannter Typ, Anzahl Punkte,
+     Standardabweichung, Formabweichung (Ebenheit, Rundheit, Zylindrizität, Kugelform, Kegelform, Profil), Max. +/−,
+     entfernte Ausreißer, Hauptmaße. Typ kann in der Vorschau überschrieben werden (Neuberechnung).
+   - **Erzeugen** (oder Enter) legt das Merkmal an (Meldung + Markierung im Baum), **Verwerfen** (oder Esc) verwirft.
+4. **Baumansicht** zeigt nur Objekte: Daten und Merkmale; unter jedem Merkmal nur seine Komponenten **Ist** (gemessen)
+   und später **Soll** (Nominal). Prüfmerkmale stehen bewusst nicht im Baum.
+5. **Abstand** (Register Merkmale › Konstruieren): zwei Merkmale über Dropdown, Baumansicht oder Antippen im 3D-Bild wählen,
+   Vorschau prüfen, Erzeugen. Darstellung: Linie, gestrichelte X/Y/Z-Komponenten (rot/grün/blau) und Beschriftung.
+   **Regel:** Mittelpunkt–Mittelpunkt; ist eine Ebene beteiligt, wird der Mittelpunkt des anderen Merkmals senkrecht auf die
+   Ebene projiziert (Punkt-Ebene-Abstand; bei Ebene–Ebene: Mittelpunkt von B auf Ebene A). X/Y/Z sind die Beträge der Komponenten.
+   Abstände werden neu berechnet, wenn ein Bezugsmerkmal neu gefittet wird, und mitgelöscht, wenn es gelöscht wird.
+6. **Prüfmerkmal-Liste** (unten bzw. „Tabelle“ am Telefon): Merkmal + Prüfmerkmal wählen, **＋ Prüfmerkmal**. Verfügbar je Typ:
+   Durchmesser, Radius, X/Y/Z, Länge/Breite, Kegelwinkel, Form; bei Abständen Abstand 3D/X/Y/Z. Es werden keine Prüfmerkmale
+   automatisch angelegt. Soll, Tol +, Tol − eintragen (Komma oder Punkt) → Abweichung und IO/NIO (grün/rot).
 7. **Start → Tabelle CSV / Merkmale CSV** (Semikolon, Dezimalkomma, für Excel).
 
 Tasten: `Esc` beendet den Erstellmodus, `Entf` löscht die Auswahl.
@@ -62,7 +70,7 @@ Tasten: `Esc` beendet den Erstellmodus, `Entf` löscht die Auswahl.
 | Langloch | Projektion der Wandpunkte in die Ebene ⟂ Achse, Stadion-Kontur (Mittelpunkt, Winkel, halbe Länge, Radius) per LM |
 | Punkt | Schwerpunkt der Auswahl |
 
-Alle Fits robust: nach dem ersten Fit werden Punkte mit |Residuum| > 3·σ (σ aus MAD) entfernt und neu gefittet.
+Alle Fits robust: Punkte mit |Residuum| > 3·σ (σ aus MAD) werden iterativ (bis zu 3 Runden) entfernt und neu gefittet. Eine Region, deren Normalen zu > 95 % innerhalb 3° liegen, wird direkt als Ebene erkannt.
 **Automatische Erkennung:** Ebene, Kugel, Zylinder, Kegel und (bei prismatischen Normalen) Langloch werden gefittet; Plausibilitätsprüfungen
 (z. B. Radius < 3× Ausdehnung, Kegelwinkel 2°–80°); gewählt wird der einfachste Typ, dessen RMS höchstens 30 % über dem besten liegt.
 Ein sehr kurzer Zylinder (Höhe < ¼ Durchmesser) wird als Kreis ausgegeben.

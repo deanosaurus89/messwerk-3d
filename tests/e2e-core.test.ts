@@ -5,7 +5,7 @@ import { parseSTL } from '../src/core/io';
 import { MeshTopology, gather } from '../src/core/region';
 import { autoFit, fitType, GeomType } from '../src/core/fit';
 import type { Vec3 } from '../src/core/linalg';
-import { evaluate, Feature, Control } from '../src/core/features';
+import { evaluate, Feature, Control, computeDistance } from '../src/core/features';
 
 const buf = readFileSync(new URL('../public/samples/beispielteil.stl', import.meta.url));
 const mesh = parseSTL(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), 'beispielteil');
@@ -59,11 +59,16 @@ describe('E2E Beispielteil', () => {
     const f = extract([26.04, 20, 10], [-1, 0, 0], 'Kreis');
     expect(f.type).toBe('Kreis'); expect(f.diameter!).toBeCloseTo(12.08, 2);
   });
-  it('Prüfmerkmale IO/NIO und Abstand', () => {
+  it('Prüfmerkmale IO/NIO und Abstand als Merkmal', () => {
     const d: Control = { id: 1, kind: 'Durchmesser', featureIds: [1], nominal: 12, tolUp: 0.05, tolLo: -0.05 };
     expect(evaluate(d, feats).status).toBe('NIO');
-    const a: Control = { id: 2, kind: 'Abstand X', featureIds: [1, 4], nominal: 35, tolUp: 0.1, tolLo: -0.1 };
+    const dist = computeDistance(feats.get(1)!.measured!, feats.get(4)!.measured!);
+    feats.set(99, { id: 99, name: 'Abstand 1', type: 'Abstand', measured: dist, pointCount: 0, method: 'Konstruiert', refs: [1, 4] });
+    const a: Control = { id: 2, kind: 'Abstand X', featureIds: [99], nominal: 35, tolUp: 0.1, tolLo: -0.1 };
     const r = evaluate(a, feats);
     expect(r.measured!).toBeCloseTo(35.05, 1); expect(r.status).toBe('IO');
+    // Ebene (Oberseite z=20) zu Kugelmitte (z=17): Punkt-Ebene-Abstand 3
+    const pe = computeDistance(feats.get(0)!.measured!, feats.get(6)!.measured!);
+    expect(pe.distance!).toBeCloseTo(3, 2); expect(Math.abs(pe.delta![0])).toBeLessThan(1e-3);
   });
 });

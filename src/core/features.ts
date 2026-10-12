@@ -1,6 +1,6 @@
 // Merkmale (Features) und Prüfmerkmale (Controls). Erweiterbar um Soll-Komponente (CAD).
 import { FitResult, GeomType } from './fit';
-import { Vec3, sub } from './linalg';
+import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
 
 export interface Feature {
   id: number;
@@ -9,31 +9,28 @@ export interface Feature {
   measured?: FitResult;      // Ist-Komponente
   nominal?: FitResult;       // Soll-Komponente (spätere CAD-Erweiterung)
   pointCount: number;
-  method: 'Klick' | 'Pinsel';
+  method: 'Klick' | 'Pinsel' | 'Konstruiert';
+  refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
 }
 
 export type ControlKind =
   | 'Durchmesser' | 'Radius' | 'X' | 'Y' | 'Z' | 'Länge' | 'Breite' | 'Kegelwinkel'
-  | 'Form' | 'Abstand X' | 'Abstand Y' | 'Abstand Z' | 'Abstand 3D';
+  | 'Form' | 'Abstand 3D' | 'Abstand X' | 'Abstand Y' | 'Abstand Z';
 
 export interface Control {
   id: number;
   kind: ControlKind;
-  featureIds: number[];       // 1 Merkmal oder 2 bei Abstand
+  featureIds: number[];       // ein Merkmal (Abstände sind eigene Merkmale)
   nominal: number | null;     // Sollwert (von Hand)
   tolUp: number;
   tolLo: number;              // negativ, z. B. -0.1
 }
 
-export interface ControlResult {
-  measured: number | null;
-  deviation: number | null;
-  status: 'IO' | 'NIO' | '—';
-}
+export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; }
 
 export const FORM_NAME: Record<GeomType, string> = {
-  Ebene: 'Ebenheit', Kreis: 'Rundheit', Zylinder: 'Zylindrizität', Langloch: 'Profilform',
-  Kegel: 'Kegelform', Kugel: 'Kugelform', Punkt: 'Form',
+  Ebene: 'Ebenheit', Kreis: 'Rundheit', Zylinder: 'Zylindrizität', Langloch: 'Profil',
+  Kegel: 'Kegelform', Kugel: 'Kugelform', Punkt: 'Form', Abstand: 'Form',
 };
 
 export function controlLabel(c: Control, f?: Feature): string {
@@ -50,21 +47,32 @@ export function availableControls(t: GeomType): ControlKind[] {
     case 'Langloch': return ['Länge', 'Breite', ...pos, 'Form'];
     case 'Kegel': return ['Kegelwinkel', 'Durchmesser', ...pos, 'Form'];
     case 'Punkt': return pos;
-  }
-}
-
-export function defaultControls(t: GeomType): ControlKind[] {
-  switch (t) {
-    case 'Ebene': return ['Form'];
-    case 'Kreis': case 'Zylinder': return ['Durchmesser', 'X', 'Y'];
-    case 'Kugel': return ['Durchmesser', 'X', 'Y', 'Z'];
-    case 'Langloch': return ['Länge', 'Breite', 'X', 'Y'];
-    case 'Kegel': return ['Kegelwinkel', 'X', 'Y'];
-    case 'Punkt': return ['X', 'Y', 'Z'];
+    case 'Abstand': return ['Abstand 3D', 'Abstand X', 'Abstand Y', 'Abstand Z'];
   }
 }
 
 export const DEG = 180 / Math.PI;
+
+/**
+ * Abstand zwischen zwei Merkmalen (Ist). Regel:
+ *  - Ebene ↔ Ebene: Mittelpunkt von B senkrecht auf Ebene A projiziert (Punkt-Ebene-Abstand).
+ *  - Ebene ↔ anderes Merkmal: Mittelpunkt des anderen Merkmals senkrecht auf die Ebene (Punkt-Ebene).
+ *  - sonst: Mittelpunkt ↔ Mittelpunkt (bei Zylinder/Kegel/Kreis/Langloch liegt der Mittelpunkt auf der Achse).
+ * X/Y/Z sind die Beträge der Komponenten von p2 − p1 im Koordinatensystem des Bauteils.
+ */
+export function computeDistance(a: FitResult, b: FitResult): FitResult {
+  let p1: Vec3, p2: Vec3, rule: string;
+  const proj = (pl: FitResult, q: Vec3): Vec3 => sub(q, scale(pl.normal, dot(sub(q, pl.center), pl.normal)));
+  if (a.type === 'Ebene' && b.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'Punkt (B) – Ebene (A)'; }
+  else if (a.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'Punkt (B) – Ebene (A)'; }
+  else if (b.type === 'Ebene') { p1 = a.center; p2 = proj(b, a.center); rule = 'Punkt (A) – Ebene (B)'; }
+  else { p1 = a.center; p2 = b.center; rule = 'Mittelpunkt – Mittelpunkt'; }
+  const delta = sub(p2, p1), d = norm(delta);
+  return {
+    type: 'Abstand', center: scale(add(p1, p2), 0.5), normal: d > 0 ? unit(delta) : [0, 0, 1],
+    distance: d, delta, p1, p2, rule, rms: 0, form: 0, maxPos: 0, maxNeg: 0, n: 0,
+  };
+}
 
 export function measuredValue(c: Control, feats: Map<number, Feature>): number | null {
   const f = feats.get(c.featureIds[0])?.measured;
@@ -79,15 +87,10 @@ export function measuredValue(c: Control, feats: Map<number, Feature>): number |
     case 'Breite': return f.width ?? null;
     case 'Kegelwinkel': return f.halfAngle != null ? 2 * f.halfAngle * DEG : null;
     case 'Form': return f.form;
-    default: {
-      const g = feats.get(c.featureIds[1])?.measured;
-      if (!g) return null;
-      const d: Vec3 = sub(g.center, f.center);
-      if (c.kind === 'Abstand X') return Math.abs(d[0]);
-      if (c.kind === 'Abstand Y') return Math.abs(d[1]);
-      if (c.kind === 'Abstand Z') return Math.abs(d[2]);
-      return Math.hypot(d[0], d[1], d[2]);
-    }
+    case 'Abstand 3D': return f.distance ?? null;
+    case 'Abstand X': return f.delta ? Math.abs(f.delta[0]) : null;
+    case 'Abstand Y': return f.delta ? Math.abs(f.delta[1]) : null;
+    case 'Abstand Z': return f.delta ? Math.abs(f.delta[2]) : null;
   }
 }
 
@@ -106,26 +109,25 @@ export function defaultTolerance(kind: ControlKind): { nominal: number | null; u
   return { nominal: null, up: 0.1, lo: -0.1 };
 }
 
-const fmt = (v: number | null, d = 4) => (v == null ? '' : v.toFixed(d));
+const fmt = (v: number | null | undefined, d = 4) => (v == null ? '' : v.toFixed(d));
 
 /** CSV (Semikolon, deutsches Dezimalkomma) für Excel. */
 export function controlsCSV(controls: Control[], feats: Map<number, Feature>): string {
   const head = ['Merkmal', 'Prüfmerkmal', 'Soll', 'Ist', 'Abweichung', 'Tol +', 'Tol -', 'Status'];
   const rows = controls.map((c) => {
-    const r = evaluate(c, feats);
-    const names = c.featureIds.map((id) => feats.get(id)?.name ?? '?').join(' → ');
-    return [names, controlLabel(c, feats.get(c.featureIds[0])), fmt(c.nominal), fmt(r.measured), fmt(r.deviation),
+    const r = evaluate(c, feats), f = feats.get(c.featureIds[0]);
+    return [f?.name ?? '?', controlLabel(c, f), fmt(c.nominal), fmt(r.measured), fmt(r.deviation),
       fmt(c.tolUp), fmt(c.tolLo), r.status].map((s) => String(s).replace('.', ',').replace(/;/g, ','));
   });
   return '\ufeff' + [head, ...rows].map((r) => r.join(';')).join('\r\n') + '\r\n';
 }
 
 export function featureCSV(feats: Feature[]): string {
-  const head = ['Name', 'Typ', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Durchmesser', 'Länge', 'Breite', 'Kegelwinkel', 'Form', 'RMS', 'Punkte'];
+  const head = ['Name', 'Typ', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Durchmesser', 'Länge', 'Breite', 'Kegelwinkel', 'Abstand 3D', 'Form', 'RMS', 'Punkte'];
   const rows = feats.map((f) => {
     const m = f.measured!;
-    return [f.name, f.type, ...m.center.map((v) => fmt(v)), ...m.normal.map((v) => fmt(v, 6)), fmt(m.diameter ?? null),
-      fmt(m.length ?? null), fmt(m.width ?? null), fmt(m.halfAngle != null ? 2 * m.halfAngle * DEG : null), fmt(m.form), fmt(m.rms), String(f.pointCount)]
+    return [f.name, f.type, ...m.center.map((v) => fmt(v)), ...m.normal.map((v) => fmt(v, 6)), fmt(m.diameter),
+      fmt(m.length), fmt(m.width), fmt(m.halfAngle != null ? 2 * m.halfAngle * DEG : null), fmt(m.distance), fmt(m.form), fmt(m.rms), String(f.pointCount)]
       .map((s) => String(s).replace('.', ','));
   });
   return '\ufeff' + [head, ...rows].map((r) => r.join(';')).join('\r\n') + '\r\n';

@@ -29,17 +29,50 @@ async function run(browserType, devName, landscape, label) {
   // Tap auf Bohrungswand
   await page.evaluate(() => { const b = document.querySelector('[data-ftype="auto"]'); b.click(); });
   const xy = await page.evaluate(() => { const { viewer } = window.__app; viewer.view('iso'); const v = viewer.camera.position.clone().set(20, 26.04, 17).project(viewer.camera); const r = viewer.renderer.domElement.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; });
-  await page.touchscreen.tap(xy[0], xy[1]);
+  const tapWorld = async (p) => {
+    const xy = await page.evaluate((p) => { const { viewer } = window.__app; viewer.view('iso'); const v = viewer.camera.position.clone().set(...p).project(viewer.camera); const r = viewer.renderer.domElement.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; }, p);
+    await page.touchscreen.tap(xy[0], xy[1]);
+  };
+  await tapWorld([20, 26.04, 17]);
   let feat = null;
-  try { await page.waitForFunction(() => window.__app.state.features.length > 0, null, { timeout: 30000 });
-    feat = await page.evaluate(() => { const f = window.__app.state.features[0]; return `${f.type} D=${f.measured.diameter?.toFixed(4)}`; }); } catch {}
+  try {
+    await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 30000 });
+    if (await page.evaluate(() => window.__app.state.features.length)) throw new Error('sofort erzeugt');
+    if (!(await page.isVisible('#pc-create'))) throw new Error('Erzeugen-Knopf nicht sichtbar');
+    if (prefix) await page.screenshot({ path: `${prefix}${label}-vorschau.png` });
+    await page.tap('#pc-create');
+    await page.waitForFunction(() => window.__app.state.features.length > 0, null, { timeout: 10000 });
+    feat = await page.evaluate(() => { const f = window.__app.state.features[0]; return `${f.type} D=${f.measured.diameter?.toFixed(4)}`; });
+  } catch (e) { errs.push('Ablauf: ' + e.message); }
   await page.waitForTimeout(400);
   if (prefix) await page.screenshot({ path: `${prefix}${label}.png` });
-  if (prefix && label.includes('hochformat') && await page.isVisible('#mobile-bar')) {
-    await page.tap('#mobile-bar [data-panel="table"]'); await page.waitForTimeout(400);
-    await page.screenshot({ path: `${prefix}${label}-tabelle.png` });
-    await page.tap('#mobile-bar [data-panel="dialog"]'); await page.waitForTimeout(400);
-    await page.screenshot({ path: `${prefix}${label}-dialog.png` });
+  if (prefix && label.includes('hochformat') && feat) {
+    await tapWorld([55.05, 22, 26]);
+    await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 30000 });
+    await page.tap('#pc-create');
+    await page.evaluate(() => document.querySelector('.tab[data-tab="merkmale"]').click());
+    await page.tap('#btn-distance');
+    await page.waitForTimeout(400);
+    await page.selectOption('#d-a', { label: 'Zylinder 1' }); await page.selectOption('#d-b', { label: 'Zylinder 2' });
+    await page.waitForFunction(() => window.__app.state.preview?.fit.type === 'Abstand');
+    await page.tap('#pc-create');
+    await page.evaluate(() => window.__app.viewer.view('+Z'));
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${prefix}${label}-abstand.png` });
+    await page.tap('#mobile-bar [data-panel="tree"]'); await page.waitForTimeout(400);
+    await page.screenshot({ path: `${prefix}${label}-baum.png` });
+    await page.tap('#mobile-bar [data-panel="tree"]');
+    await page.tap('#mobile-bar [data-panel="table"]'); await page.waitForTimeout(300);
+    for (const [f, k, n] of [['Zylinder 1', 'Durchmesser', '12'], ['Abstand 1', 'Abstand X', '35'], ['Abstand 1', 'Abstand 3D', '40,1']]) {
+      await page.selectOption('#ca-feat', { label: f }); await page.selectOption('#ca-kind', { label: k }); await page.tap('#ca-add');
+      const inp = page.locator('#ctrl-table tbody tr').last().locator('td input').first(); await inp.fill(n); await inp.press('Enter');
+    }
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${prefix}${label}-liste.png` });
+    const st = await page.evaluate(() => [...document.querySelectorAll('#ctrl-table .st')].map((e) => e.textContent).join(','));
+    console.log('   Liste:', st);
+    if (st !== 'IO,IO,IO') errs.push('Liste unerwartet: ' + st);
+    const tree = await page.textContent('#tree'); if (/Durchmesser|Abstand X/.test(tree)) errs.push('Prüfmerkmale im Baum');
   }
   const ok = visible && feat?.startsWith('Zylinder') && !errs.length;
   if (!ok) failed = true;
