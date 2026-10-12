@@ -62,7 +62,7 @@ const PE_NAME: Record<PeTool, string> = { reduce: 'Dreiecksreduktion', subdiv: '
 const pe = {
   tool: null as PeTool | null,
   tol: 0.02, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
-  cmp: false, dev: null as Float32Array | null, devStats: null as null | { maxPos: number; maxNeg: number },
+  cmp: false, scale: 0, dev: null as Float32Array | null, devStats: null as null | { maxPos: number; maxNeg: number },
   undo: [] as { positions: Float32Array; indices: Uint32Array; label: string }[], edits: [] as string[],
   live: '', running: false, origTris: 0,
 };
@@ -295,6 +295,14 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
 modeBar.addEventListener('pointerdown', (e) => e.stopPropagation());
 function renderModeBar() {
+  if (state.data && pe.tool === 'erase') {
+    modeBar.className = 'brush';
+    modeBar.innerHTML = `<span class="mb-tool erase">✧ Magischer Radierer</span><label>r <input id="mb-rad" type="number" min="0.1" step="0.1" value="${pe.radius}" style="width:58px" inputmode="decimal"> mm</label>
+      <button data-a="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶</button><button data-a="pe-cmp" class="${pe.cmp ? 'on' : ''}">◐ Vergleich</button><button data-a="pe-exit">✕ Beenden</button>`;
+    modeBar.querySelector<HTMLInputElement>('#mb-rad')!.oninput = (e) => { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); if (v > 0) { pe.radius = v; const n = document.querySelector<HTMLInputElement>('#pe-rad-n'), r = document.querySelector<HTMLInputElement>('#pe-rad-r'); if (n) n.value = String(v); if (r) r.value = String(v); } };
+    modeBar.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a; if (a === 'pe-undo') peUndo(); else if (a === 'pe-cmp') peToggleCompare(); else peExit(); }));
+    return;
+  }
   const m = state.mode;
   if (!state.data || !m) { modeBar.className = 'hidden'; return; }
   let html = '';
@@ -594,6 +602,7 @@ function deleteSelected() {
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'INPUT') return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { e.preventDefault(); undoBrush(); return; }
+  if (e.key === 'Escape' && pe.tool) { peExit(); return; }
   if (e.key === 'Escape') {
     if (state.preview) discardPreview();
     else if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { if (state.brushCount) clearSelectionAll(); else setMethod('Klick'); }
@@ -1404,12 +1413,12 @@ document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.oncl
   state.mode = null; state.preview = null; clearBrush();
   pe.tool = t; if (t === 'erase') pe.radius = pe.radius || +(state.data.diag / 40).toFixed(1);
   viewer.controls.enabled = true; viewer.showCursor(null, 1);
-  renderAll(); if (isPhone()) togglePanel('dialog', true);
+  renderAll(); if (isPhone()) togglePanel('dialog', t !== 'erase'); // Radierer: Steuerung in der Modusleiste, 3D frei zum Tippen
 }));
 $('#btn-pe-cmp').onclick = () => peToggleCompare();
 $('#btn-pe-undo').onclick = () => peUndo();
 $('#btn-pe-reset').onclick = () => peResetOriginal();
-function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; viewer.showCursor(null, 1); renderAll(); }
+function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
 
 function renderPolyRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => b.classList.toggle('on', pe.tool === b.dataset.pe));
@@ -1451,7 +1460,8 @@ function renderPolyDialog(d: HTMLElement) {
     <div class="pe-live" id="pe-live">${pe.live || `Aktuell: <b>${tris.toLocaleString('de-DE')}</b> Dreiecke`}</div>
     <h4>Vergleich</h4>
     <div class="row"><button class="btn ${pe.cmp ? 'on' : ''}" id="pe-cmp">◐ Farbvergleich zum Original ${pe.cmp ? 'an' : 'aus'}</button></div>
-    ${pe.cmp && pe.devStats ? `<div class="row"><span class="note">Abweichung zum Original: +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm</span></div>` : ''}
+    ${pe.cmp && pe.devStats ? `<div class="row"><span class="note">Abweichung zum Original: +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm</span></div>
+      <div class="row"><label>Farbskala ±</label><input type="number" id="pe-scale" value="${pe.scale || ''}" placeholder="auto ${peScale().toFixed(3)}" min="0" step="0.001" inputmode="decimal"><span class="unit">mm</span></div>` : ''}
     <div class="row"><button class="btn" id="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶ Rückgängig</button><button class="btn" id="pe-reset" ${pe.undo.length ? '' : 'disabled'}>⟲ Original</button><button class="btn" id="pe-exit">Schließen</button></div>
     ${pe.edits.length ? `<p class="note">Verlauf: ${pe.edits.join(' → ')}</p>` : ''}
     <p class="note">Merkmale bleiben erhalten; ihre Punkte werden auf das bearbeitete Netz übertragen. Ist-Werte bei Bedarf in den Eigenschaften neu fitten.</p>`;
@@ -1467,6 +1477,7 @@ function renderPolyDialog(d: HTMLElement) {
     r.addEventListener('input', () => { pe.radius = +r.value; n.value = r.value; });
   }
   d.querySelector<HTMLSelectElement>('#pe-lv')?.addEventListener('change', (e) => { pe.levels = +(e.target as HTMLSelectElement).value; renderDialog(); });
+  d.querySelector<HTMLInputElement>('#pe-scale')?.addEventListener('change', (e) => { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); pe.scale = isFinite(v) && v > 0 ? v : 0; renderScene(); });
   d.querySelector('#pe-run')?.addEventListener('click', () => peRun());
   d.querySelector('#pe-cancel')?.addEventListener('click', () => { polyEngine.cancel(); });
   d.querySelector('#pe-cmp')?.addEventListener('click', () => peToggleCompare());
@@ -1558,11 +1569,18 @@ async function peResetOriginal() {
   pe.undo = []; await applyEditedMesh(o.positions, o.indices, null, false); pe.edits = []; pe.origTris = 0; renderAll();
   toast('Original-Polygonmodell wiederhergestellt.');
 }
+/** Farbskala ±: manuell oder automatisch = 99. Perzentil der geänderten Knoten (|d| > 0,1 µm), damit einzelne große Füllungen die Reduktions-Abweichungen nicht überdecken. */
+function peScale() {
+  if (pe.scale > 0) return pe.scale;
+  const a: number[] = []; for (const x of pe.dev!) { const v = Math.abs(x); if (v > 1e-4) a.push(v); }
+  if (!a.length) return 1e-3; a.sort((x, y) => x - y);
+  return Math.max(1e-3, a[Math.min(a.length - 1, Math.floor(0.99 * a.length))]);
+}
 /** Farbkarte über das ganze Netz; liefert true, wenn aktiv (dann keine Merkmalsfarben). */
 function paintPolyCompare(): boolean {
   if (!pe.cmp || !pe.dev || !viewer.colors || pe.dev.length !== viewer.colors.length / 3) return false;
   const all = new Uint32Array(pe.dev.length); for (let i = 0; i < all.length; i++) all[i] = i;
-  const s = pe.devStats!, r = Math.max(1e-3, Math.max(s.maxPos, -s.maxNeg));
+  const r = peScale();
   viewer.paintScalar(all, pe.dev, r);
   let el = document.getElementById('dev-legend');
   if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }

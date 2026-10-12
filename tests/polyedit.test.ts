@@ -1,5 +1,6 @@
 // Polygonbearbeitung: Toleranz der Reduktion/Unterteilung/Glättung, geschlossene Füllung des magischen Radierers.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+const log = (s: string) => { try { appendFileSync('/tmp/pe-numbers.txt', s + '\n'); } catch { /* */ } };
 import { describe, expect, it } from 'vitest';
 import { parseByName } from '../src/core/io';
 import { boundaryEdges, compareToOriginal, decimate, eraseAndFill, signedDistances, smooth, subdivide } from '../src/core/polyedit';
@@ -20,7 +21,7 @@ for (const key of ['pruefplatte', 'flansch', 'freiform']) {
         const t0 = performance.now();
         const r = decimate(orig, { tol });
         const dev = maxAbs(signedDistances(orig.positions, r).d);
-        console.log(`${key} tol=${tol}: ${r.before} -> ${r.after} Dreiecke (${(100 * r.after / r.before).toFixed(1)} %), max ${dev.toFixed(4)} mm, ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+        log(`${key} tol=${tol}: ${r.before} -> ${r.after} Dreiecke (${(100 * r.after / r.before).toFixed(1)} %), max ${dev.toFixed(4)} mm, ${((performance.now() - t0) / 1000).toFixed(1)} s`);
         expect(r.after).toBeLessThan(r.before);
         expect(dev).toBeLessThanOrEqual(tol * 1.0001 + 1e-6);
         expect(boundaryEdges(r.indices, r.positions.length / 3).count).toBe(boundaryEdges(orig.indices, orig.positions.length / 3).count);
@@ -49,7 +50,7 @@ describe('Unterteilung / Glättung / Radierer (Prüfplatte)', () => {
     const c = [P[3 * F[3 * best]], P[3 * F[3 * best] + 1], P[3 * F[3 * best] + 2]];
     const b0 = boundaryEdges(orig.indices, P.length / 3).count;
     const r = eraseAndFill(orig, c, 4, best, [0, 0, 1]);
-    console.log('Radierer', { removed: r.removed, added: r.added, loops: r.loops, skipped: r.skipped, center: c });
+    log('Radierer ' + JSON.stringify({ removed: r.removed, added: r.added, loops: r.loops, skipped: r.skipped, center: c }));
     expect(r.removed).toBeGreaterThan(20); expect(r.loops).toBe(1);
     expect(boundaryEdges(r.indices, r.positions.length / 3).count).toBe(b0);
     const cmp = compareToOriginal(r, orig);
