@@ -49,7 +49,7 @@ try {
     const n0 = await S(() => window.__app.state.features.length);
     if (!(await clickWorld(p))) { fail(`Zielpunkt ${p} nicht sichtbar`); continue; }
     await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 });
-    const pv = await S(() => { const p = window.__app.state.preview; return { type: p.fit.type, n: p.indices.length, d: p.fit.diameter, rms: p.fit.rms, form: p.fit.form }; });
+    const pv = await S(() => { const p = window.__app.state.preview; return { c: p.fit.center.map((v) => +v.toFixed(3)), len: p.fit.length, type: p.fit.type, n: p.indices.length, d: p.fit.diameter, rms: p.fit.rms, form: p.fit.form }; });
     const card = await page.textContent('#preview-card');
     const nAfterClick = await S(() => window.__app.state.features.length);
     if (nAfterClick !== n0) fail('Klick hat sofort ein Merkmal erzeugt');
@@ -72,7 +72,7 @@ try {
     await page.waitForFunction((n) => window.__app.state.features.length > n, n0, { timeout: 10000 });
     const sel = await S(() => { const s = window.__app.state; const f = s.features.at(-1); return { name: f.name, sel: s.sel[0] === f.id, node: !!document.querySelector(`#tree [data-fid="${f.id}"].sel`), toast: document.querySelector('#toast').textContent }; });
     if (!sel.sel || !sel.node || !sel.toast.includes(sel.name)) fail('Rückmeldung nach Erzeugen fehlt');
-    console.log(`${sel.name}: ${pv.n} Punkte, RMS ${pv.rms.toFixed(4)}, Form ${pv.form.toFixed(4)}${pv.d ? ', D ' + pv.d.toFixed(4) : ''}`);
+    console.log(`${sel.name}: ${pv.n} Punkte, RMS ${pv.rms.toFixed(4)}, Form ${pv.form.toFixed(4)}${pv.d ? ', D ' + pv.d.toFixed(4) : ''} c=${pv.c} L=${pv.len?.toFixed(3)}`);
   }
   await page.keyboard.press('Escape');
   const ctrlCount = await S(() => window.__app.state.controls.length);
@@ -100,7 +100,7 @@ try {
   await addCtrl('Zylinder 3', 'Durchmesser', 16);
   await addCtrl('Kegel 1', 'Kegelwinkel', 61.93);
   await addCtrl('Kugel 1', 'Durchmesser', 14);
-  await addCtrl('Abstand 1', 'Abstand 3D', 40.1);
+  await addCtrl('Abstand 1', 'Abstand 3D', 39.8);
   await addCtrl('Abstand 1', 'Abstand X', 35);
   await addCtrl('Abstand 2', 'Abstand Z', 3);
   const tree = await page.textContent('#tree');

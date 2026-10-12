@@ -1,8 +1,8 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Punkt' | 'Abstand';
-export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Punkt'];
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Abstand';
+export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
 export interface FitResult {
@@ -15,6 +15,7 @@ export interface FitResult {
   width?: number;        // Langloch-Breite
   direction?: Vec3;      // Langloch-Längsrichtung
   halfAngle?: number;    // Kegel, rad
+  minorRadius?: number;  // Torus: Rohr-(Neben-)radius r (radius = Hauptradius R)
   apex?: Vec3;
   rms: number;           // Standardabweichung der orth. Abstände
   form: number;          // Formabweichung max-min
@@ -264,6 +265,50 @@ export function fitSlot(p: Vec3[], axis: Vec3): FitResult {
   return { type: 'Langloch', center, normal: n, direction: canonical(dir), radius: r, width: 2 * r, length: 2 * h + 2 * r, residuals: res, ...stats(res) };
 }
 
+// ---------------------------------------------------------------- Torus
+/** Torus: Mittelpunkt c, Achse a, Hauptradius R (Mitte–Rohrmitte), Nebenradius r (Rohr).
+ *  Start: Punkte um r entlang der Normalen verschieben -> liegen auf dem Leitkreis (Ebene ⟂ Achse, Radius R);
+ *  r (vorzeichenbehaftet, konvex/konkav) per Gitter- und Goldener-Schnitt-Suche, danach Levenberg-Marquardt (7 Parameter). */
+export function fitTorus(p: Vec3[], nrm: Vec3[]): FitResult {
+  if (p.length < 12 || nrm.length !== p.length) throw new Error('Torus: mindestens 12 Punkte mit Normalen');
+  const step = Math.max(1, Math.ceil(p.length / 4000));
+  const P = p.filter((_, i) => i % step === 0), N = nrm.filter((_, i) => i % step === 0);
+  const ext = extent(P);
+  const spine = (r: number) => {
+    const q = P.map((x, i) => sub(x, scale(N[i], r)));
+    const pl = fitPlane(q);
+    const c = fitCircle3D(q, pl.normal);
+    return { score: Math.hypot(pl.rms, c.rms), pl, c };
+  };
+  let best = { r: 0, s: Infinity };
+  const G = 41;
+  for (let k = 0; k < G; k++) {
+    const r = (-0.5 + k / (G - 1)) * ext; if (Math.abs(r) < 1e-3 * ext) continue;
+    try { const sc = spine(r).score; if (sc < best.s) best = { r, s: sc }; } catch { /* */ }
+  }
+  let lo = best.r - ext / (G - 1), hi = best.r + ext / (G - 1);
+  const gr = (Math.sqrt(5) - 1) / 2;
+  for (let it = 0; it < 30; it++) {
+    const a = hi - gr * (hi - lo), b = lo + gr * (hi - lo);
+    if (spine(a).score < spine(b).score) hi = b; else lo = a;
+  }
+  const r0 = 0.5 * (lo + hi), sp = spine(r0);
+  const d0 = canonical(sp.pl.normal), c0 = sp.c.center, R0 = sp.c.radius!;
+  const sc = Math.max(R0, Math.abs(r0), 1e-6);
+  const model = (x: number[]) => ({ d: tiltAxis(d0, x[0], x[1]), c: [c0[0] + x[2] * sc, c0[1] + x[3] * sc, c0[2] + x[4] * sc] as Vec3, R: x[5], r: Math.abs(x[6]) });
+  const resid = (pts: Vec3[], m: ReturnType<typeof model>, o: Float64Array) => {
+    for (let i = 0; i < pts.length; i++) {
+      const w = sub(pts[i], m.c); const h = dot(w, m.d);
+      const rho = Math.hypot(w[0] - h * m.d[0], w[1] - h * m.d[1], w[2] - h * m.d[2]);
+      o[i] = Math.hypot(rho - m.R, h) - m.r;
+    }
+  };
+  const out = levenbergMarquardt((x, o) => resid(P, model(x), o), [0, 0, 0, 0, 0, R0, Math.abs(r0)], P.length, { maxIter: 100 });
+  const m = model(out.x);
+  const res = new Float64Array(p.length); resid(p, m, res);
+  return { type: 'Torus', center: m.c, normal: m.d, radius: m.R, diameter: 2 * m.R, minorRadius: m.r, length: 2 * m.r, residuals: res, ...stats(res) };
+}
+
 // ---------------------------------------------------------------- Punkt
 export function fitPoint(p: Vec3[], nrm?: Vec3[]): FitResult {
   const c = centroid(p);
@@ -307,6 +352,7 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit = true):
       }
       case 'Langloch': return fitSlot(pp, axisFromNormals(nn).axis);
       case 'Kegel': return fitCone(pp, nn);
+      case 'Torus': return fitTorus(pp, nn);
       case 'Punkt': return fitPoint(pp, nn);
       default: throw new Error('Typ nicht fitbar: ' + type);
     }
@@ -330,15 +376,17 @@ export function autoFit(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: Fi
   const nAx = axisFromNormals(n);
   const nCen = axisFromNormals(n, true);
   tryFit('Kugel'); tryFit('Zylinder'); tryFit('Kegel');
+  if (nAx.ratio > 0.02 && p.length >= 30) tryFit('Torus');
   if (nAx.ratio < 0.05) tryFit('Langloch');
   const valid = cands.filter((c) => {
     if (!isFinite(c.rms)) return false;
     if (c.type === 'Kugel' || c.type === 'Zylinder') return (c.radius ?? 0) < 3 * ext;
     if (c.type === 'Kegel') return (c.halfAngle ?? 0) > 0.035 && (c.halfAngle ?? 0) < 1.4 && nCen.ratio < 0.2;
+    if (c.type === 'Torus') return (c.radius ?? 0) > 0.3 * (c.minorRadius ?? 0) && (c.radius ?? 0) < 3 * ext && (c.minorRadius ?? 0) < ext && (c.minorRadius ?? 0) > 1e-3 * ext;
     if (c.type === 'Langloch') return (c.length ?? 0) - (c.width ?? 0) > 0.2 * (c.width ?? 0) && (c.width ?? 0) < 3 * ext;
     return true;
   });
-  const order: GeomType[] = ['Ebene', 'Kugel', 'Zylinder', 'Langloch', 'Kegel'];
+  const order: GeomType[] = ['Ebene', 'Kugel', 'Zylinder', 'Langloch', 'Kegel', 'Torus'];
   valid.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
   const minRms = Math.min(...valid.map((c) => c.rms));
   let best = valid.find((c) => c.rms <= 1.3 * minRms + 1e-4 * ext) ?? valid[0];

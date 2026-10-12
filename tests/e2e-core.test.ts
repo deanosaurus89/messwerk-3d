@@ -107,3 +107,30 @@ describe('Hilfsebene: Wandklick an vielen Stellen', () => {
     }
   });
 });
+
+import { autoExtract } from '../src/core/aux';
+describe('Automatik: Ebene vs. Hilfsebene vs. Wand, Torus', () => {
+  const run = (pt: Vec3, nrm: Vec3) => autoExtract(mesh, topo, seed(pt, nrm), pt, { maxAngleDeg: 20, radius: 0 }, 120);
+  it.each([[[50, 50, 20]], [[5, 55, 20]], [[70, 10, 20]], [[90, 55, 20]], [[30, 30, 20]]])('Ebene innen %j -> Ebene ohne Hilfsebene', (pt) => {
+    const r = run(pt as Vec3, [0, 0, 1]); expect(r.fit.type).toBe('Ebene'); expect(r.aux).toBeUndefined();
+  });
+  it.each([[[27.2, 20, 20]], [[20, 27, 20]], [[13, 20, 20]]])('Ebene nahe Bohrung %j -> Kreis mit Hilfsebene', (pt) => {
+    const r = run(pt as Vec3, [0, 0, 1]); expect(r.fit.type).toBe('Kreis'); expect(r.aux).toBeDefined();
+    expect(r.fit.diameter!).toBeCloseTo(12.08, 1); expect(r.fit.center[2]).toBeCloseTo(20, 2);
+  });
+  it('Ebene nahe Langloch -> Langloch mit Hilfsebene', () => {
+    const r = run([20, 51.2, 20], [0, 0, 1]); expect(r.fit.type).toBe('Langloch'); expect(r.aux).toBeDefined(); expect(r.fit.length!).toBeCloseTo(30, 1);
+  });
+  it('Bohrungswand Mitte -> Zylinder; Wand an der Kante -> Kreis mit Hilfsebene', () => {
+    expect(run([20, 26.04, 10], [0, -1, 0]).fit.type).toBe('Zylinder');
+    const k = run([20, 26.04, 19.3], [0, -1, 0]); expect(k.fit.type).toBe('Kreis'); expect(k.aux).toBeDefined(); expect(k.fit.center[2]).toBeCloseTo(20, 2);
+  });
+  it('Langlochwand -> Langloch mit Hilfsebene', () => {
+    const r = run([20, 50, 10], [0, -1, 0]); expect(r.fit.type).toBe('Langloch'); expect(r.aux).toBeDefined();
+  });
+  it('Torus am Beispielteil', () => {
+    const r = run([40, 16, 22.8], [0, 0, 1]);
+    expect(r.fit.type).toBe('Torus'); expect(r.fit.radius!).toBeCloseTo(6, 1); expect(r.fit.minorRadius!).toBeCloseTo(2, 1);
+    expect(r.fit.center[0]).toBeCloseTo(40, 1); expect(r.fit.center[2]).toBeCloseTo(20.8, 1);
+  });
+});

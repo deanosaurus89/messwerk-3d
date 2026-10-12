@@ -184,6 +184,7 @@ export class Viewer {
         obj.quaternion.copy(q); break;
       }
       case 'Kugel': obj = new THREE.Mesh(new THREE.SphereGeometry(f.radius!, 24, 16), mat); break;
+      case 'Torus': obj = new THREE.Mesh(new THREE.TorusGeometry(f.radius!, f.minorRadius!, 12, 48), mat); obj.quaternion.copy(qz); break;
       case 'Kreis': {
         const pts = Array.from({ length: 73 }, (_, i) => new THREE.Vector3(f.radius! * Math.cos((i * Math.PI) / 36), f.radius! * Math.sin((i * Math.PI) / 36), 0));
         obj = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat); obj.quaternion.copy(qz); break;
@@ -227,6 +228,22 @@ export class Viewer {
       const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 160, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
       d.position.copy(p); d.renderOrder = 8; this.prims.add(d);
     }
+  }
+
+  /** Kamera auf einen Bereich zentrieren (Blickrichtung bleibt). */
+  focus(c: [number, number, number], r: number) {
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
+    const dist = Math.max(r, this.radius / 200) / Math.sin(Math.min(vf, hf) / 2) * 1.15;
+    this.controls.target.set(...c);
+    this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
+    this.camera.near = dist / 100; this.camera.far = dist * 10 + this.radius * 4; this.camera.updateProjectionMatrix();
+    this.controls.update(); this.camera.updateMatrixWorld();
+  }
+  getCamera() { return { position: this.camera.position.toArray(), target: this.controls.target.toArray(), near: this.camera.near, far: this.camera.far }; }
+  setCamera(c: { position: number[]; target: number[]; near: number; far: number }) {
+    this.camera.position.fromArray(c.position); this.controls.target.fromArray(c.target);
+    this.camera.near = c.near; this.camera.far = c.far; this.camera.updateProjectionMatrix(); this.controls.update(); this.camera.updateMatrixWorld();
   }
 
   snapshot(): string { return this.renderer.domElement.toDataURL('image/png'); }

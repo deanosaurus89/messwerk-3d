@@ -4,13 +4,15 @@ import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
 import { autoFit, fitType, FitResult, GeomType } from './core/fit';
 import type { Vec3 } from './core/linalg';
-import { extractWithAuxPlane } from './core/aux';
+import { autoExtract, extractWithAuxPlane } from './core/aux';
+import { computeNormals } from './core/mesh';
 
 let mesh: MeshData | null = null;
 let topo: MeshTopology | null = null;
 
 export type Req =
   | { op: 'load'; name: string; buffer: ArrayBuffer }
+  | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto' }
@@ -32,8 +34,9 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
   const t0 = performance.now();
   try {
     let result: any, transfer: Transferable[] = [];
-    if (req.op === 'load') {
-      mesh = parseByName(req.name, req.buffer);
+    if (req.op === 'load' || req.op === 'loadRaw') {
+      if (req.op === 'load') mesh = parseByName(req.name, req.buffer);
+      else { mesh = { name: req.name, positions: req.positions, indices: req.indices }; if (mesh.indices.length) computeNormals(mesh); }
       topo = mesh.indices.length ? new MeshTopology(mesh) : null;
       const b = bounds(mesh);
       const positions = mesh.positions.slice(), indices = mesh.indices.slice();
@@ -42,11 +45,16 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       transfer = [positions.buffer, indices.buffer, ...(normals ? [normals.buffer] : [])];
     } else if (req.op === 'grow') {
       if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell (Dreiecke). Für Punktwolken den Pinsel verwenden.');
-      const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius });
-      const v = topo.regionVertices(tris);
-      const use = v.interior.length >= 20 ? v.interior : v.all;
-      const f = doFit(use, req.type);
-      result = { indices: use, ...f };
+      if (req.type === 'auto') {
+        const r = autoExtract(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius }, bounds(mesh!).diag);
+        delete r.fit.residuals; r.fit.n = r.indices.length; if (r.aux) delete r.aux.plane.residuals;
+        result = r;
+      } else {
+        const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius });
+        const v = topo.regionVertices(tris);
+        const use = v.interior.length >= 20 ? v.interior : v.all;
+        result = { indices: use, ...doFit(use, req.type) };
+      }
     } else if (req.op === 'aux') {
       if (!topo) throw new Error('Hilfsebene benötigt ein Polygonmodell (Dreiecke).');
       const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane);

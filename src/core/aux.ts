@@ -2,7 +2,7 @@
 // Vorgehen wie in gängiger Messsoftware: Ebene aus der angrenzenden Planfläche, Wandpunkte (z. B. Bohrungswand)
 // senkrecht in diese Ebene projizieren, Kreis bzw. Stadion-Kontur in der Ebene fitten; Mittelpunkt liegt in der Ebene,
 // Orientierung = Ebenennormale.
-import { FitResult, axisFromNormals, fitCircle3D, fitPlane, fitSlot, fitType } from './fit';
+import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitPlane, fitSlot, fitType } from './fit';
 import { Vec3, dot, scale, sub } from './linalg';
 import { MeshData } from './mesh';
 import { GrowOptions, MeshTopology, gather } from './region';
@@ -49,7 +49,16 @@ function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
 }
 
 export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
-  type: 'Kreis' | 'Langloch', givenPlane?: FitResult): AuxResult {
+  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult {
+  const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, o, type, givenPlane, maxDist);
+  if (!r) throw new Error('Kein Übergang Ebene/Bohrung in der Nähe des Klickpunkts');
+  return r;
+}
+
+/** Wie extractWithAuxPlane; mit maxDist: nur wenn der Klick näher als maxDist am Übergang Ebene/Wand liegt, sonst null.
+ *  type 'auto': Kreis oder Langloch anhand der Konturfits in der Ebene. */
+export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
+  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult | null {
   const nt = mesh.indices.length / 3;
   const visited = new Uint8Array(nt);
   const mk = (tris: Uint32Array): Region => {
@@ -72,12 +81,13 @@ export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri:
   const triDist = (t: number) => { let d = Infinity; for (let k = 0; k < 3; k++) { const v = F[3 * t + k];
     d = Math.min(d, Math.hypot(P[3 * v] - seedPoint[0], P[3 * v + 1] - seedPoint[1], P[3 * v + 2] - seedPoint[2])); } return d; };
   /** Erste Nachbarregion (über die Regionsgrenze, nach Abstand zum Klickpunkt sortiert), die das Kriterium erfüllt. */
-  const findAround = (r: Region, ok: (g: Region) => boolean): Region | undefined => {
+  const findAround = (r: Region, ok: (g: Region) => boolean, maxD = Infinity): Region | undefined => {
     const cand = new Map<number, number>();
     for (const t of r.tris) for (const u of topo.neighbors(t)) if (!visited[u] && !topo.sliver[u] && !cand.has(u)) cand.set(u, triDist(u));
     const order = [...cand.entries()].sort((a, b) => a[1] - b[1]);
     let tried = 0;
-    for (const [u] of order) {
+    for (const [u, du] of order) {
+      if (du > maxD) break;
       if (visited[u]) continue;
       const g = mk(topo.growRegion(u, seedPoint, { ...o, radius: 0 }));
       if (g.verts.length >= 8 && ok(g)) return g;
@@ -98,26 +108,54 @@ export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri:
   let wall: Region | undefined, planeReg: Region | undefined;
   if (p1.ok && !givenPlane) {
     planeReg = r1;
-    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal));
-    if (!wall) throw new Error('Keine Wand (Bohrung/Langloch) neben der angeklickten Ebene gefunden');
+    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist);
+    if (!wall) { if (isFinite(maxDist)) return null; throw new Error('Keine Wand (Bohrung/Langloch) neben der angeklickten Ebene gefunden'); }
   } else if (p1.ok && givenPlane) {
-    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal));
-    if (!wall) throw new Error('Keine passende Wand neben der angeklickten Fläche gefunden');
+    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist);
+    if (!wall) { if (isFinite(maxDist)) return null; } if (!wall) throw new Error('Keine passende Wand neben der angeklickten Fläche gefunden');
   } else {
     wall = r1;
     if (!givenPlane) {
       const ax = axisFromNormals(r1.n).axis;
       // ausreichend große Planfläche verlangen (kleine Splitter-Fragmente am Kantenübergang überspringen)
       const minV = Math.max(60, Math.min(2000, 0.1 * r1.verts.length));
-      planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; });
+      if (!(axisFromNormals(r1.n).ratio < 0.05)) { if (isFinite(maxDist)) return null; throw new Error('Angeklickte Fläche ist weder Ebene noch prismatische Wand'); }
+      planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
+      if (!planeReg && isFinite(maxDist)) return null;
       if (!planeReg) throw new Error('Keine angrenzende Ebene für die Hilfsebene gefunden – vorhandene Ebene wählen');
     }
   }
   let plane = givenPlane ?? fitType('Ebene', planeReg!.p, planeReg!.n);
   // Normale aus dem Material heraus (Richtung der Flächennormalen der Ebenenpunkte)
   if (planeReg) { const pn = isPlanar(planeReg).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
-  const fit = fitInPlane(type, wall.p, plane);
+  let fit: FitResult;
+  if (type === 'auto') {
+    const fc = fitInPlane('Kreis', wall.p, plane);
+    let fs: FitResult | null = null; try { fs = fitInPlane('Langloch', wall.p, plane); } catch { /* */ }
+    fit = fs && fs.rms < 0.6 * fc.rms && fs.length! - fs.width! > 0.2 * fs.width! ? fs : fc;
+  } else fit = fitInPlane(type, wall.p, plane);
   fit.n = wall.verts.length;
   delete fit.residuals; delete plane.residuals;
   return { fit, plane, wallIdx: wall.verts, planeIdx: planeReg ? planeReg.verts : new Uint32Array(0) };
+}
+
+/** Automatik-Modus: Region wachsen + Typ erkennen; liegt der Klick nahe am Übergang Ebene/Bohrung bzw. auf einer
+ *  Langlochwand, wird Kreis/Langloch in der Hilfsebene bestimmt. Reine Ebenen bleiben Ebenen (ohne Hilfsebene). */
+export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions, diag: number) {
+  const tris = topo.growRegion(seedTri, seedPoint, o);
+  const v = topo.regionVertices(tris);
+  const use = v.interior.length >= 20 ? v.interior : v.all;
+  const g = gather(mesh, use);
+  if (g.p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  const r = autoFit(g.p, g.n);
+  const base = { indices: use, fit: r.best, candidates: r.candidates.map((c) => ({ type: c.type, rms: c.rms })) };
+  if (['Ebene', 'Zylinder', 'Kreis', 'Langloch'].includes(r.best.type)) {
+    const T = Math.min(3, Math.max(0.5, 0.015 * diag));
+    const maxD = r.best.type === 'Langloch' ? diag : T;
+    try {
+      const a = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, 'auto', undefined, maxD);
+      if (a) return { ...base, indices: a.wallIdx, fit: a.fit, aux: { plane: a.plane, indices: a.planeIdx } };
+    } catch { /* keine Hilfsebene */ }
+  }
+  return { ...base, aux: undefined as undefined | { plane: FitResult; indices: Uint32Array } };
 }

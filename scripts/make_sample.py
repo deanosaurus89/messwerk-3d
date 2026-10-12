@@ -1,7 +1,7 @@
-"""Erzeugt ein verrauschtes Mess-STL eines Beispielteils (Ebenen, Bohrungen, Langloch, Zylinder, Kegel, Kugel).
+"""Erzeugt ein verrauschtes Mess-STL eines Beispielteils (Ebenen, Bohrungen, Langloch, Zylinder, Kegel, Kugel, Torus).
 Benötigt: pip install cadquery-ocp numpy  (nur Entwicklung, nicht zur Laufzeit)."""
 import sys, struct, numpy as np
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeCone, BRepPrimAPI_MakeSphere
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeCone, BRepPrimAPI_MakeSphere, BRepPrimAPI_MakeTorus
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
 from OCP.gp import gp_Pnt, gp_Ax2, gp_Dir
 from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
@@ -26,6 +26,8 @@ def part(hole_d=12.0, boss_dx=0.0):
     s=BRepAlgoAPI_Fuse(s,cyl(55+boss_dx,30,8,20,12)).Shape()
     s=BRepAlgoAPI_Fuse(s,BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(82,38,20),Z),10,4,10).Shape()).Shape()
     s=BRepAlgoAPI_Fuse(s,BRepPrimAPI_MakeSphere(gp_Pnt(60,8,17),7).Shape()).Shape()
+    # Torusring (R=6, r=2), Mitte 0,8 mm über der Oberseite -> teilweise eingebettet, scharfe Kante zur Ebene
+    s=BRepAlgoAPI_Fuse(s,BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(40,10,20.8),Z),6,2).Shape()).Shape()
     return s
 def mesh(s,defl):
     BRepMesh_IncrementalMesh(s,defl,False,0.1,True)

@@ -8,6 +8,7 @@ export const ICON: Record<string, string> = {
   Langloch: s('<rect x="3" y="8" width="18" height="8" rx="4"/>'),
   Kegel: s('<ellipse cx="12" cy="18" rx="6.5" ry="2.5"/><path d="M5.5 18 L10 5 h4 L18.5 18"/><ellipse cx="12" cy="5" rx="2" ry=".8"/>'),
   Kugel: s('<circle cx="12" cy="12" r="8"/><ellipse cx="12" cy="12" rx="8" ry="3"/>'),
+  Torus: s('<ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="11.5" rx="4" ry="1.6"/>'),
   Punkt: s('<path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>'),
   eye: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   eyeOff: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" opacity=".35"/><path d="M4 4l16 16"/>'),

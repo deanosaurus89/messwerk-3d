@@ -1,4 +1,4 @@
-# MessWerk 3D – Inspektion im Browser (v3)
+# MessWerk 3D – Inspektion im Browser (v4)
 
 **Live:** https://deanosaurus89.github.io/messwerk-3d/
 
@@ -8,6 +8,53 @@ Es werden keine fremden Icons oder Assets verwendet.
 
 **Umfang v1 (ohne CAD):** Polygonmodell importieren → Merkmale per Klick extrahieren (automatische Typerkennung) →
 Prüfmerkmale mit von Hand eingegebenen Sollwerten und Toleranzen → IO/NIO → CSV-Export.
+
+## Neu in v4
+
+### Projekt speichern / öffnen (.mw3d)
+* **Start › Projekt speichern** schreibt eine `.mw3d`-Datei: ZIP mit `project.json` (Merkmale inkl. Hilfsebenen, Prüfmerkmale mit Soll/Toleranzen, Bezüge, Label-Positionen, Sichtbarkeit, Berichte, Kamera) und binärem Netz (`mesh/positions.f32`, `mesh/indices.u32`, `features/indices.u32`).
+* iPhone/iPad: Teilen-Dialog („In Dateien sichern“); Desktop: Download. **Projekt öffnen** über die Dateiauswahl.
+* **Autosave** in IndexedDB (1,5 s nach jeder Änderung). Beim Start erscheint „Letztes Projekt wiederherstellen“; zusätzlich Start › Letztes Projekt.
+
+### Bezüge (ISO 5459) und Toleranzen mit Bezug (ISO 1101)
+* Zuweisen: Dialog › Bezug › Buchstabe › *Bezug zuweisen*, oder Rechtsklick/langes Tippen im Baum. Buchstaben A–T (ohne I, O, Q).
+* Umbenennen: einen anderen Buchstaben wählen. Ist er schon vergeben, werden die beiden Buchstaben getauscht. Prüfmerkmale verweisen auf das Merkmal, nicht auf den Buchstaben, und bleiben daher gültig.
+* Entfernen: abhängige Prüfmerkmale bleiben erhalten und werden mit ⚠ „Bezug entfernt“ markiert. Ist das Bezugsmerkmal gelöscht, steht dort „Bezugsmerkmal gelöscht“. Weist man den Bezug neu zu, verschwindet die Markierung.
+* Die Bezugsfahne steht im Baum und im 3D-Label. Der Rahmen (z. B. `⌖ Ø0.100 | A|B|C`) steht in Katalog, Liste und Label.
+* Bezugssystem:
+  * **A** legt die Orientierung fest: bei einer Ebene ist Z die Normale, bei einer Achse ist Z die Achse; der Ursprung liegt auf A.
+  * **B**: bei einer Ebene die Richtung in A und der Ursprung auf B; bei einer Achse oder einem Punkt der Ursprung.
+  * **C** legt die restliche Drehung bzw. den Ursprung fest.
+* Katalog „Mit Bezug“:
+  * Parallelität, Rechtwinkligkeit, Neigung: bei Ebenen die Punktspanne in Sollrichtung, bei Achsen L·sin(Δ).
+  * Position mit DRF A|B|C und theoretisch genauen Maßen [X][Y][Z], von Hand eingegeben: bei Achsen eine zylindrische Zone aus den Achsendpunkten, bei Kugel/Punkt/Torus SØ, bei Ebenen 2·max|Δ|.
+  * Koaxialität, Konzentrizität, Symmetrie.
+  * Rundlauf (Messkreise), Gesamtrundlauf.
+  * Flächenprofil mit Bezug: konservativ 2·(Form + Lage).
+* Alle Istwerte werden aus der gemessenen Geometrie berechnet. Ohne CAD gibt es keine Sollgeometrie.
+* Die Hilfe steht auch in der App unter Hilfe › Hilfe Bezüge.
+
+### Trainingsmodus: Bezüge
+Start über Hilfe › Trainingsmodus: Bezüge oder über den Link im Bezug-Abschnitt des Dialogs. Es sind 19 geführte Schritte am Beispielteil mit hervorgehobenen Bedienelementen und einem gelben Ring auf dem Netz:
+1. Die Oberseite wird Bezug A, die Vorderseite B und die linke Seite C.
+2. Danach wird die Bohrung Ø12 als Zylinder erzeugt.
+3. Zum Schluss erhält sie eine Position ⌖ Ø0,1 | A | B | C mit [X]=20 und [Y]=20.
+
+Jeder Schritt wird automatisch geprüft. Weiter und Zurück sind jederzeit möglich, und die Bedienelemente sind touchtauglich.
+
+### Zentrieren
+Der Knopf **⌖ Zentrieren** neben dem ViewCube zentriert und zoomt auf das gewählte Merkmal (ohne Auswahl auf das ganze Modell). Dasselbe geht per Doppelklick auf einen Baumeintrag, über das Kontextmenü oder über den Dialog.
+
+### Torus
+* Fit: zuerst eine Suche des Rohrradius r über die Spine-Kurve (p − r·n, Ebene + Kreis), danach Levenberg-Marquardt über Mitte, Achse, R und r mit robustem Trimmen.
+* Wird auch im Modus „Automatisch“ erkannt.
+* Katalog: Mitte X/Y/Z, Achswinkel, Leitkreis-Ø/R, Rohr-Ø/r, Torusform, Std.-Abw. und Toleranzen mit Bezug.
+* Das Beispielteil enthält einen Torus (R 6, r 2) bei (40, 10, 20.8).
+
+### Automatisch + Hilfsebene
+* Ein Klick in der Nähe einer Bohrung oder eines Langlochs (auf der Wand nahe der Kante oder auf der Fläche direkt daneben) liefert dasselbe Ergebnis wie der explizite Kreis- bzw. Langloch-Modus: zweifarbige Vorschau und Statistik für Wand und Hilfsebene.
+* Auf einer freien Fläche entsteht nur eine Ebene.
+* Mitten in einer tiefen Wand entsteht ein Zylinder.
 
 ## Starten
 
@@ -115,6 +162,13 @@ Ausrichtung (Best-Fit/ICP) und Farbvergleich setzen auf denselben Kern (KD-Baum,
 `public/samples/beispielteil.stl`: Block 100×60×20 mm mit Bohrung Ø12,08 (absichtlich +0,08), Bohrung Ø6, Langloch 30×10,
 Bolzen Ø16 (um +0,05 in X versetzt), Kegelstumpf (Ø20→Ø8, Höhe 10, Kegelwinkel 61,93°), Kugelkalotte R7; Rauschen σ = 8 µm.
 Neu erzeugen: `pip install cadquery-ocp numpy` und `python scripts/make_sample.py`.
+
+## Grenzen v4
+
+* Profil mit Bezug ist eine konservative Abschätzung ohne CAD-Soll.
+* Position nutzt das DRF ohne Materialbedingungen (kein Ⓜ/Ⓛ).
+* Autosave hält nur das zuletzt geladene Netz. Wer ein neues Netz importiert, ersetzt damit den Autosave.
+* iOS: Ob der Teilen-Dialog oder ein Download erscheint, hängt von der Safari-Version ab.
 
 ## Grenzen v3
 - Kein CAD-Import, keine Ausrichtung, kein Farbvergleich (bewusst ausgelassen, Architektur vorbereitet).

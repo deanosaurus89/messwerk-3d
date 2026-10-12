@@ -8,6 +8,11 @@ import {
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
+import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, isDatumControl, toLocal } from './core/datum';
+import { datumText } from './core/features';
+import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
+import { Tour, TourStep } from './training';
+import type { Vec3 } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
 
@@ -50,6 +55,17 @@ const state = {
 (window as any).__app = { state, viewer, engine };
 
 const featMap = () => new Map<number, Feature>(state.features.map((f) => [f.id, f]));
+// Punkte eines Merkmals (für Richtungs-/Lauftoleranzen mit Bezug) aus dem Netz, max. 6000, zwischengespeichert
+const ptsCache = new Map<number, Vec3[]>();
+function featPoints(fid: number): Vec3[] | null {
+  const hit = ptsCache.get(fid); if (hit) return hit;
+  const f = state.features.find((x) => x.id === fid); if (!f || !f.indices.length || !viewer.model) return null;
+  const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
+  const step = Math.max(1, Math.ceil(f.indices.length / 6000)), out: Vec3[] = [];
+  for (let i = 0; i < f.indices.length; i += step) { const v = f.indices[i]; out.push([pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]]); }
+  ptsCache.set(fid, out); return out;
+}
+const ctx = { points: featPoints };
 const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
 const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -78,7 +94,7 @@ document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick =
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view as any)));
 $('#ico-dist').innerHTML = ICON['Abstand 3D'];
 
-const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Punkt'];
+const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 const FIT_TYPES = TYPES.filter((t) => t !== 'auto') as GeomType[];
 const typeBtns = $('#feat-type-btns');
 for (const t of TYPES) {
@@ -119,7 +135,7 @@ $('#btn-sample').onclick = async () => {
   const r = await fetch('./samples/beispielteil.stl');
   await loadBuffer('beispielteil.stl', await r.arrayBuffer());
 };
-$('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.controls, featMap()));
+$('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.controls, featMap(), ctx));
 $('#btn-report').onclick = () => makeReport();
 $('#btn-report2').onclick = () => makeReport();
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); };
@@ -143,6 +159,8 @@ async function loadBuffer(name: string, buf: ArrayBuffer) {
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = []; state.controls = []; state.sel = []; state.mode = null; state.preview = null;
     state.hidden.clear(); state.labelOffsets.clear(); state.modelVisible = true; state.typeCount = {};
+    state.reports = []; state.openReport = null; state.nextId = 1; state.nextCtrl = 1; state.nextReport = 1; ptsCache.clear();
+    loadCount++; storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
     state.opts.brush = +(r.bounds.diag / 25).toFixed(1);
     $('#projname').textContent = r.name;
     status(`${name} geladen in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
@@ -231,12 +249,17 @@ async function previewByClick(h: Hit) {
   }
   try {
     const r = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type }));
-    state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Klick' };
+    state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Klick', hit: h,
+      aux: r.aux ? { plane: r.aux.plane, indices: r.aux.indices, source: 'automatisch (angrenzende Fläche)' } : undefined };
+    if (r.aux) { status(`Automatik: ${r.fit.type} in Hilfsebene – ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Ebenenpunkte (blau).`); renderAll(); return; }
     status(`Vorschau: ${r.fit.type} aus ${r.indices.length} Punkten (${r.ms.toFixed(0)} ms). „Erzeugen“ übernimmt das Merkmal.`);
   } catch (e: any) { state.preview = null; status('Keine Geometrie gefunden: ' + e.message); }
   renderAll();
 }
 
+async function previewByClickAs(h: Hit, t: GeomType | 'auto') {
+  const m = state.mode as FitMode; const old = m.type; m.type = t; await previewByClick(h); m.type = old;
+}
 async function previewFromBrush() {
   if (!state.brushMask || !state.brushCount) { status('Zuerst Bereich mit dem Pinsel markieren.'); return; }
   const idx = new Uint32Array(state.brushCount); let k = 0;
@@ -250,6 +273,7 @@ async function previewFromBrush() {
 
 async function refitPreview(t: GeomType | 'auto') {
   const p = state.preview; if (!p || p.method === 'Konstruiert') return;
+  if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
   if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
     try { await previewWithAux(p.hit, t); } catch (e: any) { status('Hilfsebene: ' + e.message); }
     renderAll(); return;
@@ -322,9 +346,60 @@ function selectFeature(id: number, additive = false) {
   renderAll();
 }
 
+// ------------------------------------------------------------------ Bezüge (ISO 5459)
+const datumFeatures = () => state.features.filter((f) => f.datum).sort((a, b) => a.datum!.localeCompare(b.datum!));
+const dependents = (fid: number) => state.controls.filter((c) => c.datumIds?.includes(fid));
+/** Bezugsbuchstaben zuweisen (null = entfernen). Ist der Buchstabe vergeben, werden die Buchstaben getauscht. */
+function setDatum(f: FeatureView, letter: string | null) {
+  const old = f.datum;
+  if (letter && old === letter) return;
+  if (letter) {
+    const other = state.features.find((g) => g.id !== f.id && g.datum === letter);
+    if (other) { other.datum = old; toast(old ? `Bezüge getauscht: ${f.name} = ${letter}, ${other.name} = ${old}` : `${letter} von ${other.name} auf ${f.name} übertragen – ${other.name} hat keinen Bezug mehr`); }
+    else toast(old ? `Bezug ${old} → ${letter} umbenannt (${f.name})` : `Bezug ${letter} = ${f.name}`);
+    f.datum = letter;
+  } else {
+    f.datum = undefined;
+    const n = dependents(f.id).length;
+    toast(`Bezug ${old} entfernt${n ? ` – ${n} Prüfmerkmal${n > 1 ? 'e' : ''} als „Bezug entfernt“ markiert` : ''}`);
+  }
+  renderAll();
+}
+const nextFreeLetter = () => DATUM_LETTERS.find((l) => !state.features.some((f) => f.datum === l)) ?? 'Z';
+function defaultDatums(kind: ControlKind, fid: number): number[] {
+  const ds = datumFeatures().filter((d) => d.id !== fid);
+  if (!isDatumControl(kind)) return [];
+  const [, mx] = DATUM_COUNT[kind];
+  if (['Koaxialität', 'Konzentrizität', 'Rundlauf', 'Gesamtrundlauf'].includes(kind)) {
+    const a = ds.find((d) => datumKind(d.type) === 'axis') ?? ds[0]; return a ? [a.id] : [];
+  }
+  return ds.slice(0, mx).map((d) => d.id);
+}
+function defaultBasic(kind: ControlKind, f: FeatureView, datumIds: number[]): number[] | undefined {
+  const fm = featMap();
+  if (kind === 'Neigung') {
+    const d = fm.get(datumIds[0]); if (!d) return [45];
+    const a = Math.acos(Math.min(1, Math.abs(f.measured!.normal.reduce((s, v, i) => s + v * d.measured!.normal[i], 0)))) * DEG;
+    return [Math.round(a * 2) / 2];
+  }
+  if (kind === 'Position' || kind === 'Profil (Bezug)') {
+    const F = buildDRF(datumIds.map((i) => fm.get(i)!).filter(Boolean));
+    return toLocal(F, f.measured!.center).map((v) => Math.round(v * 10) / 10);
+  }
+  return undefined;
+}
+function parseDatumRef(txt: string): number[] | null {
+  const letters = txt.toUpperCase().split(/[|,; ]+/).filter(Boolean);
+  const ids = letters.map((l) => state.features.find((f) => f.datum === l)?.id);
+  if (ids.some((x) => x == null)) return null;
+  return ids as number[];
+}
+
 function addControl(kind: ControlKind, id: number) {
   const t = defaultTolerance(kind);
-  state.controls.push({ id: state.nextCtrl++, kind, featureIds: [id], nominal: t.nominal, tolUp: t.up, tolLo: t.lo });
+  const c: Control = { id: state.nextCtrl++, kind, featureIds: [id], nominal: t.nominal, tolUp: t.up, tolLo: t.lo };
+  if (isDatumControl(kind)) { c.datumIds = defaultDatums(kind, id); c.basic = defaultBasic(kind, state.features.find((f) => f.id === id)!, c.datumIds); }
+  state.controls.push(c);
   state.selControl = state.nextCtrl - 1;
 }
 /** Katalog-Haken: Prüfmerkmal hinzufügen bzw. entfernen. */
@@ -337,7 +412,7 @@ function toggleControl(kind: ControlKind, id: number, on: boolean) {
 // ------------------------------------------------------------------ Berichte
 function makeReport() {
   if (!state.features.length) { toast('Keine Merkmale für einen Bericht vorhanden.'); return; }
-  const r = buildReport(state.nextReport++, state.features, state.controls, state.data?.name ?? '');
+  const r = buildReport(state.nextReport++, state.features, state.controls, state.data?.name ?? '', new Date(), ctx);
   state.reports.push(r); state.openReport = r.id;
   renderAll();
   toast(`✔ ${r.name} erzeugt (${r.features.length} Merkmale, ${r.controls.length} Prüfmerkmale)`);
@@ -396,7 +471,7 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 }
 
 // ------------------------------------------------------------------ Darstellung
-function renderAll() { renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); renderTable(); renderScene(); renderHint(); renderReport(); }
+function renderAll() { renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
@@ -433,8 +508,11 @@ function renderTree() {
   };
   node(`<span class="tw">▾</span>${ICON.folder}<b>Objekte</b>`, '');
   node(`<span class="tw">▾</span>${ICON.data}Daten`, 'indent1');
-  if (state.data) node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(Polygonmodell)</span>`, 'indent2 model-node', undefined, false, undefined,
-    eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderTree(); renderScene(); }));
+  if (state.data) {
+    const mn = node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(Polygonmodell)</span>`, 'indent2 model-node', () => { state.sel = []; renderAll(); }, false, undefined,
+      eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderTree(); renderScene(); }));
+    mn.ondblclick = () => centerOn(null); attachContext(mn, null);
+  }
   node(`<span class="tw">▾</span>${ICON.folder}Merkmale (${state.features.length})`, 'indent1');
   const distSlots = state.mode?.kind === 'dist' ? [state.mode.a, state.mode.b] : [];
   for (const f of state.features) {
@@ -442,9 +520,11 @@ function renderTree() {
     const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
     const tag = distSlots.includes(f.id) ? ` <span class="sub">[${distSlots.indexOf(f.id) === 0 ? 'A' : 'B'}]</span>` : '';
     const sel = state.sel.includes(f.id), vis = !state.hidden.has(f.id);
-    node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${tag}`,
+    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="Bezug ${f.datum}">${f.datum}</span>` : ''}${tag}`,
       'indent2' + (vis ? '' : ' hidden-feat'), (e) => selectFeature(f.id, e.ctrlKey || e.metaKey || e.shiftKey), sel, f.id,
       eyeBtn(vis, () => { vis ? state.hidden.add(f.id) : state.hidden.delete(f.id); renderTree(); renderScene(); }));
+    fnode.ondblclick = () => centerOn(f.id);
+    attachContext(fnode, f.id);
     // nur Komponenten: Ist (gemessen), Hilfsebene, Soll (Nominal) – keine Prüfmerkmale
     if (f.measured) node(`<span class="tw"></span>${ICON.ist}Ist${f.type === 'Abstand' ? ` <span class="sub">${fmt(f.measured.distance, 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}Hilfsebene <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
@@ -475,7 +555,8 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
   if (full) rows.push(['Punkte', String(pointCount)]);
   rows.push(['Std.-Abw. (RMS)', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)]);
   if (m.outliers) rows.push(['Ausreißer entfernt', String(m.outliers)]);
-  if (m.diameter != null && m.type !== 'Langloch') rows.push(['Durchmesser', fmt(m.diameter)]);
+  if (m.type === 'Torus') rows.push(['Leitkreis-Ø 2R', fmt(m.diameter)], ['Leitkreis R', fmt(m.radius)], ['Rohr-Ø 2r', fmt(2 * Math.abs(m.minorRadius ?? 0))], ['Rohr r', fmt(Math.abs(m.minorRadius ?? 0))]);
+  else if (m.diameter != null && m.type !== 'Langloch') rows.push(['Durchmesser', fmt(m.diameter)]);
   if (m.type === 'Langloch') rows.push(['Länge', fmt(m.length)], ['Breite', fmt(m.width)]);
   if (m.type === 'Kegel') rows.push(['Kegelwinkel [°]', fmt(2 * m.halfAngle! * DEG, 3)]);
   if (full) {
@@ -491,7 +572,7 @@ const kv = (rows: [string, string][]) => `<div class="kv">${rows.map(([k, v]) =>
 /** Zweifarbige Vorschau: Kennwerte von Merkmal (orange) und Hilfsebene (blau). */
 function auxStats(p: Preview): string {
   const m = p.fit, pl = p.aux!.plane;
-  const size: [string, string][] = m.type === 'Langloch' ? [['Länge', fmt(m.length)], ['Breite', fmt(m.width)]] : [['Durchmesser', fmt(m.diameter)]];
+  const size: [string, string][] = m.type === 'Langloch' ? [['Länge', fmt(m.length)], ['Breite', fmt(m.width)]] : m.type === 'Torus' ? [['Ø 2R', fmt(m.diameter)], ['Rohr-Ø', fmt(2 * Math.abs(m.minorRadius ?? 0))]] : [['Durchmesser', fmt(m.diameter)]];
   return `<div class="aux-stats"><div class="as-col"><div class="as-h"><i style="background:${hex(PREVIEW_COLOR)}"></i>${m.type} (Wand)</div>
     ${kv([['Punkte', String(p.indices.length)], ['RMS', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ...size])}</div>
     <div class="as-col"><div class="as-h"><i style="background:${hex(AUX_COLOR)}"></i>Hilfsebene</div>
@@ -592,7 +673,18 @@ function renderDialog() {
     ${f.aux ? `<h4>${ICON.aux} Hilfsebene</h4>${kv([['Quelle', f.aux.source], ['Punkte', f.aux.refId ? '—' : String(f.aux.pointCount)], ['RMS', fmt(f.aux.plane.rms)], ['Ebenheit', fmt(f.aux.plane.form)],
       ['Punkt', f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], ['Normale', f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}
     ${f.type !== 'Abstand' && !f.aux ? `<h4>Typ ändern (Neuberechnung)</h4><div class="row"><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="btn" id="d-refit">Neu fitten</button></div>` : ''}
-    <div><button class="btn" id="d-addctrl">＋ Prüfmerkmal …</button><button class="btn" id="d-del">Merkmal löschen</button></div>`;
+    ${datumKind(f.type) ? `<h4><span class="dflag sm">${f.datum ?? '?'}</span> Bezug (ISO 5459)</h4>
+      <div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
+        return `<option value="${l}" ${(f.datum ?? nextFreeLetter()) === l ? 'selected' : ''}>${l}${o ? ` (tauschen mit ${o.name})` : ''}</option>`; }).join('')}</select>
+        <button class="btn primary" id="dt-apply">${f.datum ? 'Umbenennen' : 'Bezug zuweisen'}</button></div>
+      ${f.datum ? `<div class="row"><button class="btn" id="dt-remove">Bezug ${f.datum} entfernen</button><span class="note">${dependents(f.id).length} Prüfmerkmal(e) verwenden ${f.datum}</span></div>` : ''}
+      <p class="note">${datumKind(f.type) === 'plane' ? 'Ebene als Bezug: legt eine Richtung (Normale) und Lage fest.' : datumKind(f.type) === 'axis' ? 'Achse als Bezug (Bohrung/Welle): legt Achsrichtung und -lage fest.' : 'Mittelpunkt als Bezug.'}
+        <button class="linkbtn" id="dt-training">🎓 Trainingsmodus Bezüge</button></p>` : ''}
+    <div><button class="btn" id="d-center">⌖ Zentrieren</button><button class="btn" id="d-addctrl">＋ Prüfmerkmal …</button><button class="btn" id="d-del">Merkmal löschen</button></div>`;
+  d.querySelector('#dt-apply')?.addEventListener('click', () => setDatum(f, ($('#dt-letter') as HTMLSelectElement).value));
+  d.querySelector('#dt-remove')?.addEventListener('click', () => setDatum(f, null));
+  d.querySelector('#dt-training')?.addEventListener('click', () => startTraining());
+  d.querySelector('#d-center')?.addEventListener('click', () => centerOn(f.id));
   ($('#d-name') as HTMLInputElement).onchange = (e) => { f.name = (e.target as HTMLInputElement).value; renderAll(); };
   ($('#d-del') as HTMLButtonElement).onclick = () => { state.selControl = null; deleteSelected(); };
   ($('#d-addctrl') as HTMLButtonElement).onclick = () => { state.addFeat = f.id; state.ctab = 'katalog'; renderTable(); togglePanel('table', true); };
@@ -600,7 +692,7 @@ function renderDialog() {
     const t = ($('#d-retype') as HTMLSelectElement).value as GeomType;
     try {
       const r = await busy(engine.call<any>({ op: 'fit', indices: f.indices, type: t }));
-      f.type = r.fit.type; f.measured = r.fit;
+      f.type = r.fit.type; f.measured = r.fit; ptsCache.delete(f.id);
       state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
       recomputeDistances(); renderAll();
     } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); }
@@ -631,12 +723,26 @@ function renderTable() {
     for (const it of g.items) {
       const c = state.controls.find((k) => k.kind === it.kind && k.featureIds[0] === f.id);
       const row = document.createElement('div'); row.className = 'cat-item' + (c ? ' on' : ''); row.dataset.kind = it.kind;
-      const r = c ? evaluate(c, fm) : null;
-      const ist = r ? r.measured : evaluate({ id: 0, kind: it.kind, featureIds: [f.id], nominal: null, tolUp: 0, tolLo: 0 }, fm).measured;
-      row.innerHTML = `<label><input type="checkbox" ${c ? 'checked' : ''}><span class="sym">${it.symbol}</span><span class="cl" title="${it.note ?? ''}">${it.label}</span></label>
-        <span class="ist">${fmt(ist)}</span>`;
+      const r = c ? evaluate(c, fm, ctx) : null;
+      const ist = r ? r.measured : isDatumControl(it.kind) ? null : evaluate({ id: 0, kind: it.kind, featureIds: [f.id], nominal: null, tolUp: 0, tolLo: 0 }, fm, ctx).measured;
+      const needD = isDatumControl(it.kind) && !c && !datumFeatures().some((d) => d.id !== f.id);
+      row.innerHTML = `<label><input type="checkbox" ${c ? 'checked' : ''} ${needD ? 'disabled' : ''}><span class="sym">${it.symbol}</span><span class="cl" title="${it.note ?? ''}">${it.label}</span></label>
+        <span class="ist">${needD ? '<small>Bezug zuweisen</small>' : fmt(ist)}</span>`;
       row.querySelector('input')!.onchange = (e) => toggleControl(it.kind, f.id, (e.target as HTMLInputElement).checked);
-      if (c && r) {
+      if (c && r && isDatumControl(c.kind)) {
+        const ed = document.createElement('span'); ed.className = 'cat-ed datum-ed';
+        const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
+        lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0))));
+        const di = document.createElement('input'); di.className = 'dref'; di.value = datumText(c, fm); di.title = 'Bezüge primär|sekundär|tertiär, z. B. A|B|C';
+        di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast('Unbekannter Bezugsbuchstabe: ' + di.value); } else { c.datumIds = ids; if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') c.basic = c.basic ?? defaultBasic(c.kind, f, ids); } renderAll(); };
+        lab('Bezug', di);
+        if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') ['X', 'Y', 'Z'].forEach((a, k) => lab(`[${a}]`, numInput(c.basic?.[k] ?? 0, (x) => { c.basic = c.basic ?? [0, 0, 0]; c.basic[k] = x ?? 0; })));
+        if (c.kind === 'Neigung') lab('[∠°]', numInput(c.basic?.[0] ?? 45, (x) => (c.basic = [x ?? 0])));
+        ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : ''}${fmt(c.tolUp, 3)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
+          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag">⚠ ${r.flag}</span>` : ''}`);
+        if (r.detail) ed.title = r.detail;
+        row.appendChild(ed);
+      } else if (c && r) {
         const ed = document.createElement('span'); ed.className = 'cat-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         lab('Soll', numInput(c.nominal, (x) => (c.nominal = x)));
@@ -649,22 +755,22 @@ function renderTable() {
     }
     cat.appendChild(gd);
   }
-  if (f && (f.type === 'Ebene' || f.type === 'Zylinder' || f.type === 'Kegel' || f.type === 'Kreis')) cat.insertAdjacentHTML('beforeend',
-    '<p class="note" style="padding:2px 8px 8px">Parallelität ∥, Rechtwinkligkeit ⟂, Neigung ∠ und Position ⌖ (ISO 1101) benötigen ein Bezugssystem – hier als Winkel zu den Koordinatenachsen bzw. X/Y/Z.</p>');
+  if (f && !datumFeatures().some((d) => d.id !== f.id) && f.type !== 'Abstand') cat.insertAdjacentHTML('beforeend',
+    '<p class="note" style="padding:2px 8px 8px">Toleranzen mit Bezug (∥ ⟂ ∠ ⌖ ◎ ⌯ ↗) werden aktiv, sobald einem anderen Merkmal ein Bezug (A, B, C …) zugewiesen ist – Dialog › Bezug.</p>');
 
   // ---------- Liste aller Prüfmerkmale
   $('#ctab-n').textContent = String(state.controls.length);
   const tb = $('#ctrl-table tbody'); tb.innerHTML = '';
   let io = 0, nio = 0;
   for (const c of state.controls) {
-    const r = evaluate(c, fm); if (r.status === 'IO') io++; if (r.status === 'NIO') nio++;
+    const r = evaluate(c, fm, ctx); if (r.status === 'IO') io++; if (r.status === 'NIO') nio++;
     const fc = fm.get(c.featureIds[0]);
     const tr = document.createElement('tr');
     if (state.selControl === c.id) tr.className = 'sel';
     const td = (html: string | HTMLElement, cls = '') => { const e = document.createElement('td'); e.className = cls; if (typeof html === 'string') e.innerHTML = html; else e.appendChild(html); tr.appendChild(e); return e; };
     td(fc?.name ?? '?');
-    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}`);
-    td(numInput(c.nominal, (x) => (c.nominal = x)), 'num');
+    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag ? ` <span class="flag">⚠ ${r.flag}</span>` : ''}`);
+    td(isDatumControl(c.kind) ? '<span class="note">0</span>' : numInput(c.nominal, (x) => (c.nominal = x)), 'num');
     td(fmt(r.measured), 'num');
     td(fmt(r.deviation), `num dev ${r.status}`);
     td(numInput(c.tolUp, (x) => (c.tolUp = x ?? 0)), 'num');
@@ -685,10 +791,10 @@ function renderTable() {
 function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
   const cs = state.controls.filter((c) => c.featureIds[0] === f.id);
   const rows = cs.map((c) => {
-    const r = evaluate(c, fm);
-    return `<tr class="${r.status === '—' ? '' : r.status}"><td>${CTRL_SYMBOL(c, f)} ${controlLabel(c, f)}</td><td>${fmt(r.measured, 3)}</td><td>${c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`;
+    const r = evaluate(c, fm, ctx);
+    return `<tr class="${r.status === '—' ? '' : r.status}"><td>${CTRL_SYMBOL(c, f)} ${controlLabel(c, f)}${c.datumIds?.length ? ` |${datumText(c, fm)}|` : ''}${r.flag ? ' ⚠' : ''}</td><td>${fmt(r.measured, 3)}</td><td>${c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`;
   }).join('');
-  return `<div class="lh"><i></i>${f.name}</div>${cs.length ? `<table><tr class="lt"><th></th><th>Ist</th><th>Soll</th><th>Abw.</th></tr>${rows}</table>` : ''}`;
+  return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${cs.length ? `<table><tr class="lt"><th></th><th>Ist</th><th>Soll</th><th>Abw.</th></tr>${rows}</table>` : ''}`;
 }
 
 function renderScene() {
@@ -734,3 +840,260 @@ viewer.labels.onMoved = (id, off) => state.labelOffsets.set(id, off);
 viewer.labels.onSelect = (id) => selectFeature(id);
 
 renderAll();
+
+// ------------------------------------------------------------------ Zentrieren
+function featureRadius(f: FeatureView): number {
+  const m = f.measured!;
+  if (f.type === 'Abstand') return Math.max(m.distance! / 2, 1);
+  const P = featPoints(f.id);
+  if (P && P.length) { let r = 0; for (const q of P) r = Math.max(r, Math.hypot(q[0] - m.center[0], q[1] - m.center[1], q[2] - m.center[2])); return r; }
+  return Math.max(m.radius ?? 0, (m.length ?? 0) / 2, 2);
+}
+/** Kamera auf Merkmal (id) bzw. gesamtes Modell (null) zentrieren; ohne Argument: Auswahl. */
+function centerOn(id?: number | null) {
+  const fid = id === undefined ? state.sel[0] ?? null : id;
+  const f = state.features.find((x) => x.id === fid);
+  if (!f) { viewer.view('fit'); status('Modell zentriert.'); return; }
+  viewer.focus(f.measured!.center as [number, number, number], featureRadius(f));
+  status(`${f.name} zentriert.`);
+}
+{
+  const b = document.createElement('button'); b.id = 'btn-center'; b.title = 'Zentrieren: Ansicht auf Auswahl (oder Modell) ausrichten';
+  b.innerHTML = '<span>⌖</span> Zentrieren'; b.onclick = () => centerOn();
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  viewer.el.appendChild(b);
+}
+
+// ------------------------------------------------------------------ Kontextmenü (Rechtsklick / langes Tippen)
+const ctxMenu = document.createElement('div'); ctxMenu.id = 'ctx-menu'; ctxMenu.className = 'hidden'; document.body.appendChild(ctxMenu);
+function openContext(x: number, y: number, fid: number | null) {
+  const f = state.features.find((g) => g.id === fid);
+  const items: [string, () => void][] = [['⌖ Zentrieren', () => centerOn(fid)]];
+  if (f) {
+    state.sel = [f.id]; state.addFeat = f.id; renderAll();
+    if (datumKind(f.type)) {
+      items.push([f.datum ? `Bezug ${f.datum} umbenennen …` : 'Bezug zuweisen …', () => { togglePanel('dialog', true); setTimeout(() => ($('#dt-letter') as HTMLSelectElement)?.focus(), 50); }]);
+      if (!f.datum) items.push([`Als Bezug ${nextFreeLetter()} festlegen`, () => setDatum(f, nextFreeLetter())]);
+      else items.push([`Bezug ${f.datum} entfernen`, () => setDatum(f, null)]);
+    }
+    items.push([state.hidden.has(f.id) ? 'Einblenden' : 'Ausblenden', () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
+    items.push(['Prüfmerkmale (Katalog)', () => { state.ctab = 'katalog'; togglePanel('table', true); renderTable(); }]);
+    items.push(['Löschen', () => { state.selControl = null; deleteSelected(); }]);
+  }
+  ctxMenu.innerHTML = items.map(([t], i) => `<button data-i="${i}">${t}</button>`).join('');
+  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!][1](); }));
+  ctxMenu.classList.remove('hidden');
+  const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
+  ctxMenu.style.left = Math.min(x, innerWidth - w - 4) + 'px'; ctxMenu.style.top = Math.min(y, innerHeight - h - 4) + 'px';
+}
+window.addEventListener('pointerdown', (e) => { if (!ctxMenu.contains(e.target as Node)) ctxMenu.classList.add('hidden'); }, true);
+function attachContext(el: HTMLElement, fid: number | null) {
+  el.oncontextmenu = (e) => { e.preventDefault(); openContext(e.clientX, e.clientY, fid); };
+  let t = 0, x0 = 0, y0 = 0;
+  el.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; x0 = e.clientX; y0 = e.clientY; t = window.setTimeout(() => { t = 0; openContext(x0, y0, fid); }, 550); });
+  el.addEventListener('pointermove', (e) => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) { clearTimeout(t); t = 0; } });
+  el.addEventListener('pointerup', () => { if (t) clearTimeout(t); t = 0; });
+}
+
+// ------------------------------------------------------------------ Projekt speichern / öffnen / Autosave
+let loadCount = 0, meshKey = '', restoring = false;
+function projectJSON() {
+  const feats = state.features.map(({ indices, auxIndices, candidates, ...rest }) => { void indices; void auxIndices; void candidates; return rest; });
+  return {
+    savedAt: new Date().toISOString(), app: 'MessWerk 3D',
+    mesh: { name: state.data!.name, vertexCount: state.data!.vertexCount, triCount: state.data!.triCount },
+    state: {
+      features: feats, controls: state.controls, typeCount: state.typeCount, nextId: state.nextId, nextCtrl: state.nextCtrl, nextReport: state.nextReport,
+      reports: state.reports, hidden: [...state.hidden], modelVisible: state.modelVisible, labelOffsets: [...state.labelOffsets.entries()],
+      showLabels: state.showLabels, showPrims: state.showPrims, colorPts: state.colorPts, opts: state.opts, camera: viewer.getCamera(),
+    },
+  };
+}
+function featureIndexBlob() {
+  const o: Record<string, Uint32Array | undefined> = {};
+  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; }
+  return packIndices(o);
+}
+function meshArrays() {
+  const g = viewer.model!.geometry;
+  return { positions: g.getAttribute('position').array as Float32Array, indices: (g.index?.array ?? new Uint32Array(0)) as Uint32Array };
+}
+async function saveProject() {
+  if (!state.data) { toast('Kein Projekt zum Speichern.'); return; }
+  const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob());
+  const name = state.data.name.replace(/\.[^.]+$/, '') + '.mw3d';
+  const file = new File([bin as BlobPart], name, { type: 'application/octet-stream' });
+  const nav = navigator as any;
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent) && nav.canShare?.({ files: [file] })) {
+    try { await nav.share({ files: [file], title: name }); toast(`✔ ${name} geteilt/gesichert`); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`✔ Projekt gespeichert: ${name} (${(bin.length / 1048576).toFixed(1)} MB)`);
+}
+async function applyProject(json: any, mesh: { positions: Float32Array; indices: Uint32Array }, idx: { offsets: any; data: Uint32Array }) {
+  restoring = true;
+  try {
+    const r = await busy(engine.call<any>({ op: 'loadRaw', name: json.mesh.name, positions: mesh.positions.slice(), indices: mesh.indices.slice() }));
+    viewer.setModel(r.positions, r.indices, r.normals);
+    const st = json.state;
+    state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
+    state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id) }));
+    state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
+    state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
+    state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
+    if (st.opts) Object.assign(state.opts, st.opts);
+    state.sel = []; state.mode = null; state.preview = null; state.openReport = null; ptsCache.clear();
+    $('#projname').textContent = r.name; $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
+    loadCount++; await storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
+    renderAll();
+    if (st.camera) viewer.setCamera(st.camera);
+  } finally { restoring = false; }
+  scheduleAutosave();
+}
+async function openProjectFile(buf: ArrayBuffer, name: string) {
+  try {
+    const p = readProject(new Uint8Array(buf));
+    await applyProject(p.json, p.mesh, p.idx);
+    toast(`✔ Projekt ${name} geladen (${state.features.length} Merkmale, ${state.controls.length} Prüfmerkmale)`);
+  } catch (e: any) { toast('Projekt konnte nicht geladen werden: ' + e.message); }
+}
+async function storeMeshForAutosave(name: string) {
+  if (!viewer.model) return;
+  meshKey = name + ':' + Date.now();
+  try { const m = meshArrays(); await idbSet('mesh', { key: meshKey, name, positions: m.positions, indices: m.indices }); } catch (e) { console.warn('Autosave (Netz) nicht möglich', e); }
+}
+let autoTimer = 0;
+function scheduleAutosave() {
+  if (!state.data || restoring || !meshKey) return;
+  clearTimeout(autoTimer);
+  autoTimer = window.setTimeout(async () => {
+    try {
+      const b = featureIndexBlob();
+      await idbSet('project', { meshKey, savedAt: new Date().toISOString(), json: projectJSON(), idxOffsets: b.offsets, idxData: b.data, features: state.features.length });
+      $('#autosave').textContent = 'Autosave ' + new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch (e) { console.warn('Autosave fehlgeschlagen', e); }
+  }, 1500);
+}
+async function restoreLast() {
+  const p = await idbGet('project'), m = await idbGet('mesh');
+  if (!p || !m || p.meshKey !== m.key) { toast('Kein gespeichertes Projekt gefunden.'); return; }
+  await applyProject(p.json, { positions: m.positions, indices: m.indices }, { offsets: p.idxOffsets, data: p.idxData });
+  $('#restore-bar').classList.add('hidden');
+  toast(`✔ Letztes Projekt wiederhergestellt (${p.features} Merkmale)`);
+}
+(async () => {
+  try {
+    const p = await idbGet('project');
+    if (p && !state.data) {
+      const bar = $('#restore-bar');
+      bar.innerHTML = `<span>Letztes Projekt vom ${new Date(p.savedAt).toLocaleString('de-DE')} (${p.json.mesh.name}, ${p.features} Merkmale)</span>
+        <button class="btn primary" id="rb-restore">Letztes Projekt wiederherstellen</button><button class="btn" id="rb-discard">Verwerfen</button>`;
+      bar.classList.remove('hidden');
+      ($('#rb-restore') as HTMLButtonElement).onclick = () => restoreLast();
+      ($('#rb-discard') as HTMLButtonElement).onclick = async () => { await idbDel('project'); await idbDel('mesh'); bar.classList.add('hidden'); };
+    }
+  } catch { /* IndexedDB nicht verfügbar */ }
+})();
+$('#btn-save').onclick = () => saveProject();
+$('#file-project').onchange = async (e) => {
+  const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
+  await openProjectFile(await f.arrayBuffer(), f.name); (e.target as HTMLInputElement).value = '';
+};
+$('#btn-restore').onclick = () => restoreLast();
+
+// ------------------------------------------------------------------ Hilfe + Trainingsmodus
+$('#btn-help').onclick = () => {
+  const el = $('#help-view'); el.classList.remove('hidden');
+  el.innerHTML = `<div class="rv-head"><b>Hilfe: Bezüge und Toleranzen mit Bezug</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 Training starten</button><button class="btn" id="hv-close">✕</button></div>
+  <div class="rv-body">${HELP_HTML}</div>`;
+  ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
+  ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
+};
+const HELP_HTML = `<h3>Bezug zuweisen (ISO 5459)</h3><ol><li>Merkmal wählen (Ebene, Zylinder/Bohrung, Kreis, Kegel, Langloch, Torus, Kugel).</li>
+<li>Dialog › <b>Bezug</b>: Buchstaben wählen › <b>Bezug zuweisen</b> – oder Rechtsklick/langes Tippen im Baum › „Als Bezug … festlegen“.</li>
+<li>Umbenennen: anderen Buchstaben wählen; ist er vergeben, werden die Buchstaben <b>getauscht</b>. Prüfmerkmale verweisen auf das Merkmal und passen sich an.</li>
+<li>Entfernen: Prüfmerkmale, die den Bezug nutzen, bleiben erhalten und werden mit ⚠ „Bezug entfernt“ markiert, bis ein Bezug wieder zugewiesen wird.</li></ol>
+<h3>Bezugssystem A|B|C</h3><ul><li><b>Primär A</b> legt die Orientierung fest: Ebene → Z = Normale aus dem Material, Ursprung auf A; Achse → Z = Achse.</li>
+<li><b>Sekundär B</b>: Ebene → Richtung in A (senkrecht zu B) und Ursprung auf B; Achse/Kreis → Ursprung auf der Achse von B.</li>
+<li><b>Tertiär C</b> legt die verbleibende Drehung bzw. die letzte Ursprungskoordinate fest. X/Y werden so benannt, dass X der Welt-X-Richtung am nächsten liegt.</li></ul>
+<h3>Toleranzen mit Bezug</h3><ul><li><b>∥ Parallelität / ⟂ Rechtwinkligkeit / ∠ Neigung</b>: Ebenen – Abstand zweier Ebenen in Sollrichtung, die alle Punkte enthalten; Achsen – Länge × sin(Winkelfehler).</li>
+<li><b>⌖ Position</b>: theoretisch genaue Maße [X][Y][Z] im Bezugssystem von Hand. Achsen: zylindrische Zone Ø = 2 × größter Abstand der Achsendpunkte von der Soll-Achse; Kugel/Torus/Punkt: SØ; Ebene: 2 × größter Punktabstand zur Soll-Ebene.</li>
+<li><b>◎ Koaxialität / Konzentrizität</b>: Ø = 2 × Abstand der Achse (Endpunkte) bzw. des Mittelpunkts zur Bezugsachse.</li>
+<li><b>⌯ Symmetrie</b>: 2 × Abstand der Mittelebene/des Mittelpunkts vom Bezug (Langloch: in Breitenrichtung).</li>
+<li><b>↗ Rundlauf</b>: radiale Abstände der Punkte zur Bezugsachse in Messkreisen (Schnitte); größte Spanne. <b>⌰ Gesamtrundlauf</b>: Spanne über die ganze Fläche.</li>
+<li><b>⌓ Flächenprofil mit Bezug</b>: konservative Abschätzung 2 × (max. Formabweichung + Lageabweichung des Mittelpunkts).</li></ul>
+<p class="note">Alle Werte werden aus den gemessenen (Ist-)Geometrien berechnet; ohne CAD gibt es kein Soll-Modell – Sollmaße werden eingetippt.</p>`;
+
+let tour: Tour | null = null;
+const worldToScreen = (p: Vec3) => {
+  const v = viewer.camera.position.clone().set(p[0], p[1], p[2]).project(viewer.camera);
+  const r = canvas.getBoundingClientRect();
+  if (v.z > 1) return null;
+  const x = r.left + ((v.x + 1) / 2) * r.width, y = r.top + ((1 - v.y) / 2) * r.height;
+  const h = viewer.pick(x, y); // verdeckt? dann kein Marker
+  if (!h || Math.hypot(h.point[0] - p[0], h.point[1] - p[1], h.point[2] - p[2]) > 1.5) return null;
+  return { x, y };
+};
+const findF = (pred: (f: FeatureView) => boolean) => state.features.find(pred);
+const isTop = (f: FeatureView) => f.type === 'Ebene' && f.measured!.normal[2] > 0.99 && Math.abs(f.measured!.center[2] - 20) < 0.2;
+const isFront = (f: FeatureView) => f.type === 'Ebene' && Math.abs(f.measured!.normal[1]) > 0.99 && Math.abs(f.measured!.center[1]) < 0.2;
+const isLeft = (f: FeatureView) => f.type === 'Ebene' && Math.abs(f.measured!.normal[0]) > 0.99 && Math.abs(f.measured!.center[0]) < 0.2;
+const isHole = (f: FeatureView) => f.type === 'Zylinder' && Math.abs(f.measured!.diameter! - 12.08) < 0.3;
+const pv = (pred: (m: FitResult) => boolean) => () => !!state.preview && pred(state.preview.fit);
+const tab = (t: string) => () => (document.querySelector(`.tab[data-tab="${t}"]`) as HTMLButtonElement)?.click();
+function datumSteps(letter: string, pred: (f: FeatureView) => boolean, what: string): TourStep {
+  return {
+    title: `Bezug ${letter} zuweisen`, text: `${what} ist ausgewählt. Wähle im Dialog unter <b>Bezug</b> den Buchstaben <b>${letter}</b> und tippe auf <b>Bezug zuweisen</b>.`,
+    target: () => document.querySelector('#dt-box'),
+    enter: () => { const f = findF(pred); if (f) { state.sel = [f.id]; state.mode = null; renderAll(); } if (isPhone()) togglePanel('dialog', true); setTimeout(() => { const s = document.querySelector<HTMLSelectElement>('#dt-letter'); if (s && !findF(pred)?.datum) s.value = letter; }, 50); },
+    check: () => findF(pred)?.datum === letter,
+  };
+}
+function planeSteps(name: string, p: Vec3, dir: [number, number, number] | null, pred: (f: FeatureView) => boolean, nPred: (m: FitResult) => boolean): TourStep[] {
+  return [
+    { title: `${name} antippen`, text: `Modus <b>Ebene</b> ist aktiv. Tippe auf die markierte Stelle (gelber Ring) – die <b>${name}</b> des Teils. Es erscheint eine orange Vorschau.`,
+      world: () => worldToScreen(p),
+      enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); if (state.mode?.kind !== 'fit' || state.mode.type !== 'Ebene') startFitMode('Ebene'); dir ? viewer.viewDir(dir) : viewer.view('iso'); },
+      check: () => !!findF(pred) || pv(nPred)() },
+    { title: 'Erzeugen', text: 'Prüfe die Kennwerte (Punkte, RMS, Ebenheit) und tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(pred) },
+  ];
+}
+function startTraining() {
+  if (tour) return;
+  let lc0 = loadCount;
+  const steps: TourStep[] = [
+    { title: 'Training: Bezüge & Position', text: 'In dieser geführten Übung legst du am Beispielteil das Bezugssystem <b>A|B|C</b> fest (Oberseite, Vorderseite, linke Seite) und prüfst die <b>Position</b> der Bohrung Ø12 mit Bezug auf A|B|C.<br>Jeder Schritt wird automatisch geprüft. Mit <b>Weiter</b> geht es los.' },
+    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b>. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
+      target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
+      check: () => loadCount > lc0 && !!state.data?.name.startsWith('beispielteil') },
+    { title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
+    { title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => state.mode?.kind === 'fit' && state.mode.type === 'Ebene' },
+    ...planeSteps('Oberseite', [70, 50, 20], null, isTop, (m) => m.type === 'Ebene' && m.normal[2] > 0.99),
+    datumSteps('A', isTop, 'Die Oberseite (primärer Bezug: legt die Orientierung fest)'),
+    ...planeSteps('Vorderseite', [50, 0, 10], null, isFront, (m) => m.type === 'Ebene' && Math.abs(m.normal[1]) > 0.99),
+    datumSteps('B', isFront, 'Die Vorderseite (sekundärer Bezug: Richtung in A und Ursprung in Y)'),
+    ...planeSteps('linke Seite', [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99),
+    datumSteps('C', isLeft, 'Die linke Seite (tertiärer Bezug: Ursprung in X)'),
+    { title: 'Merkmalstyp Zylinder', text: 'Wähle im Register Merkmale den Typ <b>Zylinder</b>.', target: () => document.querySelector('[data-ftype="Zylinder"]'),
+      enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); viewer.view('iso'); }, check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Zylinder') || !!findF(isHole) },
+    { title: 'Bohrung Ø12 antippen', text: 'Tippe auf die <b>Wand der Bohrung</b> (gelber Ring).', world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
+      check: () => !!findF(isHole) || pv((m) => m.type === 'Zylinder' && Math.abs(m.diameter! - 12.08) < 0.3)() },
+    { title: 'Erzeugen', text: 'Tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#pc-create'), check: () => !!findF(isHole) },
+    { title: 'Positionstoleranz ⌖ A|B|C', text: 'Im Fenster <b>Prüfmerkmale</b> (Katalog) unter „Mit Bezug“ den Haken bei <b>⌖ Position</b> setzen. Die Bezüge A|B|C werden automatisch eingetragen.',
+      target: () => document.querySelector('#catalog .cat-item[data-kind="Position"]'),
+      enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.addFeat = f.id; state.ctab = 'katalog'; state.mode = null; renderAll(); } if (isPhone()) togglePanel('table', true); },
+      check: () => { const f = findF(isHole); const fm = featMap(); return !!f && state.controls.some((c) => c.kind === 'Position' && c.featureIds[0] === f.id && datumText(c, fm) === 'A|B|C'); } },
+    { title: 'Sollmaße [X] [Y] und Toleranz', text: 'Trage die theoretisch genauen Maße <b>[X] = 20</b> und <b>[Y] = 20</b> ein (bereits vorbelegt, bitte prüfen) und lasse die Toleranz <b>Ø 0,1</b>. Ergebnis: IO/NIO und Eintrag im 3D-Label.',
+      target: () => document.querySelector('#catalog .cat-item[data-kind="Position"] .cat-ed'),
+      check: () => { const f = findF(isHole); const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f?.id); return !!c && Math.abs((c.basic?.[0] ?? 0) - 20) < 1e-6 && Math.abs((c.basic?.[1] ?? 0) - 20) < 1e-6; } },
+    { title: 'Geschafft! 🎉', text: 'Die Bohrung ist jetzt mit <b>⌖ Ø0,1 | A | B | C</b> toleriert. Die Bezugsfahnen stehen im Baum und in den 3D-Labels. Bezüge lassen sich im Dialog umbenennen (Buchstaben tauschen) oder entfernen – abhängige Prüfmerkmale werden dann markiert.',
+      enter: () => { if (isPhone()) togglePanel('table', false); viewer.view('iso'); } },
+  ];
+  tour = new Tour('Training Bezüge', steps, () => { tour = null; (window as any).__app.tour = null; });
+  (window as any).__app.tour = tour;
+  tour.start();
+}
+$('#btn-training').onclick = () => startTraining();
+Object.assign((window as any).__app, { renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
+viewer.controls.addEventListener('end', () => scheduleAutosave());

@@ -1,5 +1,5 @@
 // Bericht ("Tabelle erzeugen"): eingefrorene Momentaufnahme aller Merkmale und Prüfmerkmale.
-import { Control, Feature, FORM_NAME, DEG, controlLabel, evaluate } from './features';
+import { Control, Feature, FORM_NAME, DEG, controlLabel, evaluate, datumText, EvalCtx } from './features';
 
 export interface ReportFeatureRow { name: string; type: string; x: number; y: number; z: number; i: number; j: number; k: number;
   size: string; form: number | null; formName: string; rms: number | null; points: number; aux: string; }
@@ -15,25 +15,27 @@ export function sizeText(f: Feature): string {
     case 'Kreis': case 'Zylinder': case 'Kugel': return `⌀ ${f4(m.diameter)}`;
     case 'Kegel': return `∢ ${f4(2 * m.halfAngle! * DEG, 3)}° / ⌀ ${f4(m.diameter)}`;
     case 'Langloch': return `${f4(m.length)} × ${f4(m.width)}`;
+    case 'Torus': return `⌀ ${f4(m.diameter)} / Rohr ⌀ ${f4(2 * m.minorRadius!)}`;
     case 'Abstand': return `${f4(m.distance)}`;
     default: return '';
   }
 }
 
-export function buildReport(id: number, features: Feature[], controls: Control[], source: string, now = new Date()): Report {
+export function buildReport(id: number, features: Feature[], controls: Control[], source: string, now = new Date(), ctx: EvalCtx = {}): Report {
   const fm = new Map(features.map((f) => [f.id, f]));
   const frows: ReportFeatureRow[] = features.map((f) => {
     const m = f.measured!;
     const isD = f.type === 'Abstand';
-    return { name: f.name, type: f.type, x: m.center[0], y: m.center[1], z: m.center[2], i: m.normal[0], j: m.normal[1], k: m.normal[2],
+    return { name: f.name + (f.datum ? ` [${f.datum}]` : ''), type: f.type, x: m.center[0], y: m.center[1], z: m.center[2], i: m.normal[0], j: m.normal[1], k: m.normal[2],
       size: sizeText(f), form: isD ? null : m.form, formName: isD ? '' : FORM_NAME[f.type], rms: isD ? null : m.rms, points: f.pointCount,
       aux: f.aux ? `Hilfsebene (${f.aux.source}, Ebenheit ${f4(f.aux.plane.form)})` : '' };
   });
   let io = 0, nio = 0;
   const crows: ReportControlRow[] = controls.map((c) => {
-    const f = fm.get(c.featureIds[0]); const r = evaluate(c, fm);
+    const f = fm.get(c.featureIds[0]); const r = evaluate(c, fm, ctx);
     if (r.status === 'IO') io++; if (r.status === 'NIO') nio++;
-    return { feature: f?.name ?? '?', control: controlLabel(c, f), nominal: c.nominal, measured: r.measured, deviation: r.deviation, tolUp: c.tolUp, tolLo: c.tolLo, status: r.status };
+    const dt = datumText(c, fm);
+    return { feature: f?.name ?? '?', control: controlLabel(c, f) + (dt ? ` |${dt}|` : '') + (r.flag ? ` ⚠ ${r.flag}` : ''), nominal: c.nominal, measured: r.measured, deviation: r.deviation, tolUp: c.tolUp, tolLo: c.tolLo, status: r.status };
   });
   return { id, name: `Tabelle ${id}`, created: now.toLocaleString('de-DE'), source, features: frows, controls: crows, io, nio };
 }

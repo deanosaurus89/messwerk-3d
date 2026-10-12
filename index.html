@@ -17,6 +17,7 @@
     <button class="tab" data-tab="merkmale">Merkmale</button>
     <button class="tab" data-tab="pruef">Prüfmerkmale</button>
     <button class="tab" data-tab="ansicht">Ansicht</button>
+    <button class="tab" data-tab="hilfe">Hilfe</button>
   </nav>
   <section id="ribbon">
     <div class="panel" data-tab="start">
@@ -24,6 +25,11 @@
         <label class="big" title="Polygonmodell oder Punktwolke importieren"><span class="ico">⤓</span>Importieren<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc" hidden /></label>
         <button class="big" id="btn-sample"><span class="ico">▣</span>Beispiel laden</button>
       </div><div class="glabel">Daten</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-save" title="Projekt als .mw3d speichern"><span class="ico">💾</span>Projekt speichern</button>
+        <label class="big" title="Projekt (.mw3d) öffnen"><span class="ico">📂</span>Projekt öffnen<input type="file" id="file-project" accept=".mw3d,application/zip,application/octet-stream" hidden /></label>
+        <button class="big" id="btn-restore" title="Autosave wiederherstellen"><span class="ico">↺</span>Letztes Projekt</button>
+      </div><div class="glabel">Projekt <span id="autosave"></span></div></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-csv"><span class="ico">⎙</span>Tabelle CSV</button>
         <button class="big" id="btn-csv-feat"><span class="ico">⎙</span>Merkmale CSV</button>
@@ -45,6 +51,12 @@
         <button class="big" id="btn-csv2" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>Liste CSV</button>
       </div><div class="glabel">Bericht · Prüfmerkmale im Katalog unter der 3D-Ansicht abhaken</div></div>
     </div>
+    <div class="panel hidden" data-tab="hilfe">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-training"><span class="ico">🎓</span>Trainingsmodus: Bezüge</button>
+        <button class="big" id="btn-help"><span class="ico">?</span>Hilfe Bezüge</button>
+      </div><div class="glabel">Hilfe</div></div>
+    </div>
     <div class="panel hidden" data-tab="ansicht">
       <div class="group"><div class="btns">
         <button class="big" data-view="iso"><span class="ico">◩</span>Isometrisch</button>
@@ -65,7 +77,7 @@
   <main id="workspace">
     <aside id="tree-pane"><div class="pane-title">Baumansicht</div><div id="tree"></div></aside>
     <div id="center">
-      <div id="scene"><div id="viewcube"><button data-view="iso" title="Isometrisch">Iso</button><button data-view="fit" title="Einpassen">⤢</button></div><div id="report-view" class="hidden"></div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
+      <div id="scene"><div id="viewcube"><button data-view="iso" title="Isometrisch">Iso</button><button data-view="fit" title="Einpassen">⤢</button></div><div id="report-view" class="hidden"></div><div id="help-view" class="hidden"></div><div id="restore-bar" class="hidden"></div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
       <div id="table-pane" data-ctab="katalog"><div class="pane-title">Prüfmerkmale <span id="summary"></span>
           <span class="ctabs"><button data-ctab="katalog">Katalog</button><button data-ctab="liste">Alle <span id="ctab-n"></span></button></span></div>
         <div id="ctrl-body"><div id="catalog"></div>

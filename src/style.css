@@ -177,3 +177,36 @@ td.dev.IO { color:var(--io); font-weight:600; } td.dev.NIO { color:var(--nio); f
 @media (max-height: 560px) { #preview-card { left:auto; } }
 
 body.previewing .lbl { opacity:.35; } body.previewing #leaders { opacity:.35; }
+/* ---- v4 ---- */
+#btn-center { position:absolute; left:12px; bottom:132px; z-index:6; padding:6px 10px; border:1px solid #9fb2c8; border-radius:6px; background:#fffffff0; font:600 12.5px system-ui; color:#1e3a5c; box-shadow:0 2px 6px rgba(0,0,0,.2); min-height:34px; }
+#btn-center span { font-size:15px; } #btn-center:active { background:#dbe8f6; }
+.dflag { display:inline-block; min-width:15px; padding:0 3px; margin-left:4px; border:1.5px solid #111; background:#fff; color:#111; font:700 11px/14px system-ui; text-align:center; position:relative; }
+.dflag::after { content:''; position:absolute; left:50%; bottom:-6px; margin-left:-4px; border:4px solid transparent; border-top:5px solid #111; border-bottom:0; }
+.frame { font-family:ui-monospace,monospace; border:1px solid #333; padding:0 3px; white-space:nowrap; background:#fff; }
+.flag { color:#b45309; font-weight:600; font-size:11px; }
+.datum-ed { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin:3px 0 0 20px; font-size:11.5px; } .datum-ed input { width:52px; }
+.dref { width:70px !important; text-transform:uppercase; }
+.linkbtn { background:none; border:none; color:#1d64c8; text-decoration:underline; cursor:pointer; padding:0; font:inherit; }
+#ctx-menu { position:fixed; z-index:60; background:#fff; border:1px solid #9fb2c8; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.25); display:flex; flex-direction:column; min-width:190px; padding:4px; }
+#ctx-menu.hidden { display:none; } #ctx-menu button { text-align:left; border:none; background:none; padding:8px 10px; font:13px system-ui; border-radius:4px; } #ctx-menu button:hover { background:#e6eef8; }
+#restore-bar { position:absolute; left:50%; top:10px; transform:translateX(-50%); z-index:9; background:#fffbe8; border:1px solid #e0c66a; border-radius:6px; padding:6px 10px; display:flex; gap:8px; align-items:center; font-size:12.5px; box-shadow:0 3px 12px rgba(0,0,0,.2); max-width:96%; flex-wrap:wrap; }
+#restore-bar.hidden, #help-view.hidden { display:none; } #restore-bar .btn { margin:0; }
+#help-view { position:absolute; left:126px; right:12px; top:44px; bottom:12px; z-index:8; background:#fff; border:1px solid #9fb2c8; border-radius:6px; display:flex; flex-direction:column; box-shadow:0 6px 24px rgba(0,0,0,.3); font-size:13px; }
+#help-view .note { color:#55626f; } #autosave { color:#6b7a89; font-weight:400; }
+#tour-card { position:fixed; right:14px; bottom:14px; z-index:70; width:min(360px, calc(100vw - 20px)); background:#fff; border:2px solid #1d64c8; border-radius:10px; padding:10px 12px; box-shadow:0 10px 30px rgba(0,0,0,.35); font-size:13px; }
+#tour-card.top { bottom:auto; top:14px; }
+.tc-head { display:flex; align-items:center; gap:8px; } .tc-badge { font-weight:700; color:#1d64c8; } .tc-n { flex:1; color:#6b7a89; font-size:12px; }
+.tc-x { border:none; background:none; font-size:18px; padding:2px 6px; } .tc-title { font-weight:700; font-size:15px; margin:6px 0 4px; }
+.tc-state { margin-top:6px; color:#8a6d00; } .tc-state.ok { color:var(--io); font-weight:600; }
+.tc-btns { display:flex; justify-content:space-between; margin-top:8px; } .tc-btns .btn { min-height:38px; padding:6px 14px; }
+#tour-hl { position:fixed; z-index:65; pointer-events:none; border:3px solid #f59e0b; border-radius:8px; box-shadow:0 0 0 4px rgba(245,158,11,.3); transition:all .2s; }
+#tour-marker { position:fixed; z-index:65; pointer-events:none; width:34px; height:34px; margin:-17px 0 0 -17px; border:4px solid #facc15; border-radius:50%; box-shadow:0 0 0 3px rgba(0,0,0,.4); animation:tourpulse 1.2s infinite; }
+#tour-hl.hidden, #tour-marker.hidden { display:none; }
+@keyframes tourpulse { 50% { transform:scale(1.35); } }
+body.training .lbl { pointer-events:none !important; }
+@media (max-width: 900px), (max-height: 560px) {
+  #btn-center { left:6px; bottom:96px; padding:5px 8px; }
+  body.show-table #btn-center, body.show-tree #btn-center, body.show-dialog #btn-center { bottom:auto; top:8px; }
+  #help-view { left:4px; right:4px; top:4px; bottom:4px; }
+  #tour-card { right:6px; left:6px; width:auto; bottom:6px; font-size:12.5px; }
+}
