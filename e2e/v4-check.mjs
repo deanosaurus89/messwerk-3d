@@ -13,7 +13,7 @@ const browser = MODE === 'desktop'
   ? await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
   : await webkit.launch();
 const ctx = await browser.newContext(MODE === 'desktop' ? { viewport: { width: 1600, height: 950 }, acceptDownloads: true }
-  : { ...devices[MODE === 'iphone' ? 'iPhone 14 Pro' : 'iPad Pro 11 landscape'], acceptDownloads: true });
+  : { ...devices[{ iphone: 'iPhone 14 Pro', 'iphone-quer': 'iPhone 14 Pro landscape', ipad: 'iPad Pro 11 landscape' }[MODE]], acceptDownloads: true });
 const page = await ctx.newPage();
 const touch = MODE !== 'desktop';
 const errors = [];
@@ -53,7 +53,7 @@ try {
   while (guard++ < 200) {
     const t = await tourInfo(); if (!t) break;
     if (t.idx === lastIdx) sameCount++; else { sameCount = 0; lastIdx = t.idx; console.log(`  Schritt ${t.idx + 1}/${t.n}: ${t.title}`); await sleep(400); continue; }
-    if (sameCount > 60) { fail('Training hängt bei: ' + t.title + ' / Status: ' + await page.textContent('#status')); break; }
+    if (sameCount > 60) { await shot('training-haengt'); console.log(JSON.stringify(t)); fail('Training hängt bei: ' + t.title + ' / Status: ' + await page.textContent('#status')); break; }
     if (t.ok || /Training:|Geschafft|Sollmaße/.test(t.title)) {
       if (t.idx === t.n - 1) { await shot('training-fertig'); await page.click('#tc-next'); break; }
       if (await page.locator('#tc-next').isEnabled()) await page.click('#tc-next').catch(() => {});

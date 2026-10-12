@@ -210,3 +210,7 @@ body.training .lbl { pointer-events:none !important; }
   #help-view { left:4px; right:4px; top:4px; bottom:4px; }
   #tour-card { right:6px; left:6px; width:auto; bottom:6px; font-size:12.5px; }
 }
+
+#tour-card.side { top:6px; bottom:6px; right:6px; left:auto; width:min(300px, 40vw); overflow:auto; font-size:12px; padding:8px 10px; }
+#tour-card.side.left { right:auto; left:6px; }
+#tour-card.side .tc-title { font-size:13.5px; margin:4px 0 2px; } #tour-card.side .tc-btns .btn { min-height:34px; padding:4px 10px; }

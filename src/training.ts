@@ -69,7 +69,10 @@ export class Tour {
     const w = s.world?.();
     if (w) { this.mk.style.display = 'block'; this.mk.style.left = w.x + 'px'; this.mk.style.top = w.y + 'px'; } else this.mk.style.display = 'none';
     // Karte nicht über das Ziel legen
-    const y = r ? r.top + r.height / 2 : w ? w.y : 0;
-    this.card.classList.toggle('top', y > window.innerHeight * 0.5);
+    const y = r ? r.top + r.height / 2 : w ? w.y : 0, x = r ? r.left + r.width / 2 : w ? w.x : window.innerWidth;
+    const flat = window.innerHeight < 560 && window.innerWidth > window.innerHeight; // Querformat Telefon: Karte seitlich
+    this.card.classList.toggle('side', flat);
+    this.card.classList.toggle('left', flat && x > window.innerWidth * 0.5);
+    this.card.classList.toggle('top', !flat && y > window.innerHeight * 0.5);
   }
 }
