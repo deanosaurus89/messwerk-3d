@@ -16,22 +16,29 @@ const S = (fn, a) => page.evaluate(fn, a);
 const P = MODE === 'desktop' ? 'desktop' : 'iphone';
 async function clickWorld(p, views) {
   for (const v of views) {
+    await S(([v, p]) => { const { viewer } = window.__app; if (typeof v === 'string') viewer.view(v); else if (v.focus) { viewer.viewDir(v.focus); viewer.focus(p, 12); } else { viewer.viewDir(v); viewer.view('fit'); viewer.viewDir(v); } }, [v, p]);
+    await sleep(400); // Layout/Kamera setzen lassen (Telefon: Panels ändern die Canvasgröße)
     const xy = await S(([p, v]) => {
-      const { viewer } = window.__app; if (typeof v === 'string') viewer.view(v); else { viewer.viewDir(v); viewer.view('fit'); viewer.viewDir(v); }
+      const { viewer } = window.__app; void v;
       const q = viewer.camera.position.clone().set(p[0], p[1], p[2]).project(viewer.camera);
-      const r = viewer.renderer.domElement.getBoundingClientRect(); const x = r.left + (q.x + 1) / 2 * r.width, y = r.top + (1 - q.y) / 2 * r.height;
+      const r = viewer.renderer.domElement.getBoundingClientRect(); const x = Math.floor(r.left + (q.x + 1) / 2 * r.width), y = Math.floor(r.top + (1 - q.y) / 2 * r.height); // Touch-Tipp landet auf ganzen Pixeln
       const h = viewer.pick(x, y);
       return h && document.elementFromPoint(x, y) === viewer.renderer.domElement && Math.hypot(h.point[0] - p[0], h.point[1] - p[1], h.point[2] - p[2]) < 0.6 ? [x, y] : null;
     }, [p, v]);
     if (xy) {
       touch ? await page.touchscreen.tap(xy[0], xy[1]) : await page.mouse.click(xy[0], xy[1]);
-      if (await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 25000 }).then(() => true, () => false)) return true;
+      if (await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 25000 }).then(() => true, () => false)) {
+        const h = await S(() => { const pv = window.__app.state.preview; return pv.hit?.point ?? pv.hit; });
+        if (!Array.isArray(h) || Math.hypot(h[0] - p[0], h[1] - p[1], h[2] - p[2]) < 1.0) return true;
+        console.log('    (Tipp traf', h.map((v) => v.toFixed(2)).join(','), 'statt Prüfpunkt – nächste Ansicht)');
+        await page.click('#pc-discard').catch(() => {});
+      }
       console.log('    (keine Vorschau nach Klick – nächste Ansicht; Status:', await page.textContent('#status'), ')');
     }
   }
   return false;
 }
-const VIEWS = ['iso', '+Z', '-Y', '+X', '-X', '+Y', [1, -1, 0.3], [-1, -1, 0.3], [0, -1, 0.15], [1, 1, 0.5]];
+const VIEWS = ['iso', '+Z', '-Y', '+X', '-X', '+Y', [1, -1, 0.3], [-1, -1, 0.3], [0, -1, 0.15], [1, 1, 0.5], ...[[0, 0, 1], [1, 0.2, 1.2], [-1, 0.2, 1.2], [0.2, 1, 1.2], [0.2, -1, 1.2], [1, -1, 0.3]].map((d) => ({ focus: d }))];
 const ACCEPT = { Zylinder: ['Zylinder', 'Kreis'], Langloch: ['Langloch'], Ebene: ['Ebene'], Kugel: ['Kugel'], Kegel: ['Kegel'], Torus: ['Torus'] };
 const close = { pruefplatte: [[85.2, 45, 14], [1, -1.6, 1.1], 3.2], flansch: [[0, -22.5, 38], [0.3, -1, 0.3], 3.5], freiform: [[70, 30, 20.2], [0.4, -1, 0.9], 3.5] };
 try {
@@ -58,7 +65,7 @@ try {
       tried++;
       if (!(await clickWorld(f.probe, VIEWS))) { console.log(`  ${f.id}: Prüfpunkt nicht sichtbar – übersprungen`); tried--; continue; }
       await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 });
-      const m = await S(() => window.__app.state.preview.fit);
+      const m = await S(() => window.__app.state.preview.fit); const hit = await S(() => window.__app.state.preview.hit?.point ?? window.__app.state.preview.hit);
       let err = '';
       if (!ACCEPT[f.type].includes(m.type)) err = `Typ ${m.type}`;
       else if (f.diameter && Math.abs(m.diameter - f.diameter) > 0.03) err = `D ${m.diameter}`;
@@ -66,7 +73,7 @@ try {
       else if (f.type === 'Kegel' && Math.abs(2 * m.halfAngle * 180 / Math.PI - f.includedAngleDeg) > 0.5) err = 'Winkel';
       else if (f.type === 'Torus' && (Math.abs(m.radius - f.majorRadius) > 0.1 || Math.abs(Math.abs(m.minorRadius) - f.minorRadius) > 0.05)) err = 'Torus R/r';
       else if (f.type === 'Ebene' && Math.abs((m.center[0] - f.point[0]) * f.normal[0] + (m.center[1] - f.point[1]) * f.normal[1] + (m.center[2] - f.point[2]) * f.normal[2]) > 0.01) err = 'Ebenenlage';
-      console.log(`  ${f.id}: ${m.type}${m.diameter ? ' Ø' + m.diameter.toFixed(4) : ''}${m.type === 'Langloch' ? ` ${m.length.toFixed(3)}×${m.width.toFixed(3)}` : ''}${m.type === 'Torus' ? ` R${m.radius.toFixed(3)} r${Math.abs(m.minorRadius).toFixed(3)}` : ''}${m.type === 'Kegel' ? ` ${(2 * m.halfAngle * 180 / Math.PI).toFixed(3)}°` : ''} Form ${m.form.toFixed(4)} ${err ? '✗ ' + err : '✓'}`);
+      console.log(`  ${f.id}: ${m.type}${m.diameter ? ' Ø' + m.diameter.toFixed(4) : ''}${m.type === 'Langloch' ? ` ${m.length.toFixed(3)}×${m.width.toFixed(3)}` : ''}${m.type === 'Torus' ? ` R${m.radius.toFixed(3)} r${Math.abs(m.minorRadius).toFixed(3)}` : ''}${m.type === 'Kegel' ? ` ${(2 * m.halfAngle * 180 / Math.PI).toFixed(3)}°` : ''} Form ${m.form.toFixed(4)}${err ? ' Treffer ' + JSON.stringify(hit) : ''} ${err ? '✗ ' + err : '✓'}`);
       if (err) fail(`${key} ${f.id}: ${err}`); else ok++;
       await page.click('#pc-create');
     }
