@@ -231,6 +231,24 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ------------------------------------------------------------------ Darstellung
+// ---------- Telefon: Bereiche als Overlays (Baum links, Dialog rechts, Tabelle unten) ----------
+const PANELS = ['tree', 'dialog', 'table'] as const;
+function togglePanel(p: (typeof PANELS)[number], on?: boolean) {
+  const show = on ?? !document.body.classList.contains('show-' + p);
+  if (show && p !== 'table') document.body.classList.remove('show-tree', 'show-dialog');
+  document.body.classList.toggle('show-' + p, show);
+  document.querySelectorAll<HTMLButtonElement>('#mobile-bar [data-panel]').forEach((b) =>
+    b.classList.toggle('on', document.body.classList.contains('show-' + b.dataset.panel)));
+}
+document.querySelectorAll<HTMLButtonElement>('#mobile-bar [data-panel]').forEach((b) => (b.onclick = () => togglePanel(b.dataset.panel as any)));
+for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#table-pane', 'table']] as const) {
+  const t = document.querySelector(id + ' .pane-title')!;
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕'; x.title = 'Schließen';
+  x.onclick = () => togglePanel(p, false); t.prepend(x);
+}
+// Tippen in die 3D-Szene schließt seitliche Overlays (Tabelle bleibt)
+canvas.addEventListener('pointerdown', () => document.body.classList.remove('show-tree', 'show-dialog'), true);
+
 function renderAll() { renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); }
 
 function renderRibbon() {
@@ -400,6 +418,7 @@ function renderTable() {
     tr.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT') return; state.sel = [...c.featureIds]; state.selControl = c.id; renderTree(); renderDialog(); renderScene(); renderTable(); };
     tb.appendChild(tr);
   }
+  $('#mb-sum').textContent = state.controls.length ? `${io}/${nio}` : '';
   $('#summary').innerHTML = state.controls.length ? `${state.controls.length} Prüfmerkmale · <span style="color:var(--io)">${io} IO</span> · <span style="color:var(--nio)">${nio} NIO</span>` : '';
 }
 

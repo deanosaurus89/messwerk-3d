@@ -26,8 +26,10 @@ export class Viewer {
   center = new THREE.Vector3();
 
   constructor(public el: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const mobile = matchMedia('(pointer: coarse)').matches;
+    // Mobil: kein MSAA, Pixelverhältnis begrenzt (GPU-Speicher auf iPhone)
+    this.renderer = new THREE.WebGLRenderer({ antialias: !mobile, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 2 : 2));
     el.appendChild(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
     this.camera.up.set(0, 0, 1);
@@ -49,6 +51,12 @@ export class Viewer {
       new THREE.MeshBasicMaterial({ color: 0xffd400, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.9 }));
     this.cursor.visible = false; this.cursor.renderOrder = 10; this.scene.add(this.cursor);
     new ResizeObserver(() => this.resize()).observe(el);
+    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 300));
+    // iOS kann den WebGL-Kontext bei Speicherdruck verwerfen: Wiederherstellung zulassen
+    const glc = this.renderer.domElement;
+    glc.addEventListener('webglcontextlost', (e) => { e.preventDefault(); console.warn('WebGL-Kontext verloren'); });
+    glc.addEventListener('webglcontextrestored', () => { this.resize(); });
     this.resize();
     const loop = () => { this.renderer.render(this.scene, this.camera); requestAnimationFrame(loop); };
     loop();
@@ -97,7 +105,8 @@ export class Viewer {
       case '+Z': d.set(0, 0, 1); break; case '-Z': d.set(0, 0, -1); break;
       case 'iso': d.set(1, -1.3, 1.1).normalize(); break; default: d.copy(cur);
     }
-    const dist = this.radius / Math.sin((this.camera.fov * Math.PI) / 360) * 0.9;
+    const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
+    const dist = (this.radius / Math.sin(Math.min(vf, hf) / 2)) * 0.9; // Hochformat: horizontaler Öffnungswinkel begrenzt
     this.camera.up.set(0, 0, 1);
     if (Math.abs(d.z) > 0.99) this.camera.up.set(0, 1, 0);
     this.controls.target.copy(this.center);

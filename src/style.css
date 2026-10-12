@@ -1,6 +1,8 @@
 :root { --bg:#eef1f4; --pane:#fafbfc; --line:#c9d0d8; --acc:#1f5fa8; --acc2:#e8f0fb; --io:#1a9b3c; --nio:#d32f2f; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; font-size: 13px; }
 * { box-sizing: border-box; }
 html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:#1d2833; -webkit-user-select:none; user-select:none; }
+#mobile-bar { display:none; }
+.panel-close { display:none; }
 #app { display:grid; grid-template-rows: 30px 28px 92px 1fr 24px; height:100vh; height:100dvh; }
 #titlebar { display:flex; align-items:center; gap:14px; padding:0 10px; background:#22303f; color:#fff; }
 .logo { font-weight:600; letter-spacing:.3px; } #projname { opacity:.75; flex:1; }
@@ -64,3 +66,33 @@ td.dev.IO { color:var(--io); font-weight:600; } td.dev.NIO { color:var(--nio); f
 @media (max-width: 1100px) { #workspace { grid-template-columns: 220px minmax(0,1fr) 250px; } #search { display:none; } }
 @media (pointer: coarse) { .node { padding:7px 6px; } td input { width:70px; padding:5px; } .btn { padding:9px 14px; } }
 #dialog h3 svg, .st svg { width:20px; height:20px; vertical-align:-4px; } #dialog h3 span { display:inline-flex; }
+
+/* ---------- Telefon / kleine Displays: 3D-Ansicht hat Vorrang, Bereiche als Overlays ---------- */
+@media (max-width: 900px), (max-height: 560px) {
+  #app { grid-template-rows: 30px 50px minmax(0,1fr) 40px; }
+  #titlebar, #statusbar { display:none; }
+  #ribbon-tabs { overflow-x:auto; } .tab { padding:0 12px; white-space:nowrap; }
+  #ribbon { overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; }
+  .group { padding:2px 4px 0; } .glabel { display:none; }
+  .big { min-width:48px; height:46px; font-size:10px; padding:1px 4px; gap:0; }
+  .big .ico { font-size:17px; height:20px; } .big svg { width:20px; height:20px; }
+  #workspace { display:block; position:relative; min-height:0; overflow:hidden; }
+  #center { display:block; position:absolute; inset:0; }
+  #scene { position:absolute; inset:0; }
+  #viewcube button { padding:7px 9px; }
+  #hint { max-width:calc(100% - 20px); top:auto; bottom:8px; font-size:12px; }
+  #tree-pane, #dialog-pane { position:absolute; top:0; bottom:0; width:min(86vw,340px); z-index:20;
+    box-shadow:0 0 18px rgba(0,0,0,.35); transition:transform .2s ease; }
+  #tree-pane { left:0; transform:translateX(-105%); }
+  #dialog-pane { right:0; transform:translateX(105%); }
+  body.show-tree #tree-pane, body.show-dialog #dialog-pane { transform:none; }
+  #table-pane { position:absolute; left:0; right:0; bottom:0; height:min(45%,320px); z-index:15;
+    box-shadow:0 -4px 16px rgba(0,0,0,.3); transform:translateY(105%); transition:transform .2s ease; }
+  body.show-table #table-pane { transform:none; }
+  .panel-close { display:inline-block; float:right; background:none; border:none; font-size:16px; line-height:14px; cursor:pointer; padding:0 4px; }
+  #mobile-bar { display:flex; background:#22303f; }
+  #mobile-bar button { flex:1; background:none; border:none; color:#e3e9f0; font-size:14px; touch-action:manipulation; }
+  #mobile-bar button.on { background:#3a4f66; color:#fff; }
+  td input { width:58px; }
+}
+#viewcube, #hint, #busy { z-index:5; }
