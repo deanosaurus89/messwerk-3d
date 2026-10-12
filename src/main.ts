@@ -144,6 +144,8 @@ async function loadSample(s: SampleInfo) {
 async function openSamples() {
   const d = $('#sample-dialog');
   if (!samples) { try { samples = await (await fetch('./samples/index.json')).json(); } catch { samples = []; } }
+  const std = samples!.find((s) => s.key === 'beispielteil');
+  if (tour && std) { loadSample(std); return; } // Trainingsmodus: immer das Standard-Beispielteil direkt laden
   d.innerHTML = `<div class="rv-head"><b>Beispielteil laden</b><span class="note">Demo-Messdaten (Scan-/CT-ähnlich) – Soll-Geometrie in samples/*.json</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
     <div class="sd-grid">${samples!.map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
       <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k Dreiecke · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
@@ -1082,8 +1084,8 @@ function startTraining() {
   let lc0 = loadCount;
   const steps: TourStep[] = [
     { title: 'Training: Bezüge & Position', text: 'In dieser geführten Übung legst du am Beispielteil das Bezugssystem <b>A|B|C</b> fest (Oberseite, Vorderseite, linke Seite) und prüfst die <b>Position</b> der Bohrung Ø12 mit Bezug auf A|B|C.<br>Jeder Schritt wird automatisch geprüft. Mit <b>Weiter</b> geht es los.' },
-    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b> und wähle <b>Beispielteil (Standard)</b>. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
-      target: () => document.querySelector('.sample-card[data-key="beispielteil"]') ?? document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
+    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b> – im Training wird direkt das Standard-Beispielteil geladen. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
+      target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
       check: () => loadCount > lc0 && !!state.data?.name.startsWith('beispielteil') },
     { title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
     { title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => state.mode?.kind === 'fit' && state.mode.type === 'Ebene' },

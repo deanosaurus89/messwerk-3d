@@ -59,7 +59,7 @@ try {
       if (await page.locator('#tc-next').isEnabled()) await page.click('#tc-next').catch(() => {});
       await sleep(300); continue;
     }
-    if (sameCount !== 1) { await sleep(500); continue; } // Aktion einmal pro Schritt
+    if (sameCount !== 1 && !(/Erzeugen|Bezug [ABC]/.test(t.title) && sameCount % 8 === 0)) { await sleep(500); continue; } // Aktion einmal pro Schritt (Erzeugen/Bezug ggf. wiederholen)
     console.log('    Aktion', t.marker ? 'Marker ' + t.marker.map(Math.round) : '');
     if (t.marker) {
       if (!shotDone && /Bohrung/.test(t.title)) { await shot('training-schritt'); shotDone = true; }
@@ -67,7 +67,7 @@ try {
     } else if (/Bezug [ABC] zuweisen/.test(t.title)) await page.click('#dt-apply');
     else if (/Positionstoleranz/.test(t.title)) await page.locator('#catalog .cat-item[data-kind="Position"] input[type=checkbox]').check();
     else if (/Erzeugen/.test(t.title)) { await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 }); await page.click('#pc-create'); }
-    else if (/Beispielteil/.test(t.title)) { await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]'); await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 }); }
+    else if (/Beispielteil/.test(t.title)) { await page.click('#btn-sample'); await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 }); }
     else if (/Register/.test(t.title)) await page.click('.tab[data-tab="merkmale"]');
     else if (/Ebene/.test(t.title)) await page.click('[data-ftype="Ebene"]');
     else if (/Zylinder/.test(t.title)) await page.click('[data-ftype="Zylinder"]');
