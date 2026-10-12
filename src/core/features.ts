@@ -46,12 +46,13 @@ export interface ControlResult { measured: number | null; deviation: number | nu
 
 export const FORM_NAME: Record<GeomType, string> = {
   Ebene: 'Ebenheit', Kreis: 'Rundheit', Zylinder: 'Zylindrizität', Langloch: 'Profil',
-  Kegel: 'Kegelform', Kugel: 'Kugelform', Torus: 'Torusform', Punkt: 'Form', Abstand: 'Form',
+  Kegel: 'Kegelform', Kugel: 'Kugelform', Torus: 'Torusform', Punkt: 'Form', Freiformfläche: 'Flächenprofil', Abstand: 'Form',
 };
 
 /** ISO-1101-Symbol der Formtoleranz je Merkmalstyp. */
 export const FORM_SYMBOL: Record<GeomType, string> = {
   Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Abstand: '',
+ Freiformfläche: '⌓',
 };
 
 export interface CatalogItem { kind: ControlKind; label: string; symbol: string; note?: string; }
@@ -81,6 +82,7 @@ export function controlCatalog(t: GeomType): CatalogGroup[] {
       { kind: 'Rohrdurchmesser', label: 'Rohr-Ø (2r)', symbol: '⌀', note: 'Ringdurchmesser / Nebendurchmesser' }, { kind: 'Rohrradius', label: 'Rohrradius r', symbol: 'r' }] },
       pos, dir('Achse'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Profil (Bezug)'])];
     case 'Punkt': return [pos, D(['Position'])];
+    case 'Freiformfläche': return [form('Flächenprofil ohne Bezug: Abweichung zur rückgeführten B-Spline-Fläche (max − min)')];
     case 'Abstand': return [{ group: 'Abstand', items: (['3D', 'X', 'Y', 'Z'] as const).map((k) => ({ kind: `Abstand ${k}` as ControlKind, label: `Abstand ${k}`, symbol: '↔' })) }];
   }
 }

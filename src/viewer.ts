@@ -1,5 +1,6 @@
 // 3D-Szene (three.js): Polygonmodell, Merkmalsprimitive, Picking mit BVH, Ansichten.
 import * as THREE from 'three';
+import { NurbsInfo, evalCurve, evalSurface, insideTrim, tessellate } from './core/nurbs';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
@@ -115,6 +116,56 @@ export class Viewer {
 
   resetColors() { if (!this.colors) return; for (let i = 0; i < this.colors.length / 3; i++) this.colors.set(BASE_COLOR, 3 * i); }
   paint(idx: Uint32Array, rgb: number[]) { if (!this.colors) return; for (const v of idx) this.colors.set(rgb, 3 * v); }
+  /** Abweichungs-Farbkarte: −r blau → 0 grün → +r rot. */
+  paintScalar(idx: Uint32Array, val: Float32Array, r: number) {
+    if (!this.colors) return;
+    for (let k = 0; k < idx.length; k++) {
+      const t = Math.max(-1, Math.min(1, val[k] / r)); let c: number[];
+      if (t < 0) { const a = -t; c = a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]; }
+      else { const a = t; c = a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0]; }
+      this.colors.set(c, 3 * idx[k]);
+    }
+  }
+  /** Freiformfläche: halbtransparente Fläche + Isolinien, Randkurven (kräftig), optional Kontrollnetz. */
+  addFreeform(nb: NurbsInfo, color: number, selected: boolean, net: boolean) {
+    const t = tessellate(nb as any, 40);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(t.positions, 3)); g.setIndex(new THREE.BufferAttribute(t.indices, 1));
+    const surf = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: selected ? 0.18 : 0.1, side: THREE.DoubleSide, depthWrite: false }));
+    surf.renderOrder = 2; this.prims.add(surf);
+    // Isolinien (u, v) als Drahtgitter
+    const iso: number[] = []; const S = nb.surface, K = 10, M = 40;
+    for (let a = 0; a <= K; a++) for (const dir of [0, 1]) {
+      let prev: number[] | null = null; let inside = false;
+      for (let b = 0; b <= M; b++) {
+        const u = dir ? a / K : b / M, v = dir ? b / M : a / K; const ok = insideTrim(nb.trimUV, u, v);
+        const P = evalSurface(S, u, v, 0)[0];
+        if (prev && ok && inside) iso.push(...prev, ...P);
+        prev = P; inside = ok;
+      }
+    }
+    const ig = new THREE.BufferGeometry(); ig.setAttribute('position', new THREE.Float32BufferAttribute(iso, 3));
+    this.prims.add(new THREE.LineSegments(ig, new THREE.LineBasicMaterial({ color, transparent: true, opacity: selected ? 0.75 : 0.4 })));
+    // Randkurven
+    const BC = selected ? 0xff2bd6 : color;
+    nb.boundary.forEach((C) => {
+      const pts = Array.from({ length: 121 }, (_, i) => new THREE.Vector3(...evalCurve(C, i / 120)));
+      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: BC, depthTest: false }));
+      ln.renderOrder = 7; this.prims.add(ln);
+      if (selected) { // Röhre für bessere Sichtbarkeit
+        const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 120, this.radius / 400, 6), new THREE.MeshBasicMaterial({ color: BC, depthTest: false }));
+        tube.renderOrder = 7; this.prims.add(tube);
+      }
+    });
+    for (const c of nb.corners) { const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 180, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })); d.position.set(...c); d.renderOrder = 8; this.prims.add(d); }
+    if (net) {
+      const L: number[] = []; const cp = (i: number, j: number) => S.ctrl.slice(3 * (i * S.nv + j), 3 * (i * S.nv + j) + 3);
+      for (let i = 0; i < S.nu; i++) for (let j = 0; j < S.nv; j++) { if (i + 1 < S.nu) L.push(...cp(i, j), ...cp(i + 1, j)); if (j + 1 < S.nv) L.push(...cp(i, j), ...cp(i, j + 1)); }
+      const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.Float32BufferAttribute(L, 3));
+      const nl = new THREE.LineSegments(ng, new THREE.LineBasicMaterial({ color: 0x1b1b1b, transparent: true, opacity: 0.85, depthTest: false })); nl.renderOrder = 6; this.prims.add(nl);
+      const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(S.ctrl, 3));
+      const pp = new THREE.Points(pg, new THREE.PointsMaterial({ color: 0x111111, size: 5, sizeAttenuation: false, depthTest: false })); pp.renderOrder = 6; this.prims.add(pp);
+    }
+  }
   commitColors() { if (this.model) (this.model.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true; }
 
   /** Ansicht aus beliebiger Richtung (ViewCube: Flächen, Kanten, Ecken); Zielpunkt und Abstand bleiben erhalten. */

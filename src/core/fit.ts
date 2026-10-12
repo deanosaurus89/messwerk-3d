@@ -1,7 +1,7 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Abstand';
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Freiformfläche' | 'Abstand';
 export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
@@ -30,6 +30,8 @@ export interface FitResult {
   p1?: Vec3; p2?: Vec3;
   rule?: string;
   residuals?: Float64Array;
+  // nur Freiformfläche
+  nurbs?: import('./nurbs').NurbsInfo;
 }
 
 const stats = (res: Float64Array) => {

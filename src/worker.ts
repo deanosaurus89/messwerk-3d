@@ -6,6 +6,25 @@ import { autoFit, fitType, FitResult, GeomType, normalFilter, NormalFilter } fro
 import type { Vec3 } from './core/linalg';
 import { autoExtract, extractWithAuxPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
+import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
+
+/** Freiformfläche aus Auswahl (Indizes) oder Klick (Regionenwachstum; Krümmungsband/Knickprüfung stoppen an Verrundungen). */
+function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }) {
+  let idx = req.indices;
+  if (req.seed) {
+    if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell. Für Punktwolken den Pinsel verwenden.');
+    idx = topo.regionVertices(topo.growRegion(req.seed.tri, req.seed.point, { maxAngleDeg: req.seed.maxAngleDeg, radius: req.seed.radius })).all;
+  }
+  if (!idx || idx.length < 16) throw new Error('Zu wenige Punkte für eine Freiformfläche');
+  const { p, n } = gather(mesh!, idx, Infinity);
+  const P = mesh!.positions;
+  const loop: Vec3[] | null = mesh!.indices.length ? boundaryLoop(mesh!.indices, idx, P.length / 3).map((v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3) : null;
+  const f = fitFreeform(p, n, loop, req.params);
+  const center = evalSurface(f.surface, 0.5, 0.5, 0)[0];
+  const fit: FitResult = { type: 'Freiformfläche', center, normal: f.frame.n, rms: f.rms, form: f.form, maxPos: f.maxPos, maxNeg: f.maxNeg, n: f.n,
+    nurbs: { surface: f.surface, boundary: f.boundary, kind: f.kind, trimUV: f.trimUV, corners: f.corners, params: req.params, std: f.std, mean: f.mean } };
+  return { indices: idx, fit, candidates: [], dev: f.dev, loopCount: loop?.length ?? 0 };
+}
 
 let mesh: MeshData | null = null;
 let topo: MeshTopology | null = null;
@@ -15,6 +34,7 @@ export type Req =
   | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
+  | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult };
 
@@ -77,6 +97,8 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
+    } else if (req.op === 'nurbs') {
+      result = doNurbs(req);
     } else if (req.op === 'fit') {
       result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
     }

@@ -32,7 +32,7 @@ describe('Freiformfläche (B-Spline)', () => {
     const topo = new MeshTopology(mesh);
     const pt: Vec3 = [35, 40, Z(35, 40)]; const P = mesh.positions, F = mesh.indices; let best = 0, bd = Infinity;
     for (let t = 0; t < F.length / 3; t++) { const a = 3 * F[3 * t]; const d = (P[a] - pt[0]) ** 2 + (P[a + 1] - pt[1]) ** 2 + (P[a + 2] - pt[2]) ** 2; if (d < bd) { bd = d; best = t; } }
-    const tris = topo.growRegion(best, pt, { maxAngleDeg: 20, radius: 0, freeform: true } as any);
+    const tris = topo.growRegion(best, pt, { maxAngleDeg: 20, radius: 0 });
     const idx = topo.regionVertices(tris).all;
     const { p, n } = gather(mesh, idx);
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const q of p) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
@@ -49,5 +49,20 @@ describe('Freiformfläche (B-Spline)', () => {
     expect(st).toContain('B_SPLINE_SURFACE_WITH_KNOTS'); expect(toJSON(f).countU).toBe(12);
     expect(tessellate(f, 20).indices.length).toBe(20 * 20 * 6);
     const fs = require('node:fs'); fs.mkdirSync('/workspace/tmp-nurbs', { recursive: true }); fs.writeFileSync('/workspace/tmp-nurbs/freiform.igs', ig); fs.writeFileSync('/workspace/tmp-nurbs/freiform.stp', st);
+  });
+});
+
+describe('Freiformfläche getrimmt', () => {
+  it('kreisförmiger Ausschnitt + verstreute Flecken (Pinsel)', () => {
+    const p: Vec3[] = [], n: Vec3[] = [];
+    for (let i = 0; i <= 200; i++) for (let j = 0; j <= 200; j++) {
+      const x = 15 + 30 * i / 200, y = 20 + 35 * j / 200; const inDisc = (x - 30) ** 2 + (y - 37) ** 2 < 12 ** 2; const inSpot = (x - 42) ** 2 + (y - 52) ** 2 < 3 ** 2;
+      if (inDisc || inSpot) { p.push([x, y, Z(x, y) + 0.008 * Math.sin(i * 12.9898 + j * 78.233)]); n.push([0, 0, 1]); }
+    }
+    const ring: Vec3[] = Array.from({ length: 80 }, (_, k) => { const a = 2 * Math.PI * k / 80, x = 30 + 12 * Math.cos(a), y = 37 + 12 * Math.sin(a); return [x, y, Z(x, y)]; });
+    const f = fitFreeform(p, n, ring, { nu: 12, nv: 12, deg: 3, smooth: 1e-4 });
+    const e = (() => { let mx = 0; for (let k = 0; k < p.length; k += 7) { const u = f.uv[2 * k], v = f.uv[2 * k + 1]; const P = evalSurface(f.surface, u, v, 0)[0]; mx = Math.max(mx, Math.abs(P[2] - Z(P[0], P[1]))); } return mx; })();
+    console.log('getrimmt', f.kind, f.std, e);
+    expect(f.kind).toBe('getrimmt'); expect(f.std).toBeLessThan(0.012); expect(e).toBeLessThan(0.02);
   });
 });

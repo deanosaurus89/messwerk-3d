@@ -246,3 +246,8 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 .tc-list button { display:block; width:100%; text-align:left; border:none; background:none; padding:6px 4px; font:inherit; border-radius:4px; cursor:pointer; min-height:32px; }
 .tc-list button.cur { background:#e6eef8; font-weight:700; } .tc-list button.done::after { content:' ✔'; color:var(--io); }
 .row.chk label{width:auto;flex:1;display:flex;gap:6px;align-items:center;max-width:none}
+#dev-legend{position:absolute;right:10px;top:44px;background:rgba(255,255,255,.92);border:1px solid #ccd;border-radius:6px;padding:5px 8px;font-size:11px;z-index:6;width:170px;pointer-events:none}
+#dev-legend .bar{height:10px;margin:4px 0 2px;border-radius:3px;background:linear-gradient(90deg,#00f,#0bf 25%,#0c0 50%,#fc0 75%,#f00)}
+#dev-legend .ticks{display:flex;justify-content:space-between}
+@media (max-width:700px){#dev-legend{top:auto;bottom:8px;right:auto;left:50%;transform:translateX(-50%);width:150px}}
+@media (max-width:700px){body.previewing #btn-center{display:none}}

@@ -15,16 +15,17 @@ import { Tour, TourStep } from './training';
 import type { Vec3 } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
+import { NurbsParams, evalSurface, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
 type DistMode = { kind: 'dist'; a: number | null; b: number | null; slot: 0 | 1 };
 type Mode = FitMode | DistMode | null;
 interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'none' | number; }
 interface FeatureView extends Feature { color: number; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
-  src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; }
+  src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
-  aux?: PreviewAux; hit?: Hit; }
+  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; }
 type V3 = [number, number, number];
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -50,7 +51,8 @@ const state = {
   ctab: 'katalog' as 'katalog' | 'liste',
   brushMask: null as Uint8Array | null,
   brushCount: 0,
-  showPrims: true, colorPts: true,
+  showPrims: true, colorPts: true, devMap: true, ctrlNet: true,
+  nurbs: { nu: 12, nv: 12, deg: 3, smooth: 1e-4 } as NurbsParams,
   nextId: 1, nextCtrl: 1, typeCount: {} as Record<string, number>,
   addFeat: null as number | null,
 };
@@ -96,13 +98,14 @@ document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick =
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view as any)));
 $('#ico-dist').innerHTML = ICON['Abstand 3D'];
 
-const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
+const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt', 'Freiformfläche'];
 const FIT_TYPES = TYPES.filter((t) => t !== 'auto') as GeomType[];
 const typeBtns = $('#feat-type-btns');
 for (const t of TYPES) {
   const b = document.createElement('button');
   b.className = 'big'; b.dataset.ftype = t;
-  b.innerHTML = `<span class="ico">${ICON[t]}</span>${t === 'auto' ? 'Automatisch' : t}`;
+  b.innerHTML = `<span class="ico">${ICON[t]}</span>${t === 'auto' ? 'Automatisch' : t === 'Freiformfläche' ? 'Freiform' : t}`;
+  if (t === 'Freiformfläche') b.title = 'Freiformfläche (B-Spline/NURBS) – Klick oder Pinsel';
   b.onclick = () => startFitMode(t);
   typeBtns.appendChild(b);
 }
@@ -305,8 +308,19 @@ async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch') {
     aux: { plane: r.aux.plane, indices: r.aux.indices, source: ref ? ref.name : 'automatisch (angrenzende Fläche)', refId: ref?.id } };
   status(`Vorschau: ${type} in Hilfsebene – ${r.indices.length} Wandpunkte (orange), ${ref ? 'Ebene ' + ref.name : r.aux.indices.length + ' Ebenenpunkte (blau)'} (${r.ms.toFixed(0)} ms).`);
 }
+async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: 'Klick' | 'Pinsel', params: NurbsParams = state.nurbs) {
+  try {
+    const seed = src.hit ? { tri: src.hit.tri, point: src.hit.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius } : undefined;
+    const r = await busy(engine.call<any>({ op: 'nurbs', indices: seed ? undefined : src.indices, seed, params }));
+    state.preview = { fit: r.fit, indices: r.indices, candidates: [], method, hit: src.hit, dev: r.dev };
+    const nb = r.fit.nurbs;
+    status(`Vorschau Freiformfläche (${nb.kind}, ${nb.surface.nu}×${nb.surface.nv} Kontrollpunkte, Grad ${nb.surface.degU}): ${r.indices.length} Punkte, Std.-Abw. ${fmt(nb.std, 4)} mm (${r.ms.toFixed(0)} ms).`);
+  } catch (e: any) { state.preview = null; status('Freiformfläche: ' + e.message); toast('Freiformfläche: ' + e.message); }
+  renderAll();
+}
 async function previewByClick(h: Hit) {
   const m = state.mode as FitMode;
+  if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
   if (usesAux(m.type)) {
     try { await previewWithAux(h, m.type as 'Kreis' | 'Langloch'); }
     catch (e: any) { state.preview = null; status('Hilfsebene: ' + e.message); toast('Hilfsebene: ' + e.message); }
@@ -329,6 +343,7 @@ async function previewFromBrush() {
   if (!state.brushMask || !state.brushCount) { status('Zuerst Bereich mit dem Pinsel markieren.'); return; }
   const idx = new Uint32Array(state.brushCount); let k = 0;
   state.brushMask.forEach((v, i) => { if (v) idx[k++] = i; });
+  if ((state.mode as FitMode).type === 'Freiformfläche') { await previewNurbs({ indices: idx }, 'Pinsel'); return; }
   try {
     const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type: (state.mode as FitMode).type }));
     state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Pinsel' };
@@ -338,6 +353,7 @@ async function previewFromBrush() {
 
 async function refitPreview(t: GeomType | 'auto') {
   const p = state.preview; if (!p || p.method === 'Konstruiert') return;
+  if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
   if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
     try { await previewWithAux(p.hit, t); } catch (e: any) { status('Hilfsebene: ' + e.message); }
@@ -358,7 +374,7 @@ function commitPreview() {
   const f: FeatureView = {
     id: state.nextId++, name: `${t} ${n}`, type: t, measured: p.fit, pointCount: p.indices.length,
     method: p.method, color: PALETTE[(state.nextId - 2) % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
-    src: p.indices, hit: p.hit, fp: defaultFp(),
+    src: p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
   };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -379,6 +395,18 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
   if (f.type === 'Abstand') return;
   const fp = (f.fp ??= defaultFp());
   try {
+    if (type === 'Freiformfläche') {
+      const params = f.measured?.nurbs?.params ?? state.nurbs;
+      const seed = f.hit && f.method === 'Klick' ? { tri: f.hit.tri, point: f.hit.point, maxAngleDeg: fp.maxAngleDeg, radius: fp.radius } : undefined;
+      const r = await busy(engine.call<any>({ op: 'nurbs', indices: seed ? undefined : f.src ?? f.indices, seed, params }));
+      f.measured = r.fit; f.indices = r.indices; f.src = r.indices; f.dev = r.dev; f.aux = undefined; f.auxIndices = undefined;
+      f.type = 'Freiformfläche'; f.pointCount = f.indices.length; ptsCache.delete(f.id);
+      state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
+      recomputeDistances();
+      const nb = r.fit.nurbs;
+      status(`${f.name} neu rückgeführt: ${nb.surface.nu}×${nb.surface.nv} Kontrollpunkte, Grad ${nb.surface.degU}, Std.-Abw. ${fmt(nb.std, 4)} mm, Flächenprofil ${fmt(r.fit.form, 4)} mm.`);
+      renderAll(); scheduleAutosave(); return;
+    }
     let idx = f.src ?? f.indices, auxR: any = null;
     const inPlane = (type === 'Kreis' || type === 'Langloch') && fp.aux !== 'none';
     if (f.hit && f.method === 'Klick') {
@@ -393,7 +421,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       f.aux = { plane: auxR.aux.plane, pointCount: auxR.aux.indices.length, source: auxR.source, refId: auxR.refId } as AuxPlane; f.auxIndices = auxR.aux.indices;
     } else {
       const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null } }));
-      f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined;
+      f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined; f.dev = undefined;
     }
     f.type = f.measured!.type; f.pointCount = f.indices.length; ptsCache.delete(f.id);
     state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
@@ -657,6 +685,8 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
     return [['Abstand 3D', fmt(m.distance)], ['Abstand X', fmt(Math.abs(m.delta![0]))], ['Abstand Y', fmt(Math.abs(m.delta![1]))], ['Abstand Z', fmt(Math.abs(m.delta![2]))],
       ['Regel', m.rule!], ['P1', m.p1!.map((v) => v.toFixed(3)).join(' ')], ['P2', m.p2!.map((v) => v.toFixed(3)).join(' ')]];
   }
+  if (!full && m.nurbs) { const nb = m.nurbs; return [['Std.-Abw. σ', fmt(nb.std)], ['Flächenprofil', fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)],
+    ['Patch', `${nb.kind}, ${nb.surface.nu}×${nb.surface.nv}, Grad ${nb.surface.degU}`]]; }
   const rows: [string, string][] = [];
   if (full) rows.push(['Punkte', String(pointCount)]);
   rows.push(['Std.-Abw. (RMS)', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)]);
@@ -665,6 +695,9 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
   else if (m.diameter != null && m.type !== 'Langloch') rows.push(['Durchmesser', fmt(m.diameter)]);
   if (m.type === 'Langloch') rows.push(['Länge', fmt(m.length)], ['Breite', fmt(m.width)]);
   if (m.type === 'Kegel') rows.push(['Kegelwinkel [°]', fmt(2 * m.halfAngle! * DEG, 3)]);
+  if (m.nurbs) { const nb = m.nurbs; rows.splice(full ? 1 : 0, 0, ['Std.-Abw. σ', fmt(nb.std)]);
+    rows.push(['Patch', nb.kind === 'vierseitig' ? 'vierseitig (4 Randkurven)' : 'getrimmt (1 Randkurve)'], ['Kontrollpunkte', `${nb.surface.nu} × ${nb.surface.nv}`], ['Grad', `${nb.surface.degU} / ${nb.surface.degV}`], ['Glättung λ', String(nb.params.smooth)]); }
+  if (full && m.type === 'Freiformfläche') return rows;
   if (full) {
     rows.push(['X', fmt(m.center[0])], ['Y', fmt(m.center[1])], ['Z', fmt(m.center[2])], ['I', fmt(m.normal[0], 6)], ['J', fmt(m.normal[1], 6)], ['K', fmt(m.normal[2], 6)]);
     if (m.type === 'Zylinder' || m.type === 'Kegel') rows.push(['Höhe', fmt(m.length)]);
@@ -801,7 +834,40 @@ function renderDialog() {
   bindFitParams(d, f);
 }
 
+function nurbsParamsHTML(f: FeatureView) {
+  const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick'; const nb = f.measured!.nurbs!; const P = nb.params;
+  return `<h4>⚙ Freiform-Parameter <span class="note">(Änderung ⇒ automatisch neu rückführen)</span></h4><div id="fp-box">
+    <div class="row"><label>Geometrietyp</label><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="row"><label>Kontrollpunkte u</label><input id="nb-nu" value="${P.nu}" inputmode="numeric"></div>
+    <div class="row"><label>Kontrollpunkte v</label><input id="nb-nv" value="${P.nv}" inputmode="numeric"></div>
+    <div class="row"><label>Grad</label><select id="nb-deg">${[1, 2, 3, 4, 5].map((d) => `<option ${d === P.deg ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+    <div class="row"><label>Glättung λ</label><input id="nb-sm" value="${P.smooth}" inputmode="decimal"></div>
+    ${grow ? `<div class="row"><label>Regionenwachstum: max. Winkel [°]</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>` : `<p class="note">Punkte aus ${f.method === 'Pinsel' ? 'Pinselauswahl' : 'Projektdatei'}.</p>`}
+    <div class="row chk"><label><input type="checkbox" id="nb-dev" ${state.devMap ? 'checked' : ''}> Abweichungs-Farbkarte</label></div>
+    <div class="row chk"><label><input type="checkbox" id="nb-net" ${state.ctrlNet ? 'checked' : ''}> Kontrollnetz anzeigen</label></div>
+    <p class="note">Ablauf: Randschleife der Auswahl → ${nb.kind === 'vierseitig' ? '4 Ecken, 4 Randkurven' : 'getrimmtes Patch (1 Randkurve)'} → Parametrisierung → Ausgleich (kleinste Quadrate) mit Glättung → Parameterkorrektur. Mehr Kontrollpunkte = genauer, aber welliger; λ glättet.</p>
+    <div class="row"><button class="btn" id="nb-igs">⇩ IGES (128)</button><button class="btn" id="nb-stp">⇩ STEP</button><button class="btn" id="nb-json">⇩ JSON</button></div>
+    </div>`;
+}
+function bindNurbsParams(d: HTMLElement, f: FeatureView) {
+  const fp = f.fp!; const P = f.measured!.nurbs!.params; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
+  const num = (id: string, set: (x: number) => void, ok: (x: number) => boolean) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && ok(x)) { set(x); refitFeature(f); } else toast('Ungültiger Wert'); }; };
+  q<HTMLSelectElement>('#d-retype')?.addEventListener('change', (e) => refitFeature(f, (e.target as HTMLSelectElement).value as GeomType));
+  num('#nb-nu', (x) => (P.nu = Math.round(x)), (x) => x >= P.deg + 1 && x <= 40);
+  num('#nb-nv', (x) => (P.nv = Math.round(x)), (x) => x >= P.deg + 1 && x <= 40);
+  num('#nb-sm', (x) => (P.smooth = x), (x) => x >= 0 && x <= 100);
+  num('#fp-ang', (x) => (fp.maxAngleDeg = x), (x) => x > 0 && x < 90);
+  q<HTMLSelectElement>('#nb-deg')?.addEventListener('change', (e) => { P.deg = +(e.target as HTMLSelectElement).value; P.nu = Math.max(P.nu, P.deg + 1); P.nv = Math.max(P.nv, P.deg + 1); refitFeature(f); });
+  q<HTMLInputElement>('#nb-dev')?.addEventListener('change', (e) => { state.devMap = (e.target as HTMLInputElement).checked; renderAll(); });
+  q<HTMLInputElement>('#nb-net')?.addEventListener('change', (e) => { state.ctrlNet = (e.target as HTMLInputElement).checked; renderAll(); });
+  const fit = () => ({ ...(f.measured!.nurbs! as any), dev: new Float32Array(0), uv: new Float32Array(0), rms: f.measured!.rms, form: f.measured!.form, maxPos: f.measured!.maxPos, maxNeg: f.measured!.maxNeg, n: f.pointCount });
+  const nm = f.name.replace(/[^\w-]+/g, '_');
+  q('#nb-igs')?.addEventListener('click', () => download(nm + '.igs', toIGES(fit(), nm), 'model/iges'));
+  q('#nb-stp')?.addEventListener('click', () => download(nm + '.stp', toSTEP(fit(), nm), 'model/step'));
+  q('#nb-json')?.addEventListener('click', () => download(nm + '.json', JSON.stringify(toJSON(fit()), null, 1), 'application/json'));
+}
 function fitParamsHTML(f: FeatureView) {
+  if (f.measured?.nurbs) return nurbsParamsHTML(f);
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
   const m = f.measured!;
@@ -820,6 +886,7 @@ function fitParamsHTML(f: FeatureView) {
     </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
+  if (f.measured?.nurbs) { bindNurbsParams(d, f); return; }
   const fp = f.fp!; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
   const num = (id: string, set: (x: number) => void, min = 0) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && x >= min) { set(x); refitFeature(f); } else el.value = ''; }; };
   q<HTMLSelectElement>('#d-retype')?.addEventListener('change', (e) => refitFeature(f, (e.target as HTMLSelectElement).value as GeomType));
@@ -929,6 +996,15 @@ function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
   return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${cs.length ? `<table><tr class="lt"><th></th><th>Ist</th><th>Soll</th><th>Abw.</th></tr>${rows}</table>` : ''}`;
 }
 
+/** Farbskala symmetrisch: ±max(3σ, |max|) begrenzt auf 3σ, mind. 1 µm. */
+function devRange(dev: Float32Array) { let s = 0; for (const d of dev) s += d * d; return Math.max(1e-3, 3 * Math.sqrt(s / Math.max(1, dev.length))); }
+function renderDevLegend(dev: Float32Array | null) {
+  let el = document.getElementById('dev-legend');
+  if (!dev) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
+  const r = devRange(dev);
+  el.innerHTML = `<b>Abweichung [mm]</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
+}
 function renderScene() {
   if (!state.data) return;
   if (viewer.model) viewer.model.visible = state.modelVisible;
@@ -937,7 +1013,8 @@ function renderScene() {
   if (state.colorPts) for (const f of state.features) {
     if (f.type === 'Abstand' || !vis(f)) continue;
     const c = rgb(f.color), s = state.sel.includes(f.id);
-    viewer.paint(f.indices, s ? c : c.map((v) => 0.55 * v + 0.45 * 0.68));
+    if (s && f.dev && state.devMap && f.dev.length === f.indices.length) viewer.paintScalar(f.indices, f.dev, devRange(f.dev));
+    else viewer.paint(f.indices, s ? c : c.map((v) => 0.55 * v + 0.45 * 0.68));
   }
   if (state.brushMask && state.brushCount) {
     const idx: number[] = []; state.brushMask.forEach((v, i) => v && idx.push(i));
@@ -945,17 +1022,21 @@ function renderScene() {
   }
   const p = state.preview;
   if (p?.aux?.indices.length) viewer.paint(p.aux.indices, rgb(AUX_COLOR));
-  if (p && p.indices.length) viewer.paint(p.indices, rgb(PREVIEW_COLOR));
+  if (p && p.indices.length) { if (p.dev && state.devMap) viewer.paintScalar(p.indices, p.dev, devRange(p.dev)); else viewer.paint(p.indices, rgb(PREVIEW_COLOR)); }
+  const lg = [p?.dev && state.devMap ? p.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
+  renderDevLegend(lg ?? null);
   viewer.commitColors();
   viewer.clearPrims();
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
     if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel);
+    else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
     else viewer.addPrimitive(f.measured!, f.color, sel);
   }
   if (p) {
     if (p.fit.type === 'Abstand') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true);
+    else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
   }
@@ -1030,7 +1111,7 @@ function attachContext(el: HTMLElement, fid: number | null) {
 // ------------------------------------------------------------------ Projekt speichern / öffnen / Autosave
 let loadCount = 0, meshKey = '', restoring = false;
 function projectJSON() {
-  const feats = state.features.map(({ indices, auxIndices, candidates, src, ...rest }) => { void indices; void auxIndices; void candidates; void src; return rest; });
+  const feats = state.features.map(({ indices, auxIndices, candidates, src, dev, ...rest }) => { void indices; void auxIndices; void candidates; void src; void dev; return rest; });
   return {
     savedAt: new Date().toISOString(), app: 'MessWerk 3D',
     mesh: { name: state.data!.name, vertexCount: state.data!.vertexCount, triCount: state.data!.triCount },
@@ -1043,7 +1124,7 @@ function projectJSON() {
 }
 function featureIndexBlob() {
   const o: Record<string, Uint32Array | undefined> = {};
-  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; o['s' + f.id] = f.src; }
+  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; o['s' + f.id] = f.src; o['d' + f.id] = f.dev ? new Uint32Array(f.dev.buffer.slice(f.dev.byteOffset, f.dev.byteOffset + f.dev.byteLength)) : undefined; }
   return packIndices(o);
 }
 function meshArrays() {
@@ -1070,7 +1151,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     viewer.setModel(r.positions, r.indices, r.normals);
     const st = json.state;
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
-    state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id), src: unpackIndex(idx, 's' + f.id) }));
+    state.features = st.features.map((f: any) => ({ ...f, indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id), src: unpackIndex(idx, 's' + f.id), dev: ((d) => (d ? new Float32Array(d.slice().buffer) : undefined))(unpackIndex(idx, 'd' + f.id)) }));
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
@@ -1275,5 +1356,15 @@ function startTraining() {
   tour.start();
 }
 $('#btn-training').onclick = () => startTraining();
-Object.assign((window as any).__app, { renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
+/** Test-Hilfe: Abstand der rückgeführten Fläche zur bekannten Formel des Freiform-Demoteils (nur innerhalb der Trimmung, 3 % Rand). */
+function nurbsAccuracy(fit: FitResult) {
+  const Zf = (x: number, y: number) => 20 + Math.sin((Math.PI * x) / 70) * (17 + 3 * Math.cos((2 * Math.PI * y) / 80) + (2.5 * y) / 80);
+  const nb = fit.nurbs!; let mx = 0, s = 0, n = 0;
+  for (let i = 0; i <= 50; i++) for (let j = 0; j <= 50; j++) {
+    const u = 0.03 + 0.94 * i / 50, v = 0.03 + 0.94 * j / 50; if (!insideTrim(nb.trimUV, u, v)) continue;
+    const P = evalSurface(nb.surface, u, v, 0)[0]; const d = P[2] - Zf(P[0], P[1]); mx = Math.max(mx, Math.abs(d)); s += d * d; n++;
+  }
+  return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
+}
+Object.assign((window as any).__app, { nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
 viewer.controls.addEventListener('end', () => scheduleAutosave());

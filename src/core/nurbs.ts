@@ -6,6 +6,9 @@ import { Vec3, add, cross, dot, eigSym3, norm, scale, sub, unit } from './linalg
 export interface BSplineSurface { degU: number; degV: number; nu: number; nv: number; ku: number[]; kv: number[]; ctrl: number[]; }
 export interface BSplineCurve { deg: number; n: number; knots: number[]; ctrl: number[]; }
 export interface NurbsParams { nu: number; nv: number; deg: number; smooth: number; iterations?: number; }
+/** Kompakte, speicherbare Beschreibung (im Merkmal/Projekt). */
+export interface NurbsInfo { surface: BSplineSurface; boundary: BSplineCurve[]; kind: 'vierseitig' | 'getrimmt'; trimUV: number[]; corners: Vec3[];
+  params: NurbsParams; std: number; mean: number; }
 export interface NurbsFit {
   surface: BSplineSurface;
   frame: { o: Vec3; e1: Vec3; e2: Vec3; n: Vec3; su: number; sv: number; u0: number; v0: number };
@@ -154,6 +157,13 @@ function minRect(xy: [number, number][]): { c: number; s: number; x0: number; x1
   }
   return best;
 }
+function hull2(xy: [number, number][]): [number, number][] {
+  const P = [...xy].sort((a, b) => a[0] - b[0] || a[1] - b[1]); const cr = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: [number, number][] = [], up: [number, number][] = [];
+  for (const q of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of P.reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
 const polyArea = (xy: [number, number][]) => { let a = 0; for (let i = 0; i < xy.length; i++) { const p = xy[i], q = xy[(i + 1) % xy.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; };
 
 /** Kurven-LSQ (kubisch, Sehnenlängen-Parametrisierung, Endpunkte interpoliert über starke Gewichtung). */
@@ -187,8 +197,7 @@ export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: Nurb
   // Rand in der Ebene → minimales Rechteck (Achsen + Ausdehnung), Ecken
   const loopP = loop && loop.length >= 8 ? loop : null;
   const to2 = (q: Vec3): [number, number] => { const d = sub(q, c); return [dot(d, e1), dot(d, e2)]; };
-  const ref2 = (loopP ?? p).map(to2);
-  const R = minRect(ref2);
+  const R = minRect(p.map(to2)); // Rechteck aus allen Punkten (Rand kann mehrere Teilschleifen haben)
   e1 = unit(add(scale(e1, R.c), scale(e2, R.s))); e2 = cross(n, e1);
   const u0 = R.x0, v0 = R.y0, su = R.x1 - R.x0 || 1, sv = R.y1 - R.y0 || 1;
   const toUV = (q: Vec3): [number, number] => { const d = sub(q, c); return [Math.min(1, Math.max(0, (dot(d, e1) - u0) / su)), Math.min(1, Math.max(0, (dot(d, e2) - v0) / sv))]; };
@@ -207,10 +216,15 @@ export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: Nurb
         if (seg.length >= 2) boundary.push(fitCurve(seg, Math.min(16, Math.max(4, Math.round(seg.length / 6)))));
       }
     } else {
-      const closed = [...loopP, loopP[0]]; boundary.push(fitCurve(closed, Math.min(40, Math.max(8, Math.round(closed.length / 6)))));
-      trimUV = luv.flat();
+      // Trimmschleife: Randschleife, wenn sie (fast) alle Punkte umschließt, sonst konvexe Hülle der Punkte
+      const all = p.map(toUV); let insideN = 0; const lf = luv.flat();
+      for (let k = 0; k < all.length; k += Math.max(1, Math.floor(all.length / 2000))) if (insideTrim(lf, all[k][0], all[k][1])) insideN++;
+      const frac = insideN / Math.ceil(all.length / Math.max(1, Math.floor(all.length / 2000)));
+      if (frac > 0.95) { trimUV = lf; boundary.push(fitCurve([...loopP, loopP[0]], Math.min(40, Math.max(8, Math.round(loopP.length / 6))))); }
+      else { const H = hull2(all); trimUV = H.flat(); }
     }
   }
+  if (!loopP) { trimUV = hull2(p.map(toUV)).flat(); }
   const ku = clampedKnots(nu, deg), kv = clampedKnots(nv, deg), NC = nu * nv;
   const uv = new Float32Array(2 * N); p.forEach((q, i) => { const [a, b] = toUV(q); uv[2 * i] = a; uv[2 * i + 1] = b; });
   const S: BSplineSurface = { degU: deg, degV: deg, nu, nv, ku, kv, ctrl: new Array(3 * NC).fill(0) };
@@ -225,7 +239,7 @@ export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: Nurb
     }
     let tr = 0; for (let i = 0; i < NC; i++) tr += A[i * NC + i];
     // Glättung relativ zur Datenmatrix skaliert; kleine Grundregularisierung füllt leere Bereiche (getrimmt)
-    addSmoothing(A, nu, nv, (Math.max(0, o.smooth) + 1e-6) * (tr / NC));
+    addSmoothing(A, nu, nv, (Math.max(0, o.smooth) + (kind === 'getrimmt' ? 1e-3 : 1e-6)) * (tr / NC));
     for (let i = 0; i < NC; i++) A[i * NC + i] += 1e-10 * (tr / NC);
     if (!cholSolve(A, NC, B, 3)) throw new Error('Gleichungssystem singulär – weniger Kontrollpunkte wählen');
     S.ctrl = Array.from(B);
@@ -247,6 +261,12 @@ export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: Nurb
   };
   for (let it = 0; it < (o.iterations ?? 2); it++) { for (let k = 0; k < N; k++) foot(k); solveLSQ(); }
   for (let k = 0; k < N; k++) foot(k, 3);
+  // Getrimmt ohne geschlossene Randschleife (Hülle): Randkurve aus der Fläche entlang der Trimmschleife
+  if (kind === 'getrimmt' && !boundary.length && trimUV.length >= 6) {
+    const T: Vec3[] = []; const m = trimUV.length / 2;
+    for (let k = 0; k <= m; k++) { const a = k % m, b = (k + 1) % m; for (let t = 0; t < 4; t++) { const w = t / 4; T.push(evalSurface(S, trimUV[2 * a] * (1 - w) + trimUV[2 * b] * w, trimUV[2 * a + 1] * (1 - w) + trimUV[2 * b + 1] * w, 0)[0]); } }
+    boundary.push(fitCurve(T, Math.min(40, Math.max(8, Math.round(T.length / 4)))));
+  }
   // Abweichungen (Vorzeichen: entlang Flächennormale, ausgerichtet auf die mittlere Messnormale)
   const dev = new Float32Array(N); let s = 0, s2 = 0, mx = -Infinity, mn = Infinity;
   for (let k = 0; k < N; k++) {
