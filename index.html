@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M8 1l7 7-7 7-7-7z%22 fill=%22%231f5fa8%22/%3E%3C/svg%3E" />
+<title>MessWerk 3D – Inspektion</title>
+<link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+<div id="app">
+  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span id="projname">Neues Projekt</span>
+    <input id="search" placeholder="Suchen im Baum …" /></header>
+  <nav id="ribbon-tabs">
+    <button class="tab active" data-tab="start">Start</button>
+    <button class="tab" data-tab="merkmale">Merkmale</button>
+    <button class="tab" data-tab="pruef">Prüfmerkmale</button>
+    <button class="tab" data-tab="ansicht">Ansicht</button>
+  </nav>
+  <section id="ribbon">
+    <div class="panel" data-tab="start">
+      <div class="group"><div class="btns">
+        <label class="big" title="Polygonmodell oder Punktwolke importieren"><span class="ico">⤓</span>Importieren<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc" hidden /></label>
+        <button class="big" id="btn-sample"><span class="ico">▣</span>Beispiel laden</button>
+      </div><div class="glabel">Daten</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-csv"><span class="ico">⎙</span>Tabelle CSV</button>
+        <button class="big" id="btn-csv-feat"><span class="ico">⎙</span>Merkmale CSV</button>
+      </div><div class="glabel">Bericht</div></div>
+    </div>
+    <div class="panel hidden" data-tab="merkmale">
+      <div class="group"><div class="btns" id="feat-type-btns"></div><div class="glabel">Merkmal erstellen (Klick auf das Netz)</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-delete-feat"><span class="ico">✕</span>Löschen</button>
+      </div><div class="glabel">Bearbeiten</div></div>
+    </div>
+    <div class="panel hidden" data-tab="pruef">
+      <div class="group"><div class="btns" id="ctrl-btns"></div><div class="glabel">Prüfmerkmal am gewählten Merkmal</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-dist="Abstand 3D"><span class="ico">↔</span>Abstand 3D</button>
+        <button class="big" data-dist="Abstand X"><span class="ico">X</span>Abstand X</button>
+        <button class="big" data-dist="Abstand Y"><span class="ico">Y</span>Abstand Y</button>
+        <button class="big" data-dist="Abstand Z"><span class="ico">Z</span>Abstand Z</button>
+      </div><div class="glabel">Abstand (2 Merkmale wählen, Strg/⌘ oder Mehrfachauswahl)</div></div>
+    </div>
+    <div class="panel hidden" data-tab="ansicht">
+      <div class="group"><div class="btns">
+        <button class="big" data-view="iso"><span class="ico">◩</span>Isometrisch</button>
+        <button class="big" data-view="+Z"><span class="ico">Z+</span>Oben</button>
+        <button class="big" data-view="-Z"><span class="ico">Z−</span>Unten</button>
+        <button class="big" data-view="-Y"><span class="ico">Y−</span>Vorne</button>
+        <button class="big" data-view="+Y"><span class="ico">Y+</span>Hinten</button>
+        <button class="big" data-view="+X"><span class="ico">X+</span>Rechts</button>
+        <button class="big" data-view="-X"><span class="ico">X−</span>Links</button>
+      </div><div class="glabel">Standardansichten</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-toggle-prims"><span class="ico">◎</span>Primitive</button>
+        <button class="big" id="btn-toggle-pts"><span class="ico">⁘</span>Punkte färben</button>
+      </div><div class="glabel">Anzeige</div></div>
+    </div>
+  </section>
+  <main id="workspace">
+    <aside id="tree-pane"><div class="pane-title">Baumansicht</div><div id="tree"></div></aside>
+    <div id="center">
+      <div id="scene"><div id="viewcube">
+        <button data-view="+Z">Oben</button><button data-view="-Y">Vorne</button><button data-view="+X">Rechts</button><button data-view="iso">Iso</button>
+      </div><div id="hint"></div><div id="busy" class="hidden">Berechne …</div></div>
+      <div id="table-pane"><div class="pane-title">Prüfmerkmal-Tabelle <span id="summary"></span></div>
+        <div id="table-wrap"><table id="ctrl-table"><thead><tr>
+          <th>Merkmal</th><th>Prüfmerkmal</th><th>Soll</th><th>Ist</th><th>Abw.</th><th>Tol +</th><th>Tol −</th><th>Status</th><th></th>
+        </tr></thead><tbody></tbody></table></div></div>
+    </div>
+    <aside id="dialog-pane"><div class="pane-title">Dialogbereich</div><div id="dialog"></div></aside>
+  </main>
+  <footer id="statusbar"><span id="status">Bereit. Polygonmodell importieren oder „Beispiel laden“.</span><span id="stats"></span></footer>
+</div>
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>

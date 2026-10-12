@@ -1,0 +1,58 @@
+// Web Worker: Parsen, Topologie, Regionenwachstum, Pinsel und Fits laufen hier (UI bleibt flüssig).
+import { parseByName } from './core/io';
+import { MeshData, bounds } from './core/mesh';
+import { MeshTopology, brushSelect, gather } from './core/region';
+import { autoFit, fitType, FitResult, GeomType } from './core/fit';
+import type { Vec3 } from './core/linalg';
+
+let mesh: MeshData | null = null;
+let topo: MeshTopology | null = null;
+
+export type Req =
+  | { op: 'load'; name: string; buffer: ArrayBuffer }
+  | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
+  | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
+  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto' };
+
+function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
+  const { p, n } = gather(mesh!, idx);
+  if (p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  let fit: FitResult, cands: FitResult[] = [];
+  if (type === 'auto') { const r = autoFit(p, n); fit = r.best; cands = r.candidates; }
+  else fit = fitType(type, p, n);
+  delete fit.residuals;
+  fit.n = idx.length;
+  return { fit, candidates: cands.map((c) => ({ type: c.type, rms: c.rms })) };
+}
+
+self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
+  const { id, req } = e.data;
+  const t0 = performance.now();
+  try {
+    let result: any, transfer: Transferable[] = [];
+    if (req.op === 'load') {
+      mesh = parseByName(req.name, req.buffer);
+      topo = mesh.indices.length ? new MeshTopology(mesh) : null;
+      const b = bounds(mesh);
+      const positions = mesh.positions.slice(), indices = mesh.indices.slice();
+      const normals = mesh.vertexNormals ? mesh.vertexNormals.slice() : null;
+      result = { name: mesh.name, positions, indices, normals, bounds: b, vertexCount: positions.length / 3, triCount: indices.length / 3 };
+      transfer = [positions.buffer, indices.buffer, ...(normals ? [normals.buffer] : [])];
+    } else if (req.op === 'grow') {
+      if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell (Dreiecke). Für Punktwolken den Pinsel verwenden.');
+      const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius });
+      const v = topo.regionVertices(tris);
+      const use = v.interior.length >= 20 ? v.interior : v.all;
+      const f = doFit(use, req.type);
+      result = { indices: use, ...f };
+    } else if (req.op === 'brush') {
+      result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
+    } else if (req.op === 'fit') {
+      result = { indices: req.indices, ...doFit(req.indices, req.type) };
+    }
+    result.ms = performance.now() - t0;
+    (self as any).postMessage({ id, result }, transfer);
+  } catch (err: any) {
+    (self as any).postMessage({ id, error: String(err?.message ?? err) });
+  }
+};

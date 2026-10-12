@@ -1,0 +1,24 @@
+// Eigene, einfache SVG-Symbole (keine Fremd-Assets).
+const s = (p: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">${p}</svg>`;
+export const ICON: Record<string, string> = {
+  auto: s('<path d="M4 18 L9 6 L14 18 M6 13h6"/><path d="M16 6l2 3 3-1-2 3 2 3-3-1-2 3" />'),
+  Ebene: s('<path d="M3 15 L9 9 H21 L15 15 Z"/>'),
+  Kreis: s('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
+  Zylinder: s('<ellipse cx="12" cy="6" rx="6" ry="2.5"/><path d="M6 6v12M18 6v12"/><path d="M6 18a6 2.5 0 0 0 12 0"/>'),
+  Langloch: s('<rect x="3" y="8" width="18" height="8" rx="4"/>'),
+  Kegel: s('<ellipse cx="12" cy="18" rx="6.5" ry="2.5"/><path d="M5.5 18 L10 5 h4 L18.5 18"/><ellipse cx="12" cy="5" rx="2" ry=".8"/>'),
+  Kugel: s('<circle cx="12" cy="12" r="8"/><ellipse cx="12" cy="12" rx="8" ry="3"/>'),
+  Punkt: s('<path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>'),
+  folder: s('<path d="M3 7h6l2 2h10v10H3z"/>'),
+  data: s('<path d="M4 6h16v12H4z M4 10h16"/>'),
+  mesh: s('<path d="M3 18 L8 6 L13 18 Z M8 6 L18 9 L13 18 M18 9 L21 18 H13"/>'),
+  control: s('<path d="M4 20h16M7 20V9M12 20V5M17 20v-8"/>'),
+  Durchmesser: s('<circle cx="12" cy="12" r="8"/><path d="M6 18 L18 6"/>'),
+  Radius: s('<circle cx="12" cy="12" r="8"/><path d="M12 12 L18 6"/>'),
+  X: '<b>X</b>', Y: '<b>Y</b>', Z: '<b>Z</b>',
+  Länge: s('<path d="M3 12h18M3 8v8M21 8v8M6 10l-3 2 3 2M18 10l3 2-3 2"/>'),
+  Breite: s('<path d="M12 3v18M8 3h8M8 21h8"/>'),
+  Kegelwinkel: s('<path d="M4 20 L12 4 L20 20"/><path d="M8 13a6 6 0 0 0 8 0"/>'),
+  Form: s('<path d="M3 14c3-5 5 3 9-2s5 3 9-2"/><path d="M3 18h18" stroke-dasharray="2 2"/>'),
+  'Abstand 3D': s('<path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"/>'),
+};
