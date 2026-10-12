@@ -1,0 +1,305 @@
+{
+ "name": "Prüfplatte",
+ "file": "pruefplatte.stl.gz",
+ "units": "mm",
+ "description": "Platte 140 × 90 × 16 mit Teilkreis 6 × Ø8 auf Ø60, Mittelbohrung Ø30, zwei Langlöchern, Tasche, Kugel und Kegel; Ecken R6, Fase 1 × 45°.",
+ "features": [
+  {
+   "id": "Oberseite",
+   "type": "Ebene",
+   "point": [
+    70,
+    45,
+    16
+   ],
+   "normal": [
+    0,
+    0,
+    1
+   ],
+   "probe": [
+    125,
+    60,
+    16
+   ]
+  },
+  {
+   "id": "Unterseite",
+   "type": "Ebene",
+   "point": [
+    70,
+    45,
+    0
+   ],
+   "normal": [
+    0,
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "Mittelbohrung",
+   "type": "Zylinder",
+   "center": [
+    70,
+    45,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 30,
+   "probe": [
+    85,
+    45,
+    8
+   ]
+  },
+  {
+   "id": "Teilkreis-Bohrung 1",
+   "type": "Zylinder",
+   "center": [
+    95.9808,
+    60.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8,
+   "probe": [
+    99.9808,
+    60.0,
+    8
+   ]
+  },
+  {
+   "id": "Teilkreis-Bohrung 2",
+   "type": "Zylinder",
+   "center": [
+    70.0,
+    75.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8
+  },
+  {
+   "id": "Teilkreis-Bohrung 3",
+   "type": "Zylinder",
+   "center": [
+    44.0192,
+    60.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8
+  },
+  {
+   "id": "Teilkreis-Bohrung 4",
+   "type": "Zylinder",
+   "center": [
+    44.0192,
+    30.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8
+  },
+  {
+   "id": "Teilkreis-Bohrung 5",
+   "type": "Zylinder",
+   "center": [
+    70.0,
+    15.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8
+  },
+  {
+   "id": "Teilkreis-Bohrung 6",
+   "type": "Zylinder",
+   "center": [
+    95.9808,
+    30.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 8
+  },
+  {
+   "id": "Teilkreis",
+   "type": "Teilkreis",
+   "center": [
+    70,
+    45
+   ],
+   "diameter": 60,
+   "count": 6,
+   "startAngleDeg": 30
+  },
+  {
+   "id": "Langloch 1",
+   "type": "Langloch",
+   "center": [
+    22,
+    72,
+    16
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "length": 24,
+   "width": 10,
+   "through": true,
+   "probe": [
+    22,
+    77,
+    8
+   ]
+  },
+  {
+   "id": "Langloch 2",
+   "type": "Langloch",
+   "center": [
+    120,
+    45,
+    16
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "length": 24,
+   "width": 10,
+   "depth": 8
+  },
+  {
+   "id": "Tasche",
+   "type": "Tasche",
+   "box": [
+    [
+     15,
+     12,
+     10
+    ],
+    [
+     45,
+     32,
+     16
+    ]
+   ],
+   "cornerRadius": 4,
+   "depth": 6,
+   "floor": {
+    "point": [
+     30,
+     22,
+     10
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "Kugel",
+   "type": "Kugel",
+   "center": [
+    115,
+    17,
+    18
+   ],
+   "diameter": 20,
+   "probe": [
+    115,
+    17,
+    28
+   ]
+  },
+  {
+   "id": "Kegel",
+   "type": "Kegel",
+   "apexAxis": [
+    0,
+    0,
+    1
+   ],
+   "baseCenter": [
+    110,
+    74,
+    16
+   ],
+   "baseDiameter": 16,
+   "topDiameter": 8,
+   "height": 10,
+   "includedAngleDeg": 43.6028,
+   "probe": [
+    116.03,
+    74,
+    20
+   ]
+  },
+  {
+   "id": "Eckenradien",
+   "type": "Rundung",
+   "radius": 6
+  },
+  {
+   "id": "Fase",
+   "type": "Fase",
+   "size": "1 x 45°"
+  }
+ ],
+ "mesh": {
+  "triangles": 334838,
+  "vertices": 167455,
+  "edge_mm": {
+   "mean": 0.505,
+   "p5": 0.388,
+   "p95": 0.615,
+   "max": 0.951
+  },
+  "quality": {
+   "mean": 0.959,
+   "p1": 0.777,
+   "min": 0.25
+  },
+  "stl_bytes": 16741984,
+  "noise_sigma_mm": 0.008,
+  "waviness_mm": 0.003,
+  "target_edge_mm": 0.48,
+  "scan_holes": 6,
+  "generator": "scripts/make_scan_parts.py"
+ }
+}

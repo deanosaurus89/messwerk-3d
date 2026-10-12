@@ -130,11 +130,28 @@ $('#file').onchange = async (e) => {
   await loadBuffer(f.name, await f.arrayBuffer());
   (e.target as HTMLInputElement).value = '';
 };
-$('#btn-sample').onclick = async () => {
-  status('Lade Beispiel …');
-  const r = await fetch('./samples/beispielteil.stl');
-  await loadBuffer('beispielteil.stl', await r.arrayBuffer());
-};
+// ---------- Beispielteile (Auswahl mit Vorschaubild)
+interface SampleInfo { key: string; name: string; file: string; description: string; triangles: number; bytes: number; thumb: string; kind: string }
+let samples: SampleInfo[] | null = null;
+async function loadSample(s: SampleInfo) {
+  $('#sample-dialog').classList.add('hidden');
+  status(`Lade ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
+  try {
+    const r = await fetch('./samples/' + s.file); if (!r.ok) throw new Error('HTTP ' + r.status);
+    await loadBuffer(s.file, await r.arrayBuffer());
+  } catch (e: any) { toast('Beispiel konnte nicht geladen werden: ' + e.message); } finally { $('#busy').classList.add('hidden'); }
+}
+async function openSamples() {
+  const d = $('#sample-dialog');
+  if (!samples) { try { samples = await (await fetch('./samples/index.json')).json(); } catch { samples = []; } }
+  d.innerHTML = `<div class="rv-head"><b>Beispielteil laden</b><span class="note">Demo-Messdaten (Scan-/CT-ähnlich) – Soll-Geometrie in samples/*.json</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
+    <div class="sd-grid">${samples!.map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
+      <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k Dreiecke · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
+  d.classList.remove('hidden');
+  ($('#sd-close') as HTMLButtonElement).onclick = () => d.classList.add('hidden');
+  d.querySelectorAll<HTMLButtonElement>('.sample-card').forEach((b) => (b.onclick = () => loadSample(samples!.find((s) => s.key === b.dataset.key)!)));
+}
+$('#btn-sample').onclick = () => openSamples();
 $('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.controls, featMap(), ctx));
 $('#btn-report').onclick = () => makeReport();
 $('#btn-report2').onclick = () => makeReport();
@@ -142,6 +159,7 @@ $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; 
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features));
 $('#btn-delete-feat').onclick = () => deleteSelected();
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); };
+$('#btn-toggle-wire').onclick = () => { const on = !viewer.wire; viewer.setWireframe(on); $('#btn-toggle-wire').classList.toggle('on', on); };
 $('#btn-toggle-pts').onclick = () => { state.colorPts = !state.colorPts; renderScene(); renderRibbon(); };
 
 function download(name: string, text: string, type = 'text/csv;charset=utf-8') {
@@ -1064,8 +1082,8 @@ function startTraining() {
   let lc0 = loadCount;
   const steps: TourStep[] = [
     { title: 'Training: Bezüge & Position', text: 'In dieser geführten Übung legst du am Beispielteil das Bezugssystem <b>A|B|C</b> fest (Oberseite, Vorderseite, linke Seite) und prüfst die <b>Position</b> der Bohrung Ø12 mit Bezug auf A|B|C.<br>Jeder Schritt wird automatisch geprüft. Mit <b>Weiter</b> geht es los.' },
-    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b>. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
-      target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
+    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b> und wähle <b>Beispielteil (Standard)</b>. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
+      target: () => document.querySelector('.sample-card[data-key="beispielteil"]') ?? document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
       check: () => loadCount > lc0 && !!state.data?.name.startsWith('beispielteil') },
     { title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
     { title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => state.mode?.kind === 'fit' && state.mode.type === 'Ebene' },

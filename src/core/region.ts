@@ -15,6 +15,51 @@ export class MeshTopology {
     this.vt = vertexTriangles(mesh);
     this.smooth = mesh.faceNormals!;
     this.sliver = this.findSlivers();
+    this.anchorDist = Math.max(1.0, 1.2 * this.medianEdge());
+    this.isotropic = this.checkIsotropic();
+    this.kappa = this.isotropic ? this.computeKappa() : new Float32Array(0);
+  }
+  /** Gleichmäßiges Scan-/CT-Netz (gute Dreiecksform)? Nur dann gelten Krümmungs-/Ankerkriterium beim Wachsen;
+   *  bei tessellierten CAD-Netzen (lange Splitter, sehr unterschiedliche Größen) wären sie bedeutungslos. */
+  isotropic: boolean;
+  private checkIsotropic(): boolean {
+    const p = this.mesh.positions, f = this.mesh.indices, fa = this.mesh.faceAreas!, nt = f.length / 3;
+    const step = Math.max(1, Math.floor(nt / 20000)); let n = 0, good = 0;
+    const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
+    for (let t = 0; t < nt; t += step) {
+      const a = 3 * f[3 * t], b = 3 * f[3 * t + 1], c = 3 * f[3 * t + 2]; const s = d2(a, b) + d2(b, c) + d2(c, a);
+      n++; if (s > 0 && (4 * Math.sqrt(3) * fa[t]) / s > 0.6) good++;
+    }
+    return n > 0 && good / n > 0.9;
+  }
+  /** Lokale Krümmung je Dreieck [rad/mm] (Normalenwinkel zu Nachbarn / Abstand, über 1-Ring geglättet).
+   *  Damit stoppt das Wachsen auch an tangentialen Verrundungen (Scan-/CT-Daten), wo der Winkel von Dreieck zu Dreieck klein ist. */
+  kappa: Float32Array;
+  private computeKappa(): Float32Array {
+    const p = this.mesh.positions, f = this.mesh.indices, fn = this.smooth, nt = f.length / 3;
+    const c = new Float32Array(3 * nt);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) c[3 * t + k] = (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3;
+    const raw = new Float32Array(nt);
+    for (let t = 0; t < nt; t++) {
+      let s = 0, n = 0;
+      for (const u of this.neighbors(t)) {
+        const d = Math.hypot(c[3 * u] - c[3 * t], c[3 * u + 1] - c[3 * t + 1], c[3 * u + 2] - c[3 * t + 2]); if (d < 1e-9) continue;
+        const dot = fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2];
+        s += Math.acos(Math.max(-1, Math.min(1, dot))) / d; n++;
+      }
+      raw[t] = n ? s / n : 0;
+    }
+    const out = new Float32Array(nt);
+    for (let t = 0; t < nt; t++) { let s = raw[t], n = 1; for (const u of this.neighbors(t)) { s += raw[u]; n++; } out[t] = s / n; }
+    return out;
+  }
+  /** Bezugsabstand für die Krümmungsprüfung beim Wachsen (≈ 1 mm bzw. 1,2 × mittlere Kantenlänge). */
+  anchorDist: number;
+  private medianEdge(): number {
+    const p = this.mesh.positions, f = this.mesh.indices, nt = f.length / 3, L: number[] = [];
+    const step = Math.max(1, Math.floor(nt / 5000));
+    for (let t = 0; t < nt; t += step) { const a = 3 * f[3 * t], b = 3 * f[3 * t + 1]; L.push(Math.hypot(p[a] - p[b], p[a + 1] - p[b + 1], p[a + 2] - p[b + 2])); }
+    L.sort((x, y) => x - y); return L[L.length >> 1] || 1;
   }
   /** Splitterdreiecke (Formqualität q = 4√3·A / Σl² < 0.05) haben bei Rauschen beliebige
    *  Normalen und würden über Kanten hinweg "lecken": sie werden beim Wachsen übersprungen. */
@@ -62,8 +107,29 @@ export class MeshTopology {
     const cosC = o.maxCurvatureDeg ? Math.cos((o.maxCurvatureDeg * Math.PI) / 180) : -2;
     const r2 = o.radius > 0 ? o.radius * o.radius : Infinity;
     const sn = [fn[3 * seedTri], fn[3 * seedTri + 1], fn[3 * seedTri + 2]];
+    // Bezugskrümmung: Median der Krümmung in der Saat-Umgebung (kleines Vorwachsen nur mit Winkelkriterium)
+    const kap = this.kappa, iso = this.isotropic; let kLo = -1, kHi = Infinity;
+    if (iso) {
+      const seen = new Set<number>([seedTri]), q = [seedTri], ks: number[] = [];
+      while (q.length && ks.length < 80) {
+        const t = q.shift()!; ks.push(kap[t]);
+        for (const u of this.neighbors(t)) {
+          if (seen.has(u)) continue;
+          if (fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2] < cosA) continue;
+          seen.add(u); q.push(u);
+        }
+      }
+      ks.sort((a, b) => a - b); const k0 = ks[ks.length >> 1];
+      kHi = k0 * 1.8 + 0.2; kLo = k0 / 1.8 - 0.2;
+    }
     const stack = [seedTri]; inR[seedTri] = 1;
     const out: number[] = [];
+    // Krümmungsprüfung gegen ein "Anker"-Dreieck ~anchorDist zurück auf dem Wachstumspfad:
+    // verrundete Kanten (Scan-/CT-Daten) haben kleine Winkel von Dreieck zu Dreieck, aber über ~1 mm einen großen Knick.
+    const anchor = new Int32Array(nt).fill(-1), anchor2 = new Int32Array(nt).fill(-1); anchor[seedTri] = anchor2[seedTri] = seedTri;
+    const cosK = Math.cos((60 * Math.PI) / 180), D2 = this.anchorDist ** 2;
+    const cen = (t: number, k: number) => (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3;
+    const dist2 = (a: number, b: number) => (cen(a, 0) - cen(b, 0)) ** 2 + (cen(a, 1) - cen(b, 1)) ** 2 + (cen(a, 2) - cen(b, 2)) ** 2;
     while (stack.length) {
       const t = stack.pop()!;
       for (const u of this.neighbors(t)) {
@@ -76,6 +142,11 @@ export class MeshTopology {
           const dx = p[a] - seedPoint[0], dy = p[a + 1] - seedPoint[1], dz = p[a + 2] - seedPoint[2];
           if (dx * dx + dy * dy + dz * dz > r2) continue;
         }
+        if (iso && (kap[u] > kHi || kap[u] < kLo)) continue;
+        let an = anchor[t], an2 = anchor2[t];           // an: ≥ D zurück, an2: jüngerer Anker
+        if (dist2(u, an2) > D2) { an = an2; an2 = t; }
+        if (iso && fn[3 * an] * fn[3 * u] + fn[3 * an + 1] * fn[3 * u + 1] + fn[3 * an + 2] * fn[3 * u + 2] < cosK) continue;
+        anchor[u] = an; anchor2[u] = an2;
         inR[u] = 1;
         if (this.sliver[u]) continue; // Splitter: aufnehmen, aber nicht weiterwachsen
         stack.push(u);

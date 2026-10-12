@@ -22,7 +22,7 @@
   <section id="ribbon">
     <div class="panel" data-tab="start">
       <div class="group"><div class="btns">
-        <label class="big" title="Polygonmodell oder Punktwolke importieren"><span class="ico">⤓</span>Importieren<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc" hidden /></label>
+        <label class="big" title="Polygonmodell oder Punktwolke importieren"><span class="ico">⤓</span>Importieren<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc,.gz" hidden /></label>
         <button class="big" id="btn-sample"><span class="ico">▣</span>Beispiel laden</button>
       </div><div class="glabel">Daten</div></div>
       <div class="group"><div class="btns">
@@ -70,6 +70,7 @@
       <div class="group"><div class="btns">
         <button class="big" id="btn-toggle-prims"><span class="ico">◎</span>Primitive</button>
         <button class="big" id="btn-toggle-pts"><span class="ico">⁘</span>Punkte färben</button>
+        <button class="big" id="btn-toggle-wire" title="Dreiecksnetz anzeigen"><span class="ico">▦</span>Netz</button>
         <button class="big" id="btn-toggle-labels"><span class="ico">🏷</span>Labels</button>
       </div><div class="glabel">Anzeige</div></div>
     </div>
@@ -77,7 +78,7 @@
   <main id="workspace">
     <aside id="tree-pane"><div class="pane-title">Baumansicht</div><div id="tree"></div></aside>
     <div id="center">
-      <div id="scene"><div id="viewcube"><button data-view="iso" title="Isometrisch">Iso</button><button data-view="fit" title="Einpassen">⤢</button></div><div id="report-view" class="hidden"></div><div id="help-view" class="hidden"></div><div id="restore-bar" class="hidden"></div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
+      <div id="scene"><div id="viewcube"><button data-view="iso" title="Isometrisch">Iso</button><button data-view="fit" title="Einpassen">⤢</button></div><div id="report-view" class="hidden"></div><div id="help-view" class="hidden"></div><div id="sample-dialog" class="hidden"></div><div id="restore-bar" class="hidden"></div><div id="hint"></div><div id="preview-card" class="hidden"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Berechne …</div></div>
       <div id="table-pane" data-ctab="katalog"><div class="pane-title">Prüfmerkmale <span id="summary"></span>
           <span class="ctabs"><button data-ctab="katalog">Katalog</button><button data-ctab="liste">Alle <span id="ctab-n"></span></button></span></div>
         <div id="ctrl-body"><div id="catalog"></div>

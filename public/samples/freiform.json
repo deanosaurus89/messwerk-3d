@@ -1,0 +1,154 @@
+{
+ "name": "Freiform-Demoteil",
+ "file": "freiform.stl.gz",
+ "units": "mm",
+ "description": "Block 130 × 80 × 20 mit glatter Freiformfläche (B-Spline, bis +22,5 mm) links und Regelgeometrie rechts: Bohrung Ø14, Bolzen Ø18, Halbkugel Ø16, Kegel.",
+ "freeform": {
+  "region_x": [
+   0,
+   70
+  ],
+  "formula": "z = 20 + sin(πx/70)·(17 + 3·cos(2πy/80) + 2.5·y/80)",
+  "sections": 15,
+  "pointsPerSection": 33
+ },
+ "features": [
+  {
+   "id": "Oberseite (eben)",
+   "type": "Ebene",
+   "point": [
+    100,
+    40,
+    20
+   ],
+   "normal": [
+    0,
+    0,
+    1
+   ],
+   "probe": [
+    115,
+    45,
+    20
+   ]
+  },
+  {
+   "id": "Unterseite",
+   "type": "Ebene",
+   "point": [
+    65,
+    40,
+    0
+   ],
+   "normal": [
+    0,
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "Bohrung Ø14",
+   "type": "Zylinder",
+   "center": [
+    100,
+    25,
+    10
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 14,
+   "probe": [
+    100,
+    18,
+    10
+   ]
+  },
+  {
+   "id": "Bolzen Ø18",
+   "type": "Zylinder",
+   "center": [
+    100,
+    60,
+    26
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 18,
+   "probe": [
+    100,
+    51,
+    26
+   ]
+  },
+  {
+   "id": "Halbkugel Ø16",
+   "type": "Kugel",
+   "center": [
+    120,
+    25,
+    20
+   ],
+   "diameter": 16,
+   "probe": [
+    120,
+    25,
+    28
+   ]
+  },
+  {
+   "id": "Kegel",
+   "type": "Kegel",
+   "baseCenter": [
+    80,
+    64,
+    20
+   ],
+   "baseDiameter": 12,
+   "topDiameter": 4,
+   "height": 10,
+   "includedAngleDeg": 43.6028,
+   "probe": [
+    84,
+    64,
+    25
+   ]
+  },
+  {
+   "id": "Freiformfläche",
+   "type": "Freiform",
+   "region": "x 0..70",
+   "probe": [
+    35,
+    40,
+    35.25
+   ]
+  }
+ ],
+ "mesh": {
+  "triangles": 363132,
+  "vertices": 181621,
+  "edge_mm": {
+   "mean": 0.467,
+   "p5": 0.364,
+   "p95": 0.569,
+   "max": 0.881
+  },
+  "quality": {
+   "mean": 0.963,
+   "p1": 0.798,
+   "min": 0.399
+  },
+  "stl_bytes": 18156684,
+  "noise_sigma_mm": 0.008,
+  "waviness_mm": 0.003,
+  "target_edge_mm": 0.45,
+  "scan_holes": 6,
+  "generator": "scripts/make_scan_parts.py"
+ }
+}

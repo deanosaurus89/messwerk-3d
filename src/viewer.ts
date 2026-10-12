@@ -79,7 +79,17 @@ export class Viewer {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
   }
 
+  wire: THREE.Mesh | null = null;
+  /** Dreiecksnetz als Drahtgitter über dem Modell anzeigen (Ansicht › Netz). */
+  setWireframe(on: boolean) {
+    if (this.wire) { this.scene.remove(this.wire); this.wire = null; }
+    if (on && this.model && (this.model as THREE.Mesh).isMesh) {
+      this.wire = new THREE.Mesh(this.model.geometry, new THREE.MeshBasicMaterial({ color: 0x1b2633, wireframe: true, transparent: true, opacity: 0.35 }));
+      this.wire.raycast = () => {}; this.wire.visible = this.model.visible; this.scene.add(this.wire);
+    }
+  }
   setModel(positions: Float32Array, indices: Uint32Array, normals: Float32Array | null) {
+    const hadWire = !!this.wire; this.setWireframe(false);
     if (this.model) { this.scene.remove(this.model); this.model.geometry.dispose(); }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -96,6 +106,7 @@ export class Viewer {
       this.model = new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors: true, size: 2, sizeAttenuation: false }));
     }
     this.scene.add(this.model);
+    if (hadWire) this.setWireframe(true);
     geo.computeBoundingSphere();
     this.center.copy(geo.boundingSphere!.center); this.radius = geo.boundingSphere!.radius;
     this.ray.params.Points = { threshold: this.radius / 300 };

@@ -1,3 +1,4 @@
+import { gunzipSync } from 'fflate';
 // Import von Polygonmodellen: STL (ASCII/binär), PLY (ASCII/binär LE), OBJ, XYZ-Punktwolke.
 import { MeshData, computeNormals, weld } from './mesh';
 
@@ -117,6 +118,11 @@ export function parsePLY(buf: ArrayBuffer, name = 'PLY'): MeshData {
 }
 
 export function parseByName(fileName: string, buf: ArrayBuffer): MeshData {
+  const b = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
+  if (b[0] === 0x1f && b[1] === 0x8b) { // gzip (z. B. *.stl.gz) – Server liefert die Rohbytes
+    const u = gunzipSync(new Uint8Array(buf)); buf = u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+  }
+  fileName = fileName.replace(/\.gz$/i, '');
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   const name = fileName.replace(/\.[^.]+$/, '');
   if (ext === 'stl') return parseSTL(buf, name);
