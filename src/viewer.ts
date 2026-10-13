@@ -293,13 +293,54 @@ export class Viewer {
   }
 
   /** Kurve des Kurvennetzes als dünne Röhre auf der Oberfläche. */
-  addCurve(pts: number[][], color: number, selected: boolean) {
+  addCurve(pts: number[][], color: number, selected: boolean, id?: number, hover = false, thin = false) {
     if (pts.length < 2) return;
     const v = pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
     const path = new THREE.CatmullRomCurve3(v, false, 'centripetal');
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(600, Math.max(8, v.length * 2)), this.radius / (selected ? 220 : 380), 5),
-      new THREE.MeshBasicMaterial({ color: selected ? 0xffd400 : color }));
-    tube.renderOrder = 5; this.prims.add(tube);
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(600, Math.max(8, v.length * 2)), this.radius / (selected ? 220 : hover ? 260 : thin ? 520 : 380), 5),
+      new THREE.MeshBasicMaterial({ color: selected ? 0xffd400 : hover ? 0xffffff : color, transparent: thin, opacity: thin ? 0.8 : 1 }));
+    tube.renderOrder = 5; if (id != null) tube.userData.curveId = id; this.prims.add(tube);
+  }
+  /** Kontrollpunkt (anfassbar), immer sichtbar. */
+  addCtrl(p: number[], i: number, active = false) {
+    const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / (active ? 110 : 140), 12, 10), new THREE.MeshBasicMaterial({ color: active ? 0xff3d00 : 0xffffff, depthTest: false }));
+    const r = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 100, 12, 10), new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false, transparent: true, opacity: 0.55 }));
+    d.position.set(p[0], p[1], p[2]); r.position.copy(d.position); r.renderOrder = 8; d.renderOrder = 9; d.userData.ctrl = i; r.userData.ctrl = i; this.prims.add(r); this.prims.add(d);
+  }
+  /** Textmarke (z. B. Seitenzahl eines Patches) an einem Punkt. */
+  addLabel(p: number[], text: string, bg = '#ffffff') {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64; const x = c.getContext('2d')!;
+    x.fillStyle = bg; x.beginPath(); x.arc(32, 32, 28, 0, 7); x.fill(); x.lineWidth = 4; x.strokeStyle = '#222'; x.stroke();
+    x.fillStyle = '#111'; x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, 32, 34);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
+    s.scale.set(0.032, 0.032, 1); s.position.set(p[0], p[1], p[2]); s.renderOrder = 10; s.raycast = () => {}; this.prims.add(s);
+  }
+  /** Kurve oder Kontrollpunkt unter dem Zeiger (Kontrollpunkte haben Vorrang). */
+  pickCurve(clientX: number, clientY: number): { curveId?: number; ctrl?: number; point: number[] } | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    this.ray.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), this.camera);
+    (this.ray as any).firstHitOnly = false; this.prims.updateMatrixWorld();
+    const objs = this.prims.children.filter((o) => o.userData.curveId != null || o.userData.ctrl != null);
+    const hs = this.ray.intersectObjects(objs, false);
+    const c = hs.find((h) => h.object.userData.ctrl != null);
+    if (c) return { ctrl: c.object.userData.ctrl, point: c.point.toArray() };
+    // Kurven: Toleranz in Bildschirmpixeln (Röhren sind dünn) – nächster Kurvenpunkt innerhalb ~10 px
+    const m = this.model && this.model.visible ? this.ray.intersectObject(this.model, false)[0] : undefined;
+    const depth = m ? m.distance : Infinity;
+    const hit = hs.find((h) => h.object.userData.curveId != null && h.distance < depth + this.radius / 200);
+    if (hit) return { curveId: hit.object.userData.curveId, point: hit.point.toArray() };
+    let best: { curveId: number; point: number[] } | null = null, bd = 10;
+    const v = new THREE.Vector3();
+    for (const o of objs) if (o.userData.curveId != null) {
+      const pos = ((o as THREE.Mesh).geometry.getAttribute('position').array as Float32Array);
+      for (let i = 0; i < pos.length; i += 15) {
+        v.set(pos[i], pos[i + 1], pos[i + 2]); const dd = v.distanceTo(this.ray.ray.origin);
+        if (dd > depth + this.radius / 100) continue;
+        const s = v.clone().project(this.camera); const px = Math.hypot((s.x + 1) / 2 * r.width - (clientX - r.left), (1 - s.y) / 2 * r.height - (clientY - r.top));
+        if (px < bd) { bd = px; best = { curveId: o.userData.curveId, point: v.toArray() }; }
+      }
+    }
+    return best;
   }
   addNode(p: number[], color: number, size = 1) {
     const d = new THREE.Mesh(new THREE.SphereGeometry((this.radius / 150) * size, 10, 8), new THREE.MeshBasicMaterial({ color }));

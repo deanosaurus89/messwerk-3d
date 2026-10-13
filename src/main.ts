@@ -8,6 +8,7 @@ import {
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
+import { evalBSpline } from './core/curves';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
 import { datumText } from './core/features';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -27,7 +28,7 @@ interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; r
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
   aux?: PreviewAux; hit?: Hit; dev?: Float32Array; }
 type V3 = [number, number, number];
-interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Benutzer'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
+interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const engine = new Engine();
@@ -57,11 +58,11 @@ const state = {
   nextId: 1, nextCtrl: 1, typeCount: {} as Record<string, number>,
   addFeat: null as number | null,
   curves: [] as CurveView[], nextCurve: 1, curveSel: null as number | null, showLayout: false,
-  layout: null as null | { nodes: { p: number[]; degree: number; v: number }[]; regions: { faces: number; sides: number; area: number }[]; regionOf: Int32Array; tJunctions: number; foursided: number },
+  layout: null as null | { nodes: { p: number[]; degree: number; v: number }[]; corners: { v: number; kind: string; p: number[] }[]; suggestions: (CurveView & { reason: string; region: number })[]; regions: { faces: number; sides: number; loops: number; area: number; center: number[] }[]; regionOf: Int32Array; tJunctions: number; foursided: number },
 };
 (window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
-type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve';
-const PE_NAME: Record<PeTool, string> = { curve: 'Kurve zeichnen', reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
+type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve' | 'curveopts';
+const PE_NAME: Record<PeTool, string> = { curveopts: 'Kurvennetz-Optionen', curve: 'Kurve zeichnen', reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
 const pe = {
   tool: null as PeTool | null,
   tol: 0.02, normalDeg: 10, featureDeg: 30, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
@@ -216,6 +217,7 @@ let painting = false;
 canvas.addEventListener('pointerdown', (e) => {
   document.body.classList.remove('show-tree', 'show-dialog');
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0) && curveDragStart(e.clientX, e.clientY)) return;
   if (pe.tool === 'erase' && e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
     const h = viewer.pick(e.clientX, e.clientY);
     if (h) { painting = true; pePaintErase = e.shiftKey; viewer.controls.enabled = false; peStroke.push([]); pePaint(h); }
@@ -227,6 +229,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (cv.drag) { curveDragMove(e.clientX, e.clientY); return; }
+  if (e.pointerType === 'mouse' && !e.buttons) curveHover(e.clientX, e.clientY);
   if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); viewer.showCursor(h, pe.radius); if (painting && h) pePaint(h); return; }
   if (state.mode?.kind !== 'fit' || state.mode.method !== 'Pinsel') return;
   const h = viewer.pick(e.clientX, e.clientY);
@@ -235,10 +239,12 @@ canvas.addEventListener('pointermove', (e) => {
 });
 window.addEventListener('pointerup', async (e) => {
   if (painting) { painting = false; viewer.controls.enabled = true; down = null; return; }
+  if (cv.drag) { const d0 = down; down = null; const tap = d0 && Math.hypot(e.clientX - d0.x, e.clientY - d0.y) < 8; if (tap) cv.drag.moved = false; await curveDragEnd(); if (!tap) return; await curveClick(e.clientX, e.clientY); return; }
   if (!down || e.target !== canvas) { down = null; return; }
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
   down = null;
   if (moved > 8 || dt > 700) return;
+  if (!state.mode && await curveClick(e.clientX, e.clientY)) return;
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) return;
   if (pe.tool === 'curve') curveAddPoint(h);
@@ -618,6 +624,9 @@ window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'INPUT') return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { e.preventDefault(); undoBrush(); return; }
   if (e.key === 'Escape' && pe.tool) { peExit(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !pe.tool && !state.mode && cv.undo.length) { e.preventDefault(); curveUndo(); return; }
+  if (e.key === 'Escape' && state.curveSel != null) { if (cv.edit) { cv.edit = null; renderDialog(); } else curveSelect(null); return; }
+  if (e.key === 'Delete' && state.curveSel != null && !pe.tool) { curveDelete(); return; }
   if (e.key === 'Escape') {
     if (state.preview) discardPreview();
     else if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { if (state.brushCount) clearSelectionAll(); else setMethod('Klick'); }
@@ -788,8 +797,9 @@ function renderPreviewCard() {
 function renderDialog() {
   const d = $('#dialog'); d.innerHTML = '';
   if (pe.tool === 'curve') { renderCurveDialog(d); return; }
-  if (pe.tool) { renderPolyDialog(d); return; }
-  if (state.curveSel != null) { const c = state.curves.find((x) => x.id === state.curveSel); if (c) { d.innerHTML = `<h3>〰 ${c.name}</h3>${kv([['Typ', c.kind], ['Länge', c.length.toFixed(2) + ' mm'], ['Kontrollpunkte', String(c.ctrl.length)], ['Grad', '3 (B-Spline)'], ['Geschlossen', c.closed ? 'ja' : 'nein']] as any)}<div class="row"><button class="btn" id="cv-del">✕ Kurve löschen</button></div>`; d.querySelector('#cv-del')!.addEventListener('click', () => curveDelete(c.id)); return; } }
+  if (pe.tool && pe.tool !== 'curveopts') { renderPolyDialog(d); return; }
+  if (pe.tool === 'curveopts') { renderCurveOpts(d); return; }
+  if (state.curveSel != null) { const c = curveById(state.curveSel); if (c) { renderCurveSel(d, c); return; } }
   const m = state.mode;
   if (m?.kind === 'dist') {
     const opts = (sel: number | null) => `<option value="">— wählen —</option>` + state.features.filter((f) => f.type !== 'Abstand')
@@ -1660,12 +1670,113 @@ function paintPolyCompare(): boolean {
 
 
 // ------------------------------------------------------------------ Kurvennetz (Modeler-artig)
-const CURVE_COLOR: Record<CurveView['kind'], number> = { Kante: 0xd81b60, Tangente: 0x1e88e5, Benutzer: 0x2e7d32 };
+const CURVE_COLOR: Record<CurveView['kind'], number> = { Kante: 0xd81b60, Tangente: 0x1e88e5, Übergang: 0x8e24aa, Benutzer: 0x2e7d32, Vorschlag: 0xff6f00 };
+const CURVE_NAME: Record<CurveView['kind'], string> = { Kante: 'Kante', Tangente: 'Tangente', Übergang: 'Übergang', Benutzer: 'Kurve', Vorschlag: 'Naht' };
+/** Erkennungs-/Aufräumoptionen (Dialog „Optionen"). */
+const curveOpts = { sharpDeg: 30, flatKappa: 0.055, binRatio: 1.6, minLen: 0, gap: 0, dangling: 0, mergeDeg: 30, turnDeg: 55, autoCorners: true };
+const CURVE_OPT_DEF: [keyof typeof curveOpts, string, number, number, number, string][] = [
+  ['sharpDeg', 'Kantenwinkel', 5, 80, 1, '°'], ['flatKappa', 'Krümmung „eben" unter', 0.005, 0.3, 0.005, '1/mm'], ['binRatio', 'Radiussprung (Verhältnis)', 1.1, 4, 0.05, '×'],
+  ['minLen', 'Mindestlänge (0 = auto)', 0, 50, 0.5, 'mm'], ['gap', 'Lücken schließen bis (0 = auto)', 0, 20, 0.5, 'mm'], ['dangling', 'Lose Enden kürzen bis (0 = auto)', 0, 50, 0.5, 'mm'],
+  ['mergeDeg', 'Fluchtende Stücke verbinden bis', 0, 60, 1, '°'], ['turnDeg', 'Eckpunkt ab Richtungsknick', 20, 120, 1, '°']];
+/** Bearbeitung der gewählten Kurve: Undo-Stapel, Unter-Modus, Ziehen. */
+const cv = { undo: [] as string[], edit: null as null | 'insert' | 'delpt' | 'split' | 'join', hover: null as number | null, drag: null as null | { id: number; i: number; moved: boolean }, ctrlSel: null as number | null, raf: 0 };
+Object.assign((window as any).__app, { cv: () => cv, curveOpts, curveUndo, acceptSuggestions });
+function curveSnapshot() { cv.undo.push(JSON.stringify({ curves: state.curves, next: state.nextCurve, sel: state.curveSel })); if (cv.undo.length > 50) cv.undo.shift(); }
+async function curveUndo() {
+  const s = cv.undo.pop(); if (!s) { toast('Nichts rückgängig zu machen.'); return; }
+  const o = JSON.parse(s); state.curves = o.curves; state.nextCurve = o.next; state.curveSel = o.sel; cv.edit = null; cv.ctrlSel = null;
+  await updateLayout(); renderAll(); status('Kurvenbearbeitung rückgängig gemacht.');
+}
+const curveById = (id: number | null) => state.curves.find((c) => c.id === id) ?? null;
+function sampleCtrl(ctrl: number[][], closed: boolean): number[][] {
+  const P = closed ? [...ctrl, ctrl[0]] : ctrl; const out: number[][] = [];
+  for (let k = 0; k <= 120; k++) out.push(evalBSpline(P as any, k / 120) as any);
+  return out;
+}
+/** Neue Form aus Kontrollpunkten im Worker berechnen (auf Netz einrasten, Kantenkette neu bestimmen). */
+async function curveApplyCtrl(c: CurveView, ctrl: number[][]) {
+  const r = await engine.call<any>({ op: 'curveFromCtrl', ctrl: ctrl as any, kind: c.kind, closed: c.closed });
+  Object.assign(c, r.curve, { kind: c.kind });
+}
+function curveSelect(id: number | null) { state.curveSel = id; cv.ctrlSel = null; cv.edit = null; if (id != null) { state.sel = []; } renderTree(); renderScene(); renderDialog(); renderModeBar();
+  if (id != null) document.querySelector(`[data-cid="${id}"]`)?.scrollIntoView({ block: 'nearest' }); }
+/** Klick auf eine Kurve im 3D-Bild: wählen bzw. aktuellen Bearbeitungsschritt ausführen. Rückgabe true = verbraucht. */
+async function curveClick(x: number, y: number): Promise<boolean> {
+  if (!state.curves.length || pe.tool) return false;
+  const h = viewer.pickCurve(x, y); const c = curveById(state.curveSel);
+  if (c && cv.edit === 'delpt' && h?.ctrl != null) {
+    if (c.ctrl.length <= (c.closed ? 3 : 2)) { toast('Zu wenige Kontrollpunkte.'); return true; }
+    curveSnapshot(); const ctrl = c.ctrl.filter((_, i) => i !== h.ctrl); await busy(curveApplyCtrl(c, ctrl)); cv.ctrlSel = null; await updateLayout(); renderAll(); return true;
+  }
+  if (h?.ctrl != null) { cv.ctrlSel = h.ctrl; renderScene(); renderDialog(); return true; }
+  if (!h || h.curveId == null) { if (cv.edit) { toast('Bitte auf eine Kurve tippen.'); return true; } return false; }
+  if (c && cv.edit === 'insert' && h.curveId === c.id) {
+    // Position im Kontrollpolygon über den nächstgelegenen Kurvenparameter bestimmen
+    const S = sampleCtrl(c.ctrl, c.closed); let bk = 0, bd = Infinity;
+    S.forEach((q, k) => { const d = (q[0] - h.point[0]) ** 2 + (q[1] - h.point[1]) ** 2 + (q[2] - h.point[2]) ** 2; if (d < bd) { bd = d; bk = k; } });
+    const n = c.ctrl.length + (c.closed ? 1 : 0); const at = Math.min(c.ctrl.length, Math.max(1, Math.round((bk / 120) * (n - 1) + 0.5)));
+    curveSnapshot(); const ctrl = [...c.ctrl.slice(0, at), h.point, ...c.ctrl.slice(at)]; await busy(curveApplyCtrl(c, ctrl)); cv.ctrlSel = at; cv.edit = null; await updateLayout(); renderAll(); return true;
+  }
+  if (c && cv.edit === 'split' && h.curveId === c.id) {
+    const r = await busy(engine.call<any>({ op: 'curveSplit', curve: { chain: c.chain, kind: c.kind }, p: h.point as any }));
+    if (!r.curves) { toast('Teilen hier nicht möglich (zu nah am Ende).'); return true; }
+    curveSnapshot(); const i = state.curves.indexOf(c);
+    const b = { id: state.nextCurve, name: `${CURVE_NAME[c.kind]} ${state.nextCurve++}`, visible: true, ...r.curves[1] };
+    Object.assign(c, r.curves[0], { kind: c.kind, closed: false }); b.kind = c.kind; state.curves.splice(i + 1, 0, b);
+    cv.edit = null; await updateLayout(); toast(`✔ ${c.name} geteilt → ${c.name}, ${b.name}`); renderAll(); return true;
+  }
+  if (c && cv.edit === 'join' && h.curveId !== c.id) {
+    const o = curveById(h.curveId)!; curveSnapshot();
+    const r = await busy(engine.call<any>({ op: 'curveJoin', a: { chain: c.chain, kind: c.kind }, b: { chain: o.chain } }));
+    Object.assign(c, r.curve, { kind: c.kind }); state.curves = state.curves.filter((x) => x !== o);
+    cv.edit = null; await updateLayout(); toast(`✔ ${o.name} mit ${c.name} verbunden (${c.length.toFixed(1)} mm)`); renderAll(); return true;
+  }
+  curveSelect(state.curveSel === h.curveId && !cv.edit ? null : h.curveId); return true;
+}
+function curveHover(x: number, y: number) {
+  if (!state.curves.length || pe.tool || cv.drag) return;
+  const h = viewer.pickCurve(x, y); const id = h?.curveId ?? null;
+  canvas.style.cursor = h?.ctrl != null ? 'grab' : id != null ? 'pointer' : '';
+  if (id !== cv.hover) { cv.hover = id; renderScene(); }
+}
+/** Kontrollpunkt ziehen: Zeiger auf das Netz projizieren, Kurve lokal neu auswerten; beim Loslassen exakt im Worker. */
+function curveDragStart(x: number, y: number): boolean {
+  const c = curveById(state.curveSel); if (!c || pe.tool || cv.edit) return false;
+  const h = viewer.pickCurve(x, y); if (h?.ctrl == null) return false;
+  curveSnapshot(); cv.drag = { id: c.id, i: h.ctrl, moved: false }; cv.ctrlSel = h.ctrl; viewer.controls.enabled = false; return true;
+}
+function curveDragMove(x: number, y: number) {
+  const c = curveById(cv.drag!.id); if (!c) return; const m = viewer.pick(x, y); if (!m) return;
+  c.ctrl[cv.drag!.i] = m.point; cv.drag!.moved = true; c.pts = sampleCtrl(c.ctrl, c.closed);
+  if (!cv.raf) cv.raf = requestAnimationFrame(() => { cv.raf = 0; renderScene(); });
+}
+async function curveDragEnd() {
+  const d = cv.drag!; cv.drag = null; viewer.controls.enabled = true; const c = curveById(d.id);
+  if (!c || !d.moved) { cv.undo.pop(); renderScene(); renderDialog(); return; }
+  await busy(curveApplyCtrl(c, c.ctrl)); await updateLayout(); renderAll();
+}
+/** Naht-/Teilungsvorschläge als Benutzerkurven übernehmen. */
+async function acceptSuggestions() {
+  const L = state.layout; if (!L?.suggestions?.length) { toast('Keine Vorschläge vorhanden.'); return; }
+  curveSnapshot(); const n0 = L.regions.filter((r) => r.sides === 4 && r.loops === 1).length;
+  for (const s of L.suggestions) { const { reason, region, ...c } = s; state.curves.push({ ...c, kind: 'Vorschlag', id: state.nextCurve, name: `Naht ${state.nextCurve++}`, visible: true }); }
+  await updateLayout(); toast(`✔ ${L.suggestions.length} Vorschläge übernommen – 4-seitig: ${n0} → ${state.layout!.foursided}`); renderAll();
+}
 let curveDraft: { v: number; p: number[] }[] = [];
-function curvesReset() { state.curves = []; state.nextCurve = 1; state.curveSel = null; state.layout = null; state.showLayout = false; curveDraft = []; }
+function curvesReset() { cv.undo.length = 0; cv.edit = null; state.curves = []; state.nextCurve = 1; state.curveSel = null; state.layout = null; state.showLayout = false; curveDraft = []; }
 function renderCurves() {
-  for (const c of state.curves) if (c.visible) viewer.addCurve(c.pts, CURVE_COLOR[c.kind], state.curveSel === c.id);
-  if (state.layout && state.curves.some((c) => c.visible)) for (const n of state.layout.nodes) viewer.addNode(n.p, n.degree === 3 ? 0xff8f00 : n.degree === 1 ? 0x9e9e9e : 0x212121, n.degree === 3 ? 1.1 : 0.8);
+  for (const c of state.curves) if (c.visible) viewer.addCurve(c.pts, CURVE_COLOR[c.kind], state.curveSel === c.id, c.id, cv.hover === c.id);
+  const L = state.layout;
+  if (L && state.curves.some((c) => c.visible)) {
+    for (const n of L.nodes) viewer.addNode(n.p, n.degree === 3 ? 0xff8f00 : n.degree === 1 ? 0x9e9e9e : 0x212121, n.degree === 3 ? 1.1 : 0.8);
+    if (state.showLayout) {
+      for (const k of L.corners ?? []) if (k.kind !== 'Knoten') viewer.addNode(k.p, k.kind === 'Knick' ? 0xffffff : 0x00e5ff, 0.75);
+      for (const s of L.suggestions ?? []) viewer.addCurve(s.pts, CURVE_COLOR.Vorschlag, false, undefined, false, true);
+      const minF = L.regionOf.length / 300; L.regions.forEach((r) => { if (r.center && r.faces > minF) viewer.addLabel(r.center, r.loops > 1 ? `${r.sides}·${r.loops}` : String(r.sides), r.sides === 4 && r.loops === 1 ? '#b9f6ca' : '#ffccbc'); });
+    }
+  }
+  const sc = curveById(state.curveSel);
+  if (sc && sc.visible && !pe.tool) sc.ctrl.forEach((p, i) => viewer.addCtrl(p, i, cv.ctrlSel === i));
   for (const d of curveDraft) viewer.addNode(d.p, 0x2e7d32, 1.2);
 }
 /** Patch-Aufteilung einfärben: 4-seitige Patches grün/türkis, andere warm. */
@@ -1679,17 +1790,19 @@ function paintLayout(): boolean {
 function hsl(h: number, s: number, l: number): number[] { const a = s * Math.min(l, 1 - l); const f = (n: number) => { const k = (n + h * 12) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0), f(8), f(4)]; }
 async function updateLayout() {
   if (!state.curves.length) { state.layout = null; return; }
-  state.layout = await engine.call<any>({ op: 'curveLayout', chains: state.curves.map((c) => c.chain) });
+  state.layout = await engine.call<any>({ op: 'curveLayout', chains: state.curves.map((c) => c.chain), opts: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } });
 }
 async function detectCurvesUI() {
   if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
   const t0 = performance.now();
-  const r = await busy(engine.call<any>({ op: 'curvesDetect' }));
-  state.curves = state.curves.filter((c) => c.kind === 'Benutzer');
-  for (const c of r.curves) state.curves.push({ id: state.nextCurve, name: `${c.kind === 'Kante' ? 'Kante' : 'Tangente'} ${state.nextCurve++}`, visible: true, ...c });
+  const o: any = { ...curveOpts }; for (const k of ['minLen', 'gap', 'dangling'] as const) if (!o[k]) delete o[k];
+  const r = await busy(engine.call<any>({ op: 'curvesDetect', opts: o, layout: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } }));
+  if (state.curves.length) curveSnapshot();
+  state.curves = state.curves.filter((c) => c.kind === 'Benutzer' || c.kind === 'Vorschlag'); state.curveSel = null;
+  for (const c of r.curves) state.curves.push({ id: state.nextCurve, name: `${CURVE_NAME[c.kind as CurveView['kind']]} ${state.nextCurve++}`, visible: true, ...c });
   await updateLayout();
   const L = state.layout!;
-  toast(`✔ ${r.curves.length} Kurven erkannt (${r.curves.filter((c: any) => c.kind === 'Kante').length} Kanten, ${r.curves.filter((c: any) => c.kind === 'Tangente').length} Tangentenlinien) · ${L.regions.length} Patches, ${L.foursided} 4-seitig, ${L.tJunctions} T-Stöße · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  toast(`✔ ${r.curves.length} Kurven erkannt (${['Kante', 'Tangente', 'Übergang'].map((k) => `${r.curves.filter((c: any) => c.kind === k).length} ${k}`).join(', ')}) · ${L.regions.length} Patches, ${L.foursided} 4-seitig, ${L.tJunctions} T-Stöße · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   renderAll();
 }
 function curveAddPoint(h: Hit) {
@@ -1706,14 +1819,14 @@ async function curveFinish() {
   if (curveDraft.length < 2) { toast('Mindestens zwei Punkte auf das Netz setzen.'); return; }
   try {
     const r = await busy(engine.call<any>({ op: 'curvePath', verts: curveDraft.map((d) => d.v) }));
-    state.curves.push({ id: state.nextCurve, name: `Kurve ${state.nextCurve++}`, visible: true, ...r.curve });
+    curveSnapshot(); state.curves.push({ id: state.nextCurve, name: `Kurve ${state.nextCurve++}`, visible: true, ...r.curve });
     curveDraft = []; await updateLayout(); toast(`✔ Kurve erzeugt (${r.curve.length.toFixed(1)} mm) – Patches: ${state.layout!.regions.length}, 4-seitig: ${state.layout!.foursided}`);
   } catch (e: any) { toast('Fehler: ' + e.message); }
   renderAll();
 }
 async function curveDelete(id = state.curveSel) {
   if (id == null) { toast('Zuerst eine Kurve im Baum wählen.'); return; }
-  state.curves = state.curves.filter((c) => c.id !== id); state.curveSel = null;
+  curveSnapshot(); state.curves = state.curves.filter((c) => c.id !== id); state.curveSel = null; cv.edit = null;
   await updateLayout(); renderAll();
 }
 $('#btn-curve-detect').onclick = () => detectCurvesUI();
@@ -1723,6 +1836,32 @@ $('#btn-curve-draw').onclick = () => {
   state.mode = null; state.preview = null; clearBrush(); pe.tool = 'curve'; curveDraft = []; renderAll();
 };
 $('#btn-curve-del').onclick = () => curveDelete();
+$('#btn-curve-accept').onclick = () => acceptSuggestions();
+$('#btn-curve-undo').onclick = () => curveUndo();
+$('#btn-curve-opts').onclick = () => { if (pe.tool === 'curveopts') { peExit(); return; } state.mode = null; pe.tool = 'curveopts'; renderAll(); if (isPhone()) togglePanel('dialog', true); };
+function renderCurveOpts(d: HTMLElement) {
+  d.innerHTML = `<h3>Kurvennetz – Optionen</h3><p class="note">Erkennung (Kanten, Tangenten, Radius-Übergänge), Aufräumen kleiner/loser Kurvenstücke und Eckpunkte des Patch-Layouts.</p>
+    ${CURVE_OPT_DEF.map(([k, l, a, b, st, u]) => `<div class="row"><label style="flex:1">${l}</label><input type="number" data-co="${k}" min="${a}" max="${b}" step="${st}" value="${curveOpts[k]}" style="width:5.5em"> <span class="sub">${u}</span></div>`).join('')}
+    <div class="row"><label><input type="checkbox" id="co-auto" ${curveOpts.autoCorners ? 'checked' : ''}> Ecken auf geschlossenen Kurven automatisch setzen</label></div>
+    <div class="row"><button class="btn primary" id="co-run">⟳ Neu erkennen</button><button class="btn" id="co-lay">Nur Layout neu</button><button class="btn" id="co-exit">Schließen</button></div>`;
+  d.querySelectorAll<HTMLInputElement>('[data-co]').forEach((i) => i.addEventListener('change', () => { const v = parseFloat(i.value); if (isFinite(v)) (curveOpts as any)[i.dataset.co!] = v; }));
+  d.querySelector<HTMLInputElement>('#co-auto')!.addEventListener('change', (e) => { curveOpts.autoCorners = (e.target as HTMLInputElement).checked; });
+  d.querySelector('#co-run')!.addEventListener('click', () => detectCurvesUI());
+  d.querySelector('#co-lay')!.addEventListener('click', async () => { await busy(updateLayout()); renderAll(); });
+  d.querySelector('#co-exit')!.addEventListener('click', () => peExit());
+}
+function renderCurveSel(d: HTMLElement, c: CurveView) {
+  const E = (m: string, t: string, l: string) => `<button class="btn ${cv.edit === m ? 'on primary' : ''}" data-ce="${m}" title="${t}">${l}</button>`;
+  const hint: Record<string, string> = { insert: 'Auf die Kurve tippen, um dort einen Kontrollpunkt einzufügen.', delpt: 'Auf einen Kontrollpunkt tippen, um ihn zu entfernen.', split: 'Auf die Kurve tippen, wo sie geteilt werden soll.', join: 'Auf die zweite Kurve tippen; die nächsten Enden werden über das Netz verbunden.' };
+  d.innerHTML = `<h3>〰 ${c.name}</h3>${kv([['Typ', c.kind], ['Länge', c.length.toFixed(2) + ' mm'], ['Kontrollpunkte', String(c.ctrl.length)], ['Grad', '3 (B-Spline)'], ['Geschlossen', c.closed ? 'ja' : 'nein']] as any)}
+    <p class="note">${cv.edit ? hint[cv.edit] : 'Kontrollpunkte (weiß) ziehen – sie rasten auf dem Netz ein.'}</p>
+    <div class="row">${E('insert', 'Kontrollpunkt einfügen', '+ Punkt')}${E('delpt', 'Kontrollpunkt löschen', '− Punkt')}${E('split', 'Kurve teilen', '✂ Teilen')}${E('join', 'Mit anderer Kurve verbinden', '⛓ Verbinden')}</div>
+    <div class="row"><button class="btn" id="cv-del">✕ Löschen</button><button class="btn" id="cv-und" ${cv.undo.length ? '' : 'disabled'}>↶ Rückgängig</button><button class="btn" id="cv-close">Fertig</button></div>`;
+  d.querySelectorAll<HTMLButtonElement>('[data-ce]').forEach((b) => b.addEventListener('click', () => { cv.edit = cv.edit === b.dataset.ce ? null : (b.dataset.ce as any); renderDialog(); renderModeBar(); }));
+  d.querySelector('#cv-del')!.addEventListener('click', () => curveDelete(c.id));
+  d.querySelector('#cv-und')!.addEventListener('click', () => curveUndo());
+  d.querySelector('#cv-close')!.addEventListener('click', () => curveSelect(null));
+}
 $('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Zuerst Kurven erkennen oder zeichnen.'); return; } state.showLayout = !state.showLayout; if (state.showLayout) pe.cmp = false; if (!state.layout) await updateLayout(); renderAll(); };
 function renderCurveDialog(d: HTMLElement) {
   const L = state.layout;

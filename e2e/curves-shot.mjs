@@ -12,7 +12,7 @@ await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${KEY}
 await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 });
 await S(() => { document.querySelector('.tab[data-tab="poly"]').click(); document.querySelector('#btn-curve-detect').click(); });
 await page.waitForFunction(() => window.__app.state.layout, null, { timeout: 120000 });
-const info = await S(() => { const s = window.__app.state; return { n: s.curves.length, kanten: s.curves.filter((c) => c.kind === 'Kante').length, tangenten: s.curves.filter((c) => c.kind === 'Tangente').length, patches: s.layout.regions.length, vier: s.layout.foursided, t: s.layout.tJunctions, knoten: s.layout.nodes.length }; });
+const info = await S(() => { const s = window.__app.state; return { n: s.curves.length, kanten: s.curves.filter((c) => c.kind === 'Kante').length, tangenten: s.curves.filter((c) => c.kind === 'Tangente').length, uebergang: s.curves.filter((c) => c.kind === 'Übergang').length, vorschlaege: s.layout.suggestions.length, patches: s.layout.regions.length, vier: s.layout.foursided, t: s.layout.tJunctions, knoten: s.layout.nodes.length }; });
 console.log(KEY, JSON.stringify(info));
 await page.screenshot({ path: `docs/kurvennetz-${KEY}${PH ? '-iphone' : ''}.png` });
 await S(() => document.querySelector('#btn-curve-layout').click()); await sleep(500);

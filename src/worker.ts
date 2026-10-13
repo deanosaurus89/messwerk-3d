@@ -9,7 +9,7 @@ import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
 import * as THREE from 'three';
-import { EdgeGraph, detectCurves, layout as curveLayout, makeCurve, pathThrough, CurveKind, DetectOptions } from './core/curves';
+import { EdgeGraph, detectCurves, layout as curveLayout, makeCurve, pathThrough, curveFromCtrl, splitCurve, joinCurves, CurveKind, DetectOptions, LayoutOptions, CleanOptions } from './core/curves';
 
 /** Freiformfläche aus Auswahl (Indizes) oder Klick (Regionenwachstum; Krümmungsband/Knickprüfung stoppen an Verrundungen). */
 function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }) {
@@ -37,9 +37,10 @@ let origBVH: ReturnType<typeof buildBVH> | null = null;
 let eg: EdgeGraph | null = null, ebvh: ReturnType<typeof buildBVH> | null = null;
 const curveCtx = () => { if (!eg) { eg = new EdgeGraph(mesh!); ebvh = buildBVH({ positions: mesh!.positions, indices: mesh!.indices }); } return { g: eg, bvh: ebvh! }; };
 const slim = (c: any) => ({ kind: c.kind, chain: c.chain, closed: c.closed, ctrl: c.ctrl, pts: c.pts, length: c.length });
-function layoutOut(chains: number[][]) {
-  const { g } = curveCtx(); const L = curveLayout(g, chains.map((chain) => ({ chain })));
-  return { nodes: L.nodes, regions: L.regions, regionOf: L.regionOf, tJunctions: L.tJunctions, foursided: L.foursided };
+function layoutOut(chains: number[][], opts: LayoutOptions = {}) {
+  const { g, bvh } = curveCtx(); const L = curveLayout(g, chains.map((chain) => ({ chain })), opts);
+  const suggestions = L.suggestions.map((s) => ({ reason: s.reason, region: s.region, ...slim(makeCurve(g, bvh, s.chain, 'Vorschlag')) }));
+  return { nodes: L.nodes, corners: L.corners, suggestions, regions: L.regions, regionOf: L.regionOf, tJunctions: L.tJunctions, foursided: L.foursided };
 }
 
 /** Bearbeitetes Netz übernehmen; Merkmals-Indexlisten auf die nächsten Knoten des neuen Netzes umrechnen (sortiert, eindeutig). */
@@ -64,9 +65,12 @@ export type Req =
   | { op: 'load'; name: string; buffer: ArrayBuffer }
   | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
   | { op: 'setMesh'; positions: Float32Array; indices: Uint32Array; remap: (Uint32Array | null)[]; chains?: number[][]; kinds?: string[] }
-  | { op: 'curvesDetect'; opts?: DetectOptions }
+  | { op: 'curvesDetect'; opts?: DetectOptions & CleanOptions; layout?: LayoutOptions }
   | { op: 'curvePath'; verts: number[]; closed?: boolean }
-  | { op: 'curveLayout'; chains: number[][] }
+  | { op: 'curveLayout'; chains: number[][]; opts?: LayoutOptions }
+  | { op: 'curveFromCtrl'; ctrl: [number, number, number][]; kind: CurveKind; closed?: boolean }
+  | { op: 'curveSplit'; curve: { chain: number[]; kind: CurveKind }; p: [number, number, number] }
+  | { op: 'curveJoin'; a: { chain: number[]; kind: CurveKind }; b: { chain: number[] } }
   | { op: 'compare' }
   | { op: 'getOriginal' }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
@@ -119,13 +123,21 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       transfer = [positions.buffer, indices.buffer, ...(normals ? [normals.buffer] : [])];
     } else if (req.op === 'curvesDetect') {
       const { g, bvh } = curveCtx(); const cs = detectCurves(mesh!, req.opts ?? {}, g, bvh).map(slim);
-      result = { curves: cs, layout: layoutOut(cs.map((c) => c.chain)) };
+      result = { curves: cs, layout: layoutOut(cs.map((c) => c.chain), req.layout) };
     } else if (req.op === 'curvePath') {
       const { g, bvh } = curveCtx(); const chain = pathThrough(g, req.verts);
       if (chain.length < 2) throw new Error('Kein Weg zwischen den Punkten gefunden');
       result = { curve: slim(makeCurve(g, bvh, chain, 'Benutzer', req.closed ?? false)) };
+    } else if (req.op === 'curveFromCtrl') {
+      const { g, bvh } = curveCtx(); result = { curve: slim(curveFromCtrl(g, bvh, req.ctrl as any, req.kind, req.closed ?? false)) };
+    } else if (req.op === 'curveSplit') {
+      const { g, bvh } = curveCtx(); const P = mesh!.positions; let at = -1, bd = Infinity;
+      for (const v of req.curve.chain) { const d = (P[3 * v] - req.p[0]) ** 2 + (P[3 * v + 1] - req.p[1]) ** 2 + (P[3 * v + 2] - req.p[2]) ** 2; if (d < bd) { bd = d; at = v; } }
+      const r = splitCurve(g, bvh, req.curve, at); result = { curves: r ? r.map(slim) : null };
+    } else if (req.op === 'curveJoin') {
+      const { g, bvh } = curveCtx(); result = { curve: slim(joinCurves(g, bvh, req.a, req.b)) };
     } else if (req.op === 'curveLayout') {
-      result = layoutOut(req.chains);
+      result = layoutOut(req.chains, req.opts);
     } else if (req.op === 'setMesh') {
       // Kurvenketten (geordnet) vor dem Netzwechsel auf Punkte abbilden
       const oldP = mesh!.positions; const chainPts = (req.chains ?? []).map((c) => c.map((v) => [oldP[3 * v], oldP[3 * v + 1], oldP[3 * v + 2]]));
