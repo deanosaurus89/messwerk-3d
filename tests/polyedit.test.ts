@@ -61,11 +61,12 @@ describe('Unterteilung / Glättung / Radierer (Prüfplatte)', () => {
     for (let t = 0; t < F.length / 3; t++) { const a = 3 * F[3 * t]; const d = (P[a] - 125) ** 2 + (P[a + 1] - 60) ** 2 + (P[a + 2] - 16) ** 2; if (d < bd) { bd = d; best = t; } }
     const c = [P[3 * F[3 * best]], P[3 * F[3 * best] + 1], P[3 * F[3 * best] + 2]];
     const b0 = boundaryEdges(orig.indices, P.length / 3).count;
-    const r = eraseAndFill(orig, c, 4, best, [0, 0, 1]);
-    log('Radierer ' + JSON.stringify({ removed: r.removed, added: r.added, loops: r.loops, skipped: r.skipped, center: c }));
+    const sel: number[] = []; for (let i = 0; i < P.length / 3; i++) if (Math.hypot(P[3 * i] - c[0], P[3 * i + 1] - c[1], P[3 * i + 2] - c[2]) < 4) sel.push(i);
+    const r = eraseAndFill(orig, sel);
+    log('Radierer ' + JSON.stringify({ removed: r.removed, added: r.added, loops: r.loops, skipped: r.skipped, surfaces: r.surfaces }));
     expect(r.removed).toBeGreaterThan(20); expect(r.loops).toBe(1);
     expect(boundaryEdges(r.indices, r.positions.length / 3).count).toBe(b0);
     const cmp = compareToOriginal(r, orig);
-    expect(Math.max(cmp.maxPos, -cmp.maxNeg)).toBeLessThan(0.5);
+    expect(Math.max(cmp.maxPos, -cmp.maxNeg)).toBeLessThan(0.05); expect(r.surfaces[0]).toContain('Ebene');
   });
 });

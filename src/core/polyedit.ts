@@ -3,6 +3,8 @@
 // und Abweichungsvergleich zum Original (BVH-Abstand, vorzeichenbehaftet).
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
+import { axisFromNormals, fitCylinder, fitPlane, fitSphere } from './fit';
+import { basis, solve, type Vec3 } from './linalg';
 
 export interface RawMesh { positions: Float32Array; indices: Uint32Array; }
 export type Progress = (triCount: number, done: number) => void;
@@ -319,102 +321,203 @@ export function smooth(m: RawMesh, o: SmoothOptions): RawMesh {
 }
 
 // ---------------------------------------------------------------- Magischer Radierer
-export interface EraseResult extends RawMesh { removed: number; added: number; loops: number; skipped: number; }
+export interface EraseResult extends RawMesh { removed: number; added: number; loops: number; skipped: number; surfaces: string[]; }
+
+/** Analytische Ersatzfläche für die Lochfüllung. */
+export type FillSurface =
+  | { kind: 'Ebene'; c: Vec3; n: Vec3; rms: number }
+  | { kind: 'Zylinder'; c: Vec3; a: Vec3; r: number; rms: number }
+  | { kind: 'Kugel'; c: Vec3; r: number; rms: number }
+  | { kind: 'Quadrik'; c: Vec3; u: Vec3; v: Vec3; n: Vec3; k: number[]; rms: number };
+const vsub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vdot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vunit = (a: Vec3): Vec3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+export function projectTo(s: FillSurface, p: Vec3): Vec3 {
+  if (s.kind === 'Ebene') { const d = vdot(vsub(p, s.c), s.n); return [p[0] - d * s.n[0], p[1] - d * s.n[1], p[2] - d * s.n[2]]; }
+  if (s.kind === 'Kugel') { const w = vunit(vsub(p, s.c)); return [s.c[0] + s.r * w[0], s.c[1] + s.r * w[1], s.c[2] + s.r * w[2]]; }
+  if (s.kind === 'Zylinder') {
+    const w = vsub(p, s.c), t = vdot(w, s.a), q: Vec3 = [s.c[0] + t * s.a[0], s.c[1] + t * s.a[1], s.c[2] + t * s.a[2]], rd = vunit(vsub(p, q));
+    return [q[0] + s.r * rd[0], q[1] + s.r * rd[1], q[2] + s.r * rd[2]];
+  }
+  const w = vsub(p, s.c), x = vdot(w, s.u), y = vdot(w, s.v), k = s.k, h = k[0] + k[1] * x + k[2] * y + k[3] * x * x + k[4] * x * y + k[5] * y * y;
+  return [s.c[0] + x * s.u[0] + y * s.v[0] + h * s.n[0], s.c[1] + x * s.u[1] + y * s.v[1] + h * s.n[1], s.c[2] + x * s.u[2] + y * s.v[2] + h * s.n[2]];
+}
+const surfDist = (s: FillSurface, p: Vec3) => { const q = projectTo(s, p); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+function rmsOf(s: FillSurface, P: Vec3[]) { let e = 0; for (const p of P) e += surfDist(s, p) ** 2; return Math.sqrt(e / Math.max(1, P.length)); }
+
+function fitQuadric(P: Vec3[]): FillSurface | null {
+  if (P.length < 8) return null;
+  const pl = fitPlane(P); const [u, v] = basis(pl.normal); const c = pl.center, n = pl.normal;
+  const A: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0)), b = new Array(6).fill(0);
+  for (const p of P) { const w = vsub(p, c), x = vdot(w, u), y = vdot(w, v), z = vdot(w, n); const r = [1, x, y, x * x, x * y, y * y];
+    for (let i = 0; i < 6; i++) { b[i] += r[i] * z; for (let j = 0; j < 6; j++) A[i][j] += r[i] * r[j]; } }
+  for (let i = 0; i < 6; i++) A[i][i] += 1e-9;
+  const k = solve(A, b); if (!k) return null;
+  const s: FillSurface = { kind: 'Quadrik', c, u, v, n, k, rms: 0 }; s.rms = rmsOf(s, P); return s;
+}
+/** Beste Primitive (Ebene, Zylinder, Kugel) für eine Punktmenge; einfachere Form bevorzugt, wenn kaum schlechter. */
+export function fitPrimitive(P: Vec3[], N: Vec3[]): FillSurface | null {
+  const c: FillSurface[] = [];
+  try { const f = fitPlane(P); c.push({ kind: 'Ebene', c: f.center, n: f.normal, rms: f.rms }); } catch { /* */ }
+  if (P.length >= 12) {
+    try { const ax = axisFromNormals(N).axis; const f = fitCylinder(P, ax); if (isFinite(f.rms) && f.radius! < 1e4) { const s: FillSurface = { kind: 'Zylinder', c: f.center, a: vunit(f.normal), r: f.radius!, rms: 0 }; s.rms = rmsOf(s, P); c.push(s); } } catch { /* */ }
+    try { const f = fitSphere(P); if (isFinite(f.rms) && f.radius! < 1e4) { const s: FillSurface = { kind: 'Kugel', c: f.center, r: f.radius!, rms: 0 }; s.rms = rmsOf(s, P); c.push(s); } } catch { /* */ }
+  }
+  if (!c.length) return null;
+  const mn = Math.min(...c.map((x) => x.rms));
+  return c.find((x) => x.rms <= 1.5 * mn + 1e-6)!;
+}
+
 /**
- * Dreiecke im Pinselradius (zusammenhängend ab dem Treffer-Dreieck, gleiche Blickseite) entfernen, die entstehenden Lochränder
- * ringweise triangulieren und biharmonisch fairen (Δ²x = 0, äußere zwei Knotenringe fest) → krümmungsstetiger Anschluss.
- * Ränder, die schon vorher offen waren, werden nicht gefüllt (skipped).
+ * Stützring um das Loch → Ersatzflächen: eine Primitive, sonst Segmentierung (dominante Ebene über Normalen + Rest),
+ * sonst lokale Quadrik. Liefert Flächen und Zuordnung je Stützpunkt.
  */
-export function eraseAndFill(m: RawMesh, center: number[], radius: number, seedTri: number, facing?: number[]): EraseResult {
-  const P = m.positions, F = m.indices, nt = F.length / 3, nv = P.length / 3, r2 = radius * radius;
-  const inside = (v: number) => (P[3 * v] - center[0]) ** 2 + (P[3 * v + 1] - center[1]) ** 2 + (P[3 * v + 2] - center[2]) ** 2 <= r2;
+export function fitSupport(P: Vec3[], N: Vec3[], okRms: number): { surfaces: FillSurface[]; label: Int32Array } {
+  const label = new Int32Array(P.length);
+  const one = fitPrimitive(P, N);
+  if (one && one.rms <= okRms) return { surfaces: [one], label };
+  // Segmentierung: dominante Normalenrichtung (±5°) → Ebene; Rest → Primitive
+  const cos5 = Math.cos((5 * Math.PI) / 180); let bestN: Vec3 | null = null, bestC = 0;
+  const step = Math.max(1, Math.floor(P.length / 60));
+  for (let i = 0; i < P.length; i += step) { let cnt = 0; for (const q of N) if (vdot(q, N[i]) > cos5) cnt++; if (cnt > bestC) { bestC = cnt; bestN = N[i]; } }
+  if (bestN && bestC > 0.2 * P.length && P.length - bestC > 0.15 * P.length) {
+    const ia: number[] = [], ib: number[] = [];
+    N.forEach((q, i) => (vdot(q, bestN!) > cos5 ? ia : ib).push(i));
+    const sa = fitPrimitive(ia.map((i) => P[i]), ia.map((i) => N[i]));
+    // Rest: evtl. selbst wieder eine dominante Ebene (Kante zwischen zwei Ebenen) – rekursiv eine Stufe
+    const PB = ib.map((i) => P[i]), NB = ib.map((i) => N[i]);
+    let sb = fitPrimitive(PB, NB);
+    if (sa && sb && sa.rms <= okRms && sb.rms <= okRms) {
+      ia.forEach((i) => (label[i] = 0)); ib.forEach((i) => (label[i] = 1));
+      return { surfaces: [sa, sb], label };
+    }
+    if (sa && sa.rms <= okRms) { const q = fitQuadric(PB); if (q && q.rms <= okRms) { sb = q; ia.forEach((i) => (label[i] = 0)); ib.forEach((i) => (label[i] = 1)); return { surfaces: [sa, sb], label }; } }
+  }
+  const q = fitQuadric(P);
+  if (q && (!one || q.rms < one.rms)) return { surfaces: [q], label };
+  return { surfaces: one ? [one] : [], label };
+}
+
+export interface EraseOptions { /** Abstandsschwelle für „passt“ (mm); Default 0,15 × mittlere Kantenlänge */ okRms?: number; }
+/**
+ * Magischer Radierer: ausgewählte Knoten (Pinsel) samt anliegenden Dreiecken entfernen, Lochränder suchen,
+ * Ersatzfläche aus dem umgebenden Stützring fitten (Ebene/Zylinder/Kugel, zwei Flächen mit Kante, sonst Quadrik),
+ * Loch ringweise mit umgebungsgleicher Dichte triangulieren, auf die Fläche(n) projizieren (Kantenknoten auf die Schnittlinie),
+ * tangential entspannen. Ohne brauchbaren Fit: biharmonisches Fairing.
+ */
+export function eraseAndFill(m: RawMesh, sel: ArrayLike<number>, o: EraseOptions = {}): EraseResult {
+  const P = m.positions, F = m.indices, nt = F.length / 3, nv = P.length / 3;
+  const selM = new Uint8Array(nv); for (let i = 0; i < sel.length; i++) selM[sel[i]] = 1;
   const vf: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vf[F[3 * t + k]].push(t);
-  const n = [0, 0, 0];
-  const front = (t: number) => { if (!facing) return true; const l = faceNormal(P, F[3 * t], F[3 * t + 1], F[3 * t + 2], n) || 1; return (n[0] * facing[0] + n[1] * facing[1] + n[2] * facing[2]) / l > -0.2; };
-  const del = new Uint8Array(nt); const stack = [seedTri]; del[seedTri] = 1; let removed = 0;
-  while (stack.length) {
-    const t = stack.pop()!; removed++;
-    for (let k = 0; k < 3; k++) for (const s of vf[F[3 * t + k]]) {
-      if (del[s]) continue;
-      if ((inside(F[3 * s]) || inside(F[3 * s + 1]) || inside(F[3 * s + 2])) && front(s)) { del[s] = 1; stack.push(s); }
-    }
-  }
-  // Lochkanten: gerichtete Kanten verbleibender Dreiecke, deren Gegenkante nur in gelöschten Dreiecken liegt
+  const del = new Uint8Array(nt); let removed = 0;
+  for (let t = 0; t < nt; t++) if (selM[F[3 * t]] || selM[F[3 * t + 1]] || selM[F[3 * t + 2]]) { del[t] = 1; removed++; }
+  // Normalen
+  const VN = new Float32Array(3 * nv); const n = [0, 0, 0];
+  for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2]; faceNormal(P, a, b, c, n); for (const v of [a, b, c]) { VN[3 * v] += n[0]; VN[3 * v + 1] += n[1]; VN[3 * v + 2] += n[2]; } }
+  for (let v = 0; v < nv; v++) { const l = Math.hypot(VN[3 * v], VN[3 * v + 1], VN[3 * v + 2]) || 1; VN[3 * v] /= l; VN[3 * v + 1] /= l; VN[3 * v + 2] /= l; }
+  // Lochränder
   const key = (a: number, b: number) => a * nv + b;
   const dirKeep = new Set<number>(), dirDel = new Set<number>();
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) (del[t] ? dirDel : dirKeep).add(key(F[3 * t + k], F[3 * t + (k + 1) % 3]));
-  // Bow-tie-Knoten vermeiden: Knoten, an denen nach dem Löschen nur noch Dreiecke hängen, deren alle Knoten am Loch liegen, mitlöschen (eine Runde)
   const next = new Map<number, number>(); let skipped = 0;
   for (let t = 0; t < nt; t++) if (!del[t]) for (let k = 0; k < 3; k++) {
     const a = F[3 * t + k], b = F[3 * t + (k + 1) % 3];
-    if (!dirKeep.has(key(b, a)) && dirDel.has(key(b, a))) {
-      if (next.has(b)) { skipped++; continue; }
-      next.set(b, a); // Lochrand läuft entgegen der Dreiecksorientierung: b -> a
-    }
+    if (!dirKeep.has(key(b, a)) && dirDel.has(key(b, a))) { if (next.has(b)) { skipped++; continue; } next.set(b, a); }
   }
   const loops: number[][] = []; const seen = new Set<number>();
-  for (const s of next.keys()) {
-    if (seen.has(s)) continue;
-    const L: number[] = []; let v = s, guard = 0;
+  for (const s0 of next.keys()) {
+    if (seen.has(s0)) continue;
+    const L: number[] = []; let v = s0, guard = 0;
     while (!seen.has(v) && next.has(v) && guard++ < 1e6) { seen.add(v); L.push(v); v = next.get(v)!; }
-    if (v === s && L.length >= 3) loops.push(L); else skipped++;
+    if (v === s0 && L.length >= 3) loops.push(L); else skipped++;
   }
-  const pos: number[] = Array.from(P), idx: number[] = [];
-  for (let t = 0; t < nt; t++) if (!del[t]) idx.push(F[3 * t], F[3 * t + 1], F[3 * t + 2]);
-  // mittlere Kantenlänge
-  let el = 0, ec = 0; for (let t = 0; t < Math.min(nt, 5000); t++) { const a = F[3 * t], b = F[3 * t + 1]; el += Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]); ec++; }
+  // Knotenringe der verbleibenden Fläche (für Stützring-BFS)
+  const keepAdj = (v: number, cb: (w: number) => void) => { for (const t of vf[v]) if (!del[t]) for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== v) cb(w); } };
+  let el = 0, ec = 0; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 5000))) { const a = F[3 * t], b = F[3 * t + 1]; el += Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]); ec++; }
   el /= ec || 1;
-  const free = new Set<number>(); let added = 0;
+  const okRms = o.okRms ?? 0.15 * el;
+  const pos: number[] = Array.from(P), idx: number[] = [], surfacesUsed: string[] = [];
+  for (let t = 0; t < nt; t++) if (!del[t]) idx.push(F[3 * t], F[3 * t + 1], F[3 * t + 2]);
+  const allFree: number[] = [];
+  const fills: { free: number[]; surf: FillSurface[]; lab: Map<number, number> }[] = [];
   for (const L of loops) {
-    const c = [0, 0, 0]; for (const v of L) for (let k = 0; k < 3; k++) c[k] += P[3 * v + k] / L.length;
+    const c: Vec3 = [0, 0, 0]; for (const v of L) for (let k = 0; k < 3; k++) c[k] += P[3 * v + k] / L.length;
     let rad = 0; for (const v of L) rad += Math.hypot(P[3 * v] - c[0], P[3 * v + 1] - c[1], P[3 * v + 2] - c[2]) / L.length;
-    const rings = Math.max(1, Math.min(60, Math.round(rad / el)));
-    const nL = L.length; let prev = L.slice();
+    // Stützring (BFS-Tiefe ~ Lochradius)
+    const depth = Math.max(3, Math.min(10, Math.round(rad / el)));
+    const dist = new Map<number, number>(); let front = L.slice(); L.forEach((v) => dist.set(v, 0));
+    for (let d = 1; d <= depth; d++) { const nf: number[] = []; for (const v of front) keepAdj(v, (w) => { if (!dist.has(w) && !selM[w]) { dist.set(w, d); nf.push(w); } }); front = nf; }
+    const sup = [...dist.keys()];
+    const SP = sup.map((v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3), SN = sup.map((v) => [VN[3 * v], VN[3 * v + 1], VN[3 * v + 2]] as Vec3);
+    const fit = fitSupport(SP, SN, okRms);
+    surfacesUsed.push(fit.surfaces.map((x) => x.kind).join('+') || 'Fairing');
+    // Triangulierung (Ringe, Dichte ≈ Umgebung)
+    const rings = Math.max(1, Math.min(80, Math.round(rad / el)));
+    const nL = L.length; let prev = L.slice(); const free: number[] = [];
     for (let j = 1; j < rings; j++) {
-      const s = j / rings;
-      // innere Ringe dünner besetzen, damit die Dreiecke nicht zur Mitte hin zu klein werden
-      const cnt = Math.max(3, Math.round(nL * (1 - s)));
-      const ring: number[] = [];
-      for (let i = 0; i < cnt; i++) {
-        const src = L[Math.floor((i * nL) / cnt)]; const id = pos.length / 3;
-        pos.push(P[3 * src] + s * (c[0] - P[3 * src]), P[3 * src + 1] + s * (c[1] - P[3 * src + 1]), P[3 * src + 2] + s * (c[2] - P[3 * src + 2]));
-        ring.push(id); free.add(id);
-      }
+      const s = j / rings, cnt = Math.max(3, Math.round(nL * (1 - s))); const ring: number[] = [];
+      for (let i = 0; i < cnt; i++) { const src = L[Math.floor((i * nL) / cnt)]; const id = pos.length / 3;
+        pos.push(P[3 * src] + s * (c[0] - P[3 * src]), P[3 * src + 1] + s * (c[1] - P[3 * src + 1]), P[3 * src + 2] + s * (c[2] - P[3 * src + 2])); ring.push(id); free.push(id); }
       stitch(prev, ring, idx); prev = ring;
     }
-    const ci = pos.length / 3; pos.push(c[0], c[1], c[2]); free.add(ci);
+    const ci = pos.length / 3; pos.push(c[0], c[1], c[2]); free.push(ci);
     for (let i = 0; i < prev.length; i++) idx.push(prev[i], prev[(i + 1) % prev.length], ci);
-    added += 0;
+    allFree.push(...free);
+    // Zuordnung der neuen Knoten folgt später (nach harmonischer Startlage) über den nächsten Stützpunkt
+    const lab = new Map<number, number>(); sup.forEach((v, i) => lab.set(v, fit.label[i]));
+    fills.push({ free, surf: fit.surfaces, lab });
+    (fills[fills.length - 1] as any).sup = sup;
   }
-  added = free.size;
-  // Fairing: biharmonisch per Gauss-Seidel-Iteration auf den freien Knoten (Umbrella-Operator)
-  if (free.size) {
-    const NV = pos.length / 3; const adj: Set<number>[] = new Array(NV);
-    const need = new Set<number>(free);
-    for (let t = 0; t < idx.length / 3; t++) { const a = idx[3 * t], b = idx[3 * t + 1], cc = idx[3 * t + 2]; if (free.has(a) || free.has(b) || free.has(cc)) { need.add(a); need.add(b); need.add(cc); } }
-    for (const v of [...need]) if (!free.has(v)) for (const t of vf[v] ?? []) if (!del[t]) for (let k = 0; k < 3; k++) need.add(F[3 * t + k]);
-    for (let t = 0; t < idx.length / 3; t++) {
-      const tri = [idx[3 * t], idx[3 * t + 1], idx[3 * t + 2]]; if (!tri.some((v) => need.has(v))) continue;
-      for (let k = 0; k < 3; k++) { const a = tri[k], b = tri[(k + 1) % 3]; (adj[a] ??= new Set()).add(b); (adj[b] ??= new Set()).add(a); }
-    }
-    const X = Float64Array.from(pos); const Lp = new Float64Array(3 * NV);
-    const lap = (v: number) => { const N = adj[v]; if (!N || !N.size) { Lp[3 * v] = Lp[3 * v + 1] = Lp[3 * v + 2] = 0; return; } let x = 0, y = 0, z = 0; for (const w of N) { x += X[3 * w]; y += X[3 * w + 1]; z += X[3 * w + 2]; } const i = 1 / N.size; Lp[3 * v] = x * i - X[3 * v]; Lp[3 * v + 1] = y * i - X[3 * v + 1]; Lp[3 * v + 2] = z * i - X[3 * v + 2]; };
-    const nlist = [...need], flist = [...free];
-    // erst harmonisch (schnell, stabil), dann biharmonisch
-    for (let it = 0; it < 200; it++) for (const v of flist) { lap(v); X[3 * v] += Lp[3 * v]; X[3 * v + 1] += Lp[3 * v + 1]; X[3 * v + 2] += Lp[3 * v + 2]; }
-    for (let it = 0; it < 600; it++) {
-      for (const v of nlist) lap(v);
-      for (const v of flist) {
-        const N = adj[v]; let x = 0, y = 0, z = 0; for (const w of N) { x += Lp[3 * w]; y += Lp[3 * w + 1]; z += Lp[3 * w + 2]; }
-        const i = 1 / N.size; const bx = x * i - Lp[3 * v], by = y * i - Lp[3 * v + 1], bz = z * i - Lp[3 * v + 2];
-        const h = 0.25; X[3 * v] -= h * bx; X[3 * v + 1] -= h * by; X[3 * v + 2] -= h * bz;
+  // Nachbarschaft der neuen + Randknoten
+  const NV = pos.length / 3; const adj: Set<number>[] = new Array(NV);
+  const freeSet = new Set(allFree);
+  const need = new Set<number>(allFree);
+  for (let t = 0; t < idx.length / 3; t++) { const a = idx[3 * t], b = idx[3 * t + 1], cc = idx[3 * t + 2]; if (freeSet.has(a) || freeSet.has(b) || freeSet.has(cc)) { need.add(a); need.add(b); need.add(cc); } }
+  for (const v of [...need]) if (!freeSet.has(v) && v < nv) for (const t of vf[v]) if (!del[t]) for (let k = 0; k < 3; k++) need.add(F[3 * t + k]);
+  for (let t = 0; t < idx.length / 3; t++) {
+    const tri = [idx[3 * t], idx[3 * t + 1], idx[3 * t + 2]]; if (!tri.some((v) => need.has(v))) continue;
+    for (let k = 0; k < 3; k++) { const a = tri[k], b = tri[(k + 1) % 3]; (adj[a] ??= new Set()).add(b); (adj[b] ??= new Set()).add(a); }
+  }
+  const X = Float64Array.from(pos);
+  const avg = (v: number): Vec3 => { let x = 0, y = 0, z = 0; for (const w of adj[v]) { x += X[3 * w]; y += X[3 * w + 1]; z += X[3 * w + 2]; } const i = 1 / adj[v].size; return [x * i, y * i, z * i]; };
+  // harmonische Startlage
+  for (let it = 0; it < 200; it++) for (const v of allFree) { const a = avg(v); X[3 * v] = a[0]; X[3 * v + 1] = a[1]; X[3 * v + 2] = a[2]; }
+  const get = (v: number): Vec3 => [X[3 * v], X[3 * v + 1], X[3 * v + 2]];
+  const put = (v: number, p: Vec3) => { X[3 * v] = p[0]; X[3 * v + 1] = p[1]; X[3 * v + 2] = p[2]; };
+  for (const f of fills) {
+    if (!f.surf.length) { biharmonic(X, adj, f.free, [...need]); continue; }
+    const sup: number[] = (f as any).sup;
+    const assign = new Map<number, number>();
+    const proj = (v: number) => {
+      const p = get(v);
+      if (f.surf.length === 1) { put(v, projectTo(f.surf[0], p)); return; }
+      // Zuordnung: Fläche mit kleinerem Abstand, bei Gleichstand nächster Stützpunkt
+      let bi = 0, bd = Infinity; for (const s of sup) { const d = (P[3 * s] - p[0]) ** 2 + (P[3 * s + 1] - p[1]) ** 2 + (P[3 * s + 2] - p[2]) ** 2; if (d < bd) { bd = d; bi = s; } }
+      const k = f.lab.get(bi) ?? 0; assign.set(v, k); put(v, projectTo(f.surf[k], p));
+    };
+    for (let round = 0; round < 6; round++) {
+      for (const v of f.free) proj(v);
+      // Kantenknoten (Nachbar auf anderer Fläche) auf die Schnittlinie: abwechselnd projizieren
+      if (f.surf.length === 2) for (const v of f.free) {
+        const k = assign.get(v)!; let other = false; for (const w of adj[v]) { const kw = assign.get(w) ?? (f.lab.get(w)); if (kw !== undefined && kw !== k) { other = true; break; } }
+        if (!other) continue; let p = get(v); for (let i = 0; i < 30; i++) p = projectTo(f.surf[i & 1], p); put(v, p);
       }
+      if (round < 5) for (const v of f.free) { const a = avg(v), p = get(v); put(v, [p[0] + 0.5 * (a[0] - p[0]), p[1] + 0.5 * (a[1] - p[1]), p[2] + 0.5 * (a[2] - p[2])]); }
     }
-    for (const v of flist) { pos[3 * v] = X[3 * v]; pos[3 * v + 1] = X[3 * v + 1]; pos[3 * v + 2] = X[3 * v + 2]; }
   }
+  for (const v of allFree) { pos[3 * v] = X[3 * v]; pos[3 * v + 1] = X[3 * v + 1]; pos[3 * v + 2] = X[3 * v + 2]; }
   const out = compact(pos, idx, () => true, idx.length / 3);
-  return { ...out, removed, added, loops: loops.length, skipped };
+  return { ...out, removed, added: allFree.length, loops: loops.length, skipped, surfaces: surfacesUsed };
+}
+function biharmonic(X: Float64Array, adj: Set<number>[], flist: number[], nlist: number[]) {
+  const Lp = new Float64Array(X.length);
+  const lap = (v: number) => { const N = adj[v]; if (!N || !N.size) return; let x = 0, y = 0, z = 0; for (const w of N) { x += X[3 * w]; y += X[3 * w + 1]; z += X[3 * w + 2]; } const i = 1 / N.size; Lp[3 * v] = x * i - X[3 * v]; Lp[3 * v + 1] = y * i - X[3 * v + 1]; Lp[3 * v + 2] = z * i - X[3 * v + 2]; };
+  for (let it = 0; it < 600; it++) {
+    for (const v of nlist) lap(v);
+    for (const v of flist) { const N = adj[v]; let x = 0, y = 0, z = 0; for (const w of N) { x += Lp[3 * w]; y += Lp[3 * w + 1]; z += Lp[3 * w + 2]; } const i = 1 / N.size;
+      X[3 * v] -= 0.25 * (x * i - Lp[3 * v]); X[3 * v + 1] -= 0.25 * (y * i - Lp[3 * v + 1]); X[3 * v + 2] -= 0.25 * (z * i - Lp[3 * v + 2]); }
+  }
 }
 /** Zwei Ringe (äußerer a, innerer b, gleicher Umlaufsinn) zu einem Dreiecksstreifen verbinden. */
 function stitch(a: number[], b: number[], idx: number[]) {
