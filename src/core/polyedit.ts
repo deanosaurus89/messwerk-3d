@@ -102,7 +102,13 @@ class Heap { // Min-Heap (Kosten, Halbkante u->v, Zeitstempel)
   private swap(i: number, j: number) { for (const a of [this.c, this.u, this.v, this.s]) { const t = a[i]; a[i] = a[j]; a[j] = t; } }
 }
 
-export interface DecimateOptions { tol: number; minTris?: number; minQuality?: number; onProgress?: Progress; progressEvery?: number; }
+export interface DecimateOptions { tol: number; minTris?: number; minQuality?: number; onProgress?: Progress; progressEvery?: number;
+  /** max. Winkel zwischen neuer Dreiecksnormale und Originalnormalen der zugeordneten Punkte [°] – krümmungsadaptiv (Default 10°) */
+  maxNormalDeg?: number;
+  /** Kanten mit Flächenwinkel über diesem Wert sind Merkmalskanten: nur entlang der Kante kollabieren, Ecken fest (Default 30°) */
+  featureDeg?: number;
+  /** beidseitige Toleranz: Schwerpunkte/Kantenmitten neuer Dreiecke ≤ tol vom Original (Default an) */
+  twoSided?: boolean; }
 export interface DecimateResult extends RawMesh { before: number; after: number; maxDev: number; collapses: number; }
 
 /**
@@ -113,7 +119,7 @@ export interface DecimateResult extends RawMesh { before: number; after: number;
  */
 export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const P = Float64Array.from(m.positions), F = Int32Array.from(m.indices);
-  const nv = P.length / 3, nt = F.length / 3, tol2 = o.tol * o.tol, minQ = o.minQuality ?? 0.08;
+  const nv = P.length / 3, nt = F.length / 3, tol2 = o.tol * o.tol, minQ = o.minQuality ?? 0.12;
   const alive = new Uint8Array(nt).fill(1);
   const vf: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vf[F[3 * t + k]].push(t);
@@ -134,10 +140,32 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const own: number[][] = Array.from({ length: nt }, () => []);
   for (let v = 0; v < nv; v++) if (vf[v].length) own[vf[v][0]].push(v);
   const O = m.positions; // Original (unverändert)
+  // Originalnormalen (flächengewichtet) für die Normalenabweichung
+  const ON = new Float32Array(3 * nv);
+  for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2]; faceNormal(P, a, b, c, n); for (const v of [a, b, c]) { ON[3 * v] += n[0]; ON[3 * v + 1] += n[1]; ON[3 * v + 2] += n[2]; } }
+  for (let v = 0; v < nv; v++) { const l = Math.hypot(ON[3 * v], ON[3 * v + 1], ON[3 * v + 2]) || 1; ON[3 * v] /= l; ON[3 * v + 1] /= l; ON[3 * v + 2] /= l; }
+  const cosN = Math.cos(((o.maxNormalDeg ?? 10) * Math.PI) / 180);
+  // Merkmalskanten (Flächenwinkel) – Knoten mit ≠ 0/2 Merkmalskanten (Ecken, Enden) bleiben fest
+  const cosF = Math.cos(((o.featureDeg ?? 30) * Math.PI) / 180);
+  const ekey = (a: number, b: number) => (a < b ? a * nv + b : b * nv + a);
+  const feat = new Set<number>();
+  { const em = new Map<number, number>(); const fn = new Float64Array(3 * nt);
+    for (let t = 0; t < nt; t++) { const l = faceNormal(P, F[3 * t], F[3 * t + 1], F[3 * t + 2], n) || 1; fn[3 * t] = n[0] / l; fn[3 * t + 1] = n[1] / l; fn[3 * t + 2] = n[2] / l; }
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const kk = ekey(F[3 * t + k], F[3 * t + (k + 1) % 3]); const o2 = em.get(kk);
+      if (o2 === undefined) em.set(kk, t); else if (fn[3 * t] * fn[3 * o2] + fn[3 * t + 1] * fn[3 * o2 + 1] + fn[3 * t + 2] * fn[3 * o2 + 2] < cosF) feat.add(kk);
+    } }
+  const fdeg = new Uint8Array(nv); for (const kk of feat) { const a = Math.floor(kk / nv), b = kk % nv; if (fdeg[a] < 255) fdeg[a]++; if (fdeg[b] < 255) fdeg[b]++; }
+  const twoSided = o.twoSided ?? true; let bvh: MeshBVH | null = null; const qv = new THREE.Vector3(); const qt: any = {};
+  if (twoSided) bvh = buildBVH({ positions: m.positions, indices: m.indices });
+  const farFromOrig = (x: number, y: number, z: number) => { qv.set(x, y, z); const r = bvh!.closestPointToPoint(qv, qt, 0, o.tol * 1.0001); return !r || r.distance > o.tol; };
   const stamp = new Int32Array(nv);
   const heap = new Heap();
   const neigh = (u: number) => { const s = new Set<number>(); for (const t of vf[u]) for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== u) s.add(w); } return s; };
-  const pushV = (u: number) => { if (isB[u] || !vf[u].length) return; stamp[u]++; for (const v of neigh(u)) heap.push(qerr(u, v), u, v, stamp[u]); };
+  const pushV = (u: number) => {
+    if (isB[u] || !vf[u].length || (fdeg[u] !== 0 && fdeg[u] !== 2)) return; stamp[u]++;
+    for (const v of neigh(u)) { if (fdeg[u] === 2 && !feat.has(ekey(u, v))) continue; heap.push(qerr(u, v), u, v, stamp[u]); }
+  };
   for (let u = 0; u < nv; u++) pushV(u);
   let tris = nt, collapses = 0; const minTris = o.minTris ?? 4, every = o.progressEvery ?? 20000;
   const n0 = [0, 0, 0], n1 = [0, 0, 0];
@@ -174,11 +202,26 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
       if (bd > tol2) ok = false; else assign[k] = bt;
     }
     if (!ok) continue;
+    // Normalenabweichung neuer Dreiecke gegenüber den Originalnormalen ihrer Punkte (hält Verrundungen/Übergänge fein)
+    const nn = new Map<number, number[]>();
+    for (const t of moved) { const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2]; const q = [0, 0, 0]; const l = faceNormal(P, a, b, c, q) || 1; nn.set(t, [q[0] / l, q[1] / l, q[2] / l]);
+      // Ecken des neuen Dreiecks selbst
+      for (const w of [a, b, c]) if (q[0] / l * ON[3 * w] + q[1] / l * ON[3 * w + 1] + q[2] / l * ON[3 * w + 2] < cosN) ok = false; }
+    for (let k = 0; k < pts.length && ok; k++) { const q = nn.get(assign[k])!, p = pts[k]; if (q[0] * ON[3 * p] + q[1] * ON[3 * p + 1] + q[2] * ON[3 * p + 2] < cosN) ok = false; }
+    if (!ok) continue;
+    // beidseitig: Schwerpunkt und Mitten der neuen Kanten müssen nahe am Original liegen
+    if (bvh) {
+      for (const t of moved) { if (!ok) break; const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
+        if (farFromOrig((P[3 * a] + P[3 * b] + P[3 * c]) / 3, (P[3 * a + 1] + P[3 * b + 1] + P[3 * c + 1]) / 3, (P[3 * a + 2] + P[3 * b + 2] + P[3 * c + 2]) / 3)) ok = false; }
+      for (const w of nu) { if (!ok) break; if (w === v) continue; if (farFromOrig((P[3 * v] + P[3 * w]) / 2, (P[3 * v + 1] + P[3 * w + 1]) / 2, (P[3 * v + 2] + P[3 * w + 2]) / 2)) ok = false; }
+      if (!ok) continue;
+    }
     // Kollaps ausführen
     for (const t of vf[u]) own[t] = [];
     for (let k = 0; k < pts.length; k++) own[assign[k]].push(pts[k]);
     for (const t of shared) { alive[t] = 0; for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== u) { const L = vf[w]; L.splice(L.indexOf(t), 1); } } }
     for (const t of moved) { for (let k = 0; k < 3; k++) if (F[3 * t + k] === u) F[3 * t + k] = v; vf[v].push(t); }
+    if (fdeg[u]) for (const w of nu) { const kk = ekey(u, w); if (feat.has(kk)) { feat.delete(kk); if (w !== v) feat.add(ekey(v, w)); } }
     vf[u] = []; tris -= 2; collapses++;
     for (let i = 0; i < 10; i++) Q[10 * v + i] += Q[10 * u + i];
     pushV(v); for (const w of neigh(v)) pushV(w);
