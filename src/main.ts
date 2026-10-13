@@ -1624,7 +1624,7 @@ async function peCompute() {
 }
 async function peToggleCompare() {
   if (!state.data) return;
-  pe.cmp = !pe.cmp;
+  pe.cmp = !pe.cmp; if (pe.cmp) state.showLayout = false;
   if (pe.cmp && !pe.dev) await peCompute();
   renderAll();
   if (pe.cmp && pe.devStats) status(`Farbvergleich zum Original: max. +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm`);
@@ -1723,7 +1723,7 @@ $('#btn-curve-draw').onclick = () => {
   state.mode = null; state.preview = null; clearBrush(); pe.tool = 'curve'; curveDraft = []; renderAll();
 };
 $('#btn-curve-del').onclick = () => curveDelete();
-$('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Zuerst Kurven erkennen oder zeichnen.'); return; } state.showLayout = !state.showLayout; if (!state.layout) await updateLayout(); renderAll(); };
+$('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Zuerst Kurven erkennen oder zeichnen.'); return; } state.showLayout = !state.showLayout; if (state.showLayout) pe.cmp = false; if (!state.layout) await updateLayout(); renderAll(); };
 function renderCurveDialog(d: HTMLElement) {
   const L = state.layout;
   d.innerHTML = `<h3>Kurve zeichnen</h3><p class="note">Punkte auf das Netz tippen/klicken; sie werden über den kürzesten Kantenweg verbunden, als kubischer B-Spline gefittet und auf das Netz gelegt. Punkte nahe einer bestehenden Kurve rasten dort ein (T-Stoß).</p>
