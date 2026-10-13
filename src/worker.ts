@@ -9,6 +9,7 @@ import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
 import * as THREE from 'three';
+import { EdgeGraph, detectCurves, layout as curveLayout, makeCurve, pathThrough, CurveKind, DetectOptions } from './core/curves';
 
 /** Freiformfläche aus Auswahl (Indizes) oder Klick (Regionenwachstum; Krümmungsband/Knickprüfung stoppen an Verrundungen). */
 function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }) {
@@ -33,6 +34,13 @@ let topo: MeshTopology | null = null;
 /** Unverändertes Original (für Farbvergleich und „Original wiederherstellen“). */
 let orig: { positions: Float32Array; indices: Uint32Array } | null = null;
 let origBVH: ReturnType<typeof buildBVH> | null = null;
+let eg: EdgeGraph | null = null, ebvh: ReturnType<typeof buildBVH> | null = null;
+const curveCtx = () => { if (!eg) { eg = new EdgeGraph(mesh!); ebvh = buildBVH({ positions: mesh!.positions, indices: mesh!.indices }); } return { g: eg, bvh: ebvh! }; };
+const slim = (c: any) => ({ kind: c.kind, chain: c.chain, closed: c.closed, ctrl: c.ctrl, pts: c.pts, length: c.length });
+function layoutOut(chains: number[][]) {
+  const { g } = curveCtx(); const L = curveLayout(g, chains.map((chain) => ({ chain })));
+  return { nodes: L.nodes, regions: L.regions, regionOf: L.regionOf, tJunctions: L.tJunctions, foursided: L.foursided };
+}
 
 /** Bearbeitetes Netz übernehmen; Merkmals-Indexlisten auf die nächsten Knoten des neuen Netzes umrechnen (sortiert, eindeutig). */
 function setMesh(positions: Float32Array, indices: Uint32Array, remap: (Uint32Array | null)[]) {
@@ -48,14 +56,17 @@ function setMesh(positions: Float32Array, indices: Uint32Array, remap: (Uint32Ar
     cache.set(v, r); return r;
   };
   const out = remap.map((L) => (L ? Uint32Array.from(new Set(Array.from(L, nearest))).sort() : null));
-  mesh = nm; topo = new MeshTopology(nm);
+  mesh = nm; topo = new MeshTopology(nm); eg = null; ebvh = null;
   return out;
 }
 
 export type Req =
   | { op: 'load'; name: string; buffer: ArrayBuffer }
   | { op: 'loadRaw'; name: string; positions: Float32Array; indices: Uint32Array }
-  | { op: 'setMesh'; positions: Float32Array; indices: Uint32Array; remap: (Uint32Array | null)[] }
+  | { op: 'setMesh'; positions: Float32Array; indices: Uint32Array; remap: (Uint32Array | null)[]; chains?: number[][]; kinds?: string[] }
+  | { op: 'curvesDetect'; opts?: DetectOptions }
+  | { op: 'curvePath'; verts: number[]; closed?: boolean }
+  | { op: 'curveLayout'; chains: number[][] }
   | { op: 'compare' }
   | { op: 'getOriginal' }
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
@@ -100,16 +111,34 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       if (req.op === 'load') mesh = parseByName(req.name, req.buffer);
       else { mesh = { name: req.name, positions: req.positions, indices: req.indices }; if (mesh.indices.length) computeNormals(mesh); }
       topo = mesh.indices.length ? new MeshTopology(mesh) : null;
-      orig = { positions: mesh.positions.slice(), indices: mesh.indices.slice() }; origBVH = null;
+      orig = { positions: mesh.positions.slice(), indices: mesh.indices.slice() }; origBVH = null; eg = null; ebvh = null;
       const b = bounds(mesh);
       const positions = mesh.positions.slice(), indices = mesh.indices.slice();
       const normals = mesh.vertexNormals ? mesh.vertexNormals.slice() : null;
       result = { name: mesh.name, positions, indices, normals, bounds: b, vertexCount: positions.length / 3, triCount: indices.length / 3 };
       transfer = [positions.buffer, indices.buffer, ...(normals ? [normals.buffer] : [])];
+    } else if (req.op === 'curvesDetect') {
+      const { g, bvh } = curveCtx(); const cs = detectCurves(mesh!, req.opts ?? {}, g, bvh).map(slim);
+      result = { curves: cs, layout: layoutOut(cs.map((c) => c.chain)) };
+    } else if (req.op === 'curvePath') {
+      const { g, bvh } = curveCtx(); const chain = pathThrough(g, req.verts);
+      if (chain.length < 2) throw new Error('Kein Weg zwischen den Punkten gefunden');
+      result = { curve: slim(makeCurve(g, bvh, chain, 'Benutzer', req.closed ?? false)) };
+    } else if (req.op === 'curveLayout') {
+      result = layoutOut(req.chains);
     } else if (req.op === 'setMesh') {
+      // Kurvenketten (geordnet) vor dem Netzwechsel auf Punkte abbilden
+      const oldP = mesh!.positions; const chainPts = (req.chains ?? []).map((c) => c.map((v) => [oldP[3 * v], oldP[3 * v + 1], oldP[3 * v + 2]]));
       const remap = setMesh(req.positions, req.indices, req.remap);
+      let curves: any[] | undefined;
+      if (req.chains) {
+        const { g, bvh } = curveCtx(); const q = new THREE.Vector3(), tg: any = {};
+        const nearestV = (p: number[]) => { q.set(p[0], p[1], p[2]); const h = bvh.closestPointToPoint(q, tg)!; let b = mesh!.indices[3 * h.faceIndex], bd = Infinity; for (let k = 0; k < 3; k++) { const w = mesh!.indices[3 * h.faceIndex + k]; const d = (mesh!.positions[3 * w] - p[0]) ** 2 + (mesh!.positions[3 * w + 1] - p[1]) ** 2 + (mesh!.positions[3 * w + 2] - p[2]) ** 2; if (d < bd) { bd = d; b = w; } } return b; };
+        curves = chainPts.map((pts, i) => { const step = Math.max(1, Math.floor(pts.length / 40)); const vs: number[] = []; for (let k = 0; k < pts.length; k += step) vs.push(nearestV(pts[k])); vs.push(nearestV(pts[pts.length - 1]));
+          const dedup = vs.filter((v, k) => k === 0 || v !== vs[k - 1]); return slim(makeCurve(g, bvh, pathThrough(g, dedup), (req.kinds?.[i] ?? 'Benutzer') as CurveKind)); });
+      }
       const normals = mesh!.vertexNormals!.slice();
-      result = { remap, normals, bounds: bounds(mesh!), vertexCount: mesh!.positions.length / 3, triCount: mesh!.indices.length / 3 };
+      result = { remap, curves, normals, bounds: bounds(mesh!), vertexCount: mesh!.positions.length / 3, triCount: mesh!.indices.length / 3 };
       transfer = [normals.buffer];
     } else if (req.op === 'compare') {
       if (!orig || !mesh) throw new Error('Kein Netz');

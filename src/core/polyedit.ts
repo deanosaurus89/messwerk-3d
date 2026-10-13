@@ -110,8 +110,10 @@ export interface DecimateOptions { tol: number; minTris?: number; minQuality?: n
   /** Kanten mit Flächenwinkel über diesem Wert sind Merkmalskanten: nur entlang der Kante kollabieren, Ecken fest (Default 30°) */
   featureDeg?: number;
   /** beidseitige Toleranz: Schwerpunkte/Kantenmitten neuer Dreiecke ≤ tol vom Original (Default an) */
-  twoSided?: boolean; }
-export interface DecimateResult extends RawMesh { before: number; after: number; maxDev: number; collapses: number; }
+  twoSided?: boolean;
+  /** Glättungsringe der Referenznormalen (Scanrauschen), Default 3 */
+  normalSmooth?: number; }
+export interface DecimateResult extends RawMesh { before: number; after: number; maxDev: number; collapses: number; rejects?: Record<string, number>; noiseDeg?: number; }
 
 /**
  * Halbkanten-Kollaps (Knoten u wandert auf Nachbarknoten v; alle verbleibenden Knoten liegen damit auf dem Original),
@@ -121,7 +123,10 @@ export interface DecimateResult extends RawMesh { before: number; after: number;
  */
 export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const P = Float64Array.from(m.positions), F = Int32Array.from(m.indices);
-  const nv = P.length / 3, nt = F.length / 3, tol2 = o.tol * o.tol, minQ = o.minQuality ?? 0.12;
+  const nv = P.length / 3, nt = F.length / 3, tol2 = o.tol * o.tol;
+  // CAD-Tessellierung (Median-Dreiecksqualität < 0,3: lange Splitter) → Splitterschutz lockern, sonst wäre kaum ein Kollaps möglich
+  let minQ = o.minQuality ?? 0.12;
+  if (o.minQuality === undefined) { const qs: number[] = []; const nn = [0, 0, 0]; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 5000))) qs.push(quality(P, F[3 * t], F[3 * t + 1], F[3 * t + 2], nn)); qs.sort((a, b) => a - b); if ((qs[qs.length >> 1] ?? 1) < 0.3) minQ = 0.02; }
   const alive = new Uint8Array(nt).fill(1);
   const vf: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vf[F[3 * t + k]].push(t);
@@ -144,9 +149,24 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const O = m.positions; // Original (unverändert)
   // Originalnormalen (flächengewichtet) für die Normalenabweichung
   const ON = new Float32Array(3 * nv);
-  for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2]; faceNormal(P, a, b, c, n); for (const v of [a, b, c]) { ON[3 * v] += n[0]; ON[3 * v + 1] += n[1]; ON[3 * v + 2] += n[2]; } }
+  // vorzeichenunabhängig (STL mit uneinheitlicher Orientierung): Flächennormalen am ersten Beitrag ausrichten
+  for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2]; faceNormal(P, a, b, c, n); for (const v of [a, b, c]) { const sg = ON[3 * v] * n[0] + ON[3 * v + 1] * n[1] + ON[3 * v + 2] * n[2] < 0 ? -1 : 1; ON[3 * v] += sg * n[0]; ON[3 * v + 1] += sg * n[1]; ON[3 * v + 2] += sg * n[2]; } }
   for (let v = 0; v < nv; v++) { const l = Math.hypot(ON[3 * v], ON[3 * v + 1], ON[3 * v + 2]) || 1; ON[3 * v] /= l; ON[3 * v + 1] /= l; ON[3 * v + 2] /= l; }
-  const cosN = Math.cos(((o.maxNormalDeg ?? 10) * Math.PI) / 180);
+  // Scanrauschen: Referenznormalen über einige Ringe glätten (nicht über Merkmalskanten hinweg, siehe unten: dort Kantenwinkel)
+  for (let it = 0; it < (o.normalSmooth ?? 3); it++) {
+    const S = new Float32Array(3 * nv);
+    for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2];
+      const sb = ON[3 * a] * ON[3 * b] + ON[3 * a + 1] * ON[3 * b + 1] + ON[3 * a + 2] * ON[3 * b + 2] < 0 ? -1 : 1, sc = ON[3 * a] * ON[3 * c] + ON[3 * a + 1] * ON[3 * c + 1] + ON[3 * a + 2] * ON[3 * c + 2] < 0 ? -1 : 1;
+      const x = ON[3 * a] + sb * ON[3 * b] + sc * ON[3 * c], y = ON[3 * a + 1] + sb * ON[3 * b + 1] + sc * ON[3 * c + 1], z = ON[3 * a + 2] + sb * ON[3 * b + 2] + sc * ON[3 * c + 2];
+      for (const v of [a, b, c]) { const sv = ON[3 * v] * x + ON[3 * v + 1] * y + ON[3 * v + 2] * z < 0 ? -1 : 1; if (Math.abs(ON[3 * v] * x + ON[3 * v + 1] * y + ON[3 * v + 2] * z) < 2.4) { S[3 * v] += ON[3 * v]; S[3 * v + 1] += ON[3 * v + 1]; S[3 * v + 2] += ON[3 * v + 2]; continue; } S[3 * v] += sv * x; S[3 * v + 1] += sv * y; S[3 * v + 2] += sv * z; } }
+    for (let v = 0; v < nv; v++) { const l = Math.hypot(S[3 * v], S[3 * v + 1], S[3 * v + 2]) || 1; ON[3 * v] = S[3 * v] / l; ON[3 * v + 1] = S[3 * v + 1] / l; ON[3 * v + 2] = S[3 * v + 2] / l; }
+  }
+  // Rauschniveau: 90. Perzentil des Winkels Originaldreieck ↔ geglättete Normale; erlaubt = Vorgabe + Rauschwinkel
+  let noiseDeg = 0;
+  { const a: number[] = []; const step = Math.max(1, Math.floor(nt / 20000));
+    for (let t = 0; t < nt; t += step) { const x = F[3 * t], y = F[3 * t + 1], z = F[3 * t + 2]; const l = faceNormal(P, x, y, z, n) || 1; let w = 0; for (const v of [x, y, z]) w = Math.max(w, Math.acos(Math.min(1, Math.abs(n[0] * ON[3 * v] + n[1] * ON[3 * v + 1] + n[2] * ON[3 * v + 2]) / l))); a.push(w); }
+    a.sort((p2, q2) => p2 - q2); noiseDeg = ((a[Math.floor(0.9 * a.length)] ?? 0) * 180) / Math.PI; }
+  const cosN = Math.cos((Math.min(80, (o.maxNormalDeg ?? 10) + noiseDeg) * Math.PI) / 180);
   // Merkmalskanten (Flächenwinkel) – Knoten mit ≠ 0/2 Merkmalskanten (Ecken, Enden) bleiben fest
   const cosF = Math.cos(((o.featureDeg ?? 30) * Math.PI) / 180);
   const ekey = (a: number, b: number) => (a < b ? a * nv + b : b * nv + a);
@@ -155,7 +175,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     for (let t = 0; t < nt; t++) { const l = faceNormal(P, F[3 * t], F[3 * t + 1], F[3 * t + 2], n) || 1; fn[3 * t] = n[0] / l; fn[3 * t + 1] = n[1] / l; fn[3 * t + 2] = n[2] / l; }
     for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
       const kk = ekey(F[3 * t + k], F[3 * t + (k + 1) % 3]); const o2 = em.get(kk);
-      if (o2 === undefined) em.set(kk, t); else if (fn[3 * t] * fn[3 * o2] + fn[3 * t + 1] * fn[3 * o2 + 1] + fn[3 * t + 2] * fn[3 * o2 + 2] < cosF) feat.add(kk);
+      if (o2 === undefined) em.set(kk, t); else if (Math.abs(fn[3 * t] * fn[3 * o2] + fn[3 * t + 1] * fn[3 * o2 + 1] + fn[3 * t + 2] * fn[3 * o2 + 2]) < cosF) feat.add(kk);
     } }
   const fdeg = new Uint8Array(nv); for (const kk of feat) { const a = Math.floor(kk / nv), b = kk % nv; if (fdeg[a] < 255) fdeg[a]++; if (fdeg[b] < 255) fdeg[b]++; }
   const twoSided = o.twoSided ?? true; let bvh: MeshBVH | null = null; const qv = new THREE.Vector3(); const qt: any = {};
@@ -170,17 +190,17 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   };
   for (let u = 0; u < nv; u++) pushV(u);
   let tris = nt, collapses = 0; const minTris = o.minTris ?? 4, every = o.progressEvery ?? 20000;
-  const n0 = [0, 0, 0], n1 = [0, 0, 0];
+  const n0 = [0, 0, 0], n1 = [0, 0, 0]; const rej = { geoQ: 0, geoFlip: 0, shared: 0, link: 0, geo: 0, tol: 0, normal: 0, twoSided: 0 };
   while (heap.size && tris > minTris) {
     const [, u, v, s] = heap.pop();
     if (s !== stamp[u] || !vf[u].length || !vf[v].length) continue;
     // Dreiecke an Kante uv / übrige Dreiecke von u
     const shared: number[] = [], moved: number[] = [];
     for (const t of vf[u]) (F[3 * t] === v || F[3 * t + 1] === v || F[3 * t + 2] === v ? shared : moved).push(t);
-    if (shared.length !== 2) continue;
+    if (shared.length !== 2) { rej.shared++; continue; }
     // Link-Bedingung: gemeinsame Nachbarn genau 2
     const nu = neigh(u), nvs = neigh(v); let common = 0; for (const w of nu) if (nvs.has(w)) common++;
-    if (common !== 2) continue;
+    if (common !== 2) { rej.link++; continue; }
     // Geometrie prüfen (Umklappen, Splitter)
     let ok = true;
     for (const t of moved) {
@@ -189,9 +209,12 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
       const a2 = a === u ? v : a, b2 = b === u ? v : b, c2 = c === u ? v : c;
       const q = quality(P, a2, b2, c2, n1);
       const l0 = Math.hypot(n0[0], n0[1], n0[2]), l1 = Math.hypot(n1[0], n1[1], n1[2]);
-      if (q < minQ || !l1 || (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * l1) < 0.5) { ok = false; break; }
+      // Splitterschutz: schlechter als minQ nur zulassen, wenn das Dreieck vorher schon schlechter war (CAD-Tessellierung)
+      const q0 = l0 ? quality(P, a, b, c, n0) : 0;
+      if (q < minQ && q < q0) { rej.geoQ++; ok = false; break; }
+      if (!l1 || (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * l1) < 0.5) { rej.geoFlip++; ok = false; break; }
     }
-    if (!ok) continue;
+    if (!ok) { rej.geo++; continue; }
     // Toleranz: Originalpunkte aller Dreiecke von u auf neue Dreiecke verteilen
     const pts: number[] = []; for (const t of vf[u]) for (const p of own[t]) pts.push(p);
     const assign = new Int32Array(pts.length);
@@ -203,20 +226,20 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
       }
       if (bd > tol2) ok = false; else assign[k] = bt;
     }
-    if (!ok) continue;
+    if (!ok) { rej.tol++; continue; }
     // Normalenabweichung neuer Dreiecke gegenüber den Originalnormalen ihrer Punkte (hält Verrundungen/Übergänge fein)
     const nn = new Map<number, number[]>();
     for (const t of moved) { const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2]; const q = [0, 0, 0]; const l = faceNormal(P, a, b, c, q) || 1; nn.set(t, [q[0] / l, q[1] / l, q[2] / l]);
       // Ecken des neuen Dreiecks selbst
-      for (const w of [a, b, c]) if (q[0] / l * ON[3 * w] + q[1] / l * ON[3 * w + 1] + q[2] / l * ON[3 * w + 2] < cosN) ok = false; }
-    for (let k = 0; k < pts.length && ok; k++) { const q = nn.get(assign[k])!, p = pts[k]; if (q[0] * ON[3 * p] + q[1] * ON[3 * p + 1] + q[2] * ON[3 * p + 2] < cosN) ok = false; }
-    if (!ok) continue;
+      for (const w of [a, b, c]) if (Math.abs(q[0] / l * ON[3 * w] + q[1] / l * ON[3 * w + 1] + q[2] / l * ON[3 * w + 2]) < cosN) ok = false; }
+    for (let k = 0; k < pts.length && ok; k++) { const q = nn.get(assign[k])!, p = pts[k]; if (Math.abs(q[0] * ON[3 * p] + q[1] * ON[3 * p + 1] + q[2] * ON[3 * p + 2]) < cosN) ok = false; }
+    if (!ok) { rej.normal++; continue; }
     // beidseitig: Schwerpunkt und Mitten der neuen Kanten müssen nahe am Original liegen
     if (bvh) {
       for (const t of moved) { if (!ok) break; const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
         if (farFromOrig((P[3 * a] + P[3 * b] + P[3 * c]) / 3, (P[3 * a + 1] + P[3 * b + 1] + P[3 * c + 1]) / 3, (P[3 * a + 2] + P[3 * b + 2] + P[3 * c + 2]) / 3)) ok = false; }
       for (const w of nu) { if (!ok) break; if (w === v) continue; if (farFromOrig((P[3 * v] + P[3 * w]) / 2, (P[3 * v + 1] + P[3 * w + 1]) / 2, (P[3 * v + 2] + P[3 * w + 2]) / 2)) ok = false; }
-      if (!ok) continue;
+      if (!ok) { rej.twoSided++; continue; }
     }
     // Kollaps ausführen
     for (const t of vf[u]) own[t] = [];
@@ -230,7 +253,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses);
   }
   const r = compact(P, F, (t) => !!alive[t], nt);
-  return { ...r, before: nt, after: tris, maxDev: NaN, collapses };
+  return { ...r, before: nt, after: tris, maxDev: NaN, collapses, rejects: rej, noiseDeg };
 }
 
 // ---------------------------------------------------------------- Unterteilung

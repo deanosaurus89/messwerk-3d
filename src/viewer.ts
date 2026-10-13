@@ -292,6 +292,19 @@ export class Viewer {
     }
   }
 
+  /** Kurve des Kurvennetzes als dünne Röhre auf der Oberfläche. */
+  addCurve(pts: number[][], color: number, selected: boolean) {
+    if (pts.length < 2) return;
+    const v = pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+    const path = new THREE.CatmullRomCurve3(v, false, 'centripetal');
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(600, Math.max(8, v.length * 2)), this.radius / (selected ? 220 : 380), 5),
+      new THREE.MeshBasicMaterial({ color: selected ? 0xffd400 : color }));
+    tube.renderOrder = 5; this.prims.add(tube);
+  }
+  addNode(p: number[], color: number, size = 1) {
+    const d = new THREE.Mesh(new THREE.SphereGeometry((this.radius / 150) * size, 10, 8), new THREE.MeshBasicMaterial({ color }));
+    d.position.set(p[0], p[1], p[2]); d.renderOrder = 6; this.prims.add(d);
+  }
   /** Kamera auf einen Bereich zentrieren (Blickrichtung bleibt). */
   focus(c: [number, number, number], r: number) {
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();

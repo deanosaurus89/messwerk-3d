@@ -27,6 +27,7 @@ interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; r
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
   aux?: PreviewAux; hit?: Hit; dev?: Float32Array; }
 type V3 = [number, number, number];
+interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Benutzer'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const engine = new Engine();
@@ -55,10 +56,12 @@ const state = {
   nurbs: { nu: 12, nv: 12, deg: 3, smooth: 1e-4 } as NurbsParams,
   nextId: 1, nextCtrl: 1, typeCount: {} as Record<string, number>,
   addFeat: null as number | null,
+  curves: [] as CurveView[], nextCurve: 1, curveSel: null as number | null, showLayout: false,
+  layout: null as null | { nodes: { p: number[]; degree: number; v: number }[]; regions: { faces: number; sides: number; area: number }[]; regionOf: Int32Array; tJunctions: number; foursided: number },
 };
 (window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
-type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase';
-const PE_NAME: Record<PeTool, string> = { reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
+type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve';
+const PE_NAME: Record<PeTool, string> = { curve: 'Kurve zeichnen', reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
 const pe = {
   tool: null as PeTool | null,
   tol: 0.02, normalDeg: 10, featureDeg: 30, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
@@ -193,7 +196,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer) {
   try {
     const t0 = performance.now();
     const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf }, [buf]));
-    viewer.setModel(r.positions, r.indices, r.normals); peReset();
+    viewer.setModel(r.positions, r.indices, r.normals); peReset(); curvesReset();
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = []; state.controls = []; state.sel = []; state.mode = null; state.preview = null;
     state.hidden.clear(); state.labelOffsets.clear(); state.modelVisible = true; state.typeCount = {};
@@ -238,7 +241,8 @@ window.addEventListener('pointerup', async (e) => {
   if (moved > 8 || dt > 700) return;
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) return;
-  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
+  if (pe.tool === 'curve') curveAddPoint(h);
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
   else { const f = featureAtHit(h); if (f) selectFeature(f.id); }
 });
@@ -299,6 +303,12 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
 modeBar.addEventListener('pointerdown', (e) => e.stopPropagation());
 function renderModeBar() {
+  if (state.data && pe.tool === 'curve') {
+    modeBar.className = '';
+    modeBar.innerHTML = `<span class="mb-tool">〰 Kurve zeichnen · <b>${curveDraft.length}</b> Pkt</span><button data-a="ok" class="primary" ${curveDraft.length > 1 ? '' : 'disabled'}>✔ Erzeugen</button><button data-a="undo" ${curveDraft.length ? '' : 'disabled'}>↶</button><button data-a="exit">✕ Beenden</button>`;
+    modeBar.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a; if (a === 'ok') curveFinish(); else if (a === 'undo') { curveDraft.pop(); renderAll(); } else peExit(); }));
+    return;
+  }
   if (state.data && pe.tool === 'erase') {
     modeBar.className = 'brush';
     modeBar.innerHTML = `<span class="mb-tool erase">✧ Magischer Radierer</span><label>r <input id="mb-rad" type="number" min="0.1" step="0.1" value="${pe.radius}" style="width:58px" inputmode="decimal"> mm</label>
@@ -693,6 +703,16 @@ function renderTree() {
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}Hilfsebene <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
     if (f.nominal) node(`<span class="tw"></span>${ICON.soll}Soll`, 'indent3', () => selectFeature(f.id));
   }
+  if (state.curves.length) {
+    node(`<span class="tw">▾</span>${ICON.folder}Kurvennetz (${state.curves.length})${state.layout ? ` <span class="sub">${state.layout.regions.length} Patches · ${state.layout.foursided} 4-seitig · ${state.layout.tJunctions} T</span>` : ''}`, 'indent1 curve-folder');
+    for (const c of state.curves) {
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      const cn = node(`<span class="tw"></span><span style="color:${hex(CURVE_COLOR[c.kind])}">〰</span>${c.name} <span class="sub">${c.kind} · ${c.length.toFixed(1)} mm</span>`,
+        'indent2 curve-node' + (c.visible ? '' : ' hidden-feat'), () => { state.curveSel = state.curveSel === c.id ? null : c.id; renderTree(); renderScene(); renderDialog(); }, state.curveSel === c.id, undefined,
+        eyeBtn(c.visible, () => { c.visible = !c.visible; renderTree(); renderScene(); scheduleAutosave(); }));
+      cn.dataset.cid = String(c.id);
+    }
+  }
   if (state.reports.length) {
     node(`<span class="tw">▾</span>${ICON.folder}Berichte (${state.reports.length})`, 'indent1');
     for (const r of state.reports) node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
@@ -767,7 +787,9 @@ function renderPreviewCard() {
 
 function renderDialog() {
   const d = $('#dialog'); d.innerHTML = '';
+  if (pe.tool === 'curve') { renderCurveDialog(d); return; }
   if (pe.tool) { renderPolyDialog(d); return; }
+  if (state.curveSel != null) { const c = state.curves.find((x) => x.id === state.curveSel); if (c) { d.innerHTML = `<h3>〰 ${c.name}</h3>${kv([['Typ', c.kind], ['Länge', c.length.toFixed(2) + ' mm'], ['Kontrollpunkte', String(c.ctrl.length)], ['Grad', '3 (B-Spline)'], ['Geschlossen', c.closed ? 'ja' : 'nein']] as any)}<div class="row"><button class="btn" id="cv-del">✕ Kurve löschen</button></div>`; d.querySelector('#cv-del')!.addEventListener('click', () => curveDelete(c.id)); return; } }
   const m = state.mode;
   if (m?.kind === 'dist') {
     const opts = (sel: number | null) => `<option value="">— wählen —</option>` + state.features.filter((f) => f.type !== 'Abstand')
@@ -1040,7 +1062,7 @@ function renderScene() {
   if (viewer.model) viewer.model.visible = state.modelVisible;
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
-  const peOn = paintPolyCompare();
+  const peOn = paintPolyCompare() || paintLayout();
   if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) { const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i)); viewer.paint(Uint32Array.from(ids), [0.62, 0.2, 0.95]); }
   if (state.colorPts && !peOn) for (const f of state.features) {
     if (f.type === 'Abstand' || !vis(f)) continue;
@@ -1059,6 +1081,7 @@ function renderScene() {
   if (!peOn) renderDevLegend(lg ?? null);
   viewer.commitColors();
   viewer.clearPrims();
+  renderCurves();
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
@@ -1151,6 +1174,7 @@ function projectJSON() {
       features: feats, controls: state.controls, typeCount: state.typeCount, nextId: state.nextId, nextCtrl: state.nextCtrl, nextReport: state.nextReport,
       reports: state.reports, hidden: [...state.hidden], modelVisible: state.modelVisible, labelOffsets: [...state.labelOffsets.entries()],
       showLabels: state.showLabels, showPrims: state.showPrims, colorPts: state.colorPts, opts: state.opts, camera: viewer.getCamera(),
+      curves: state.curves, nextCurve: state.nextCurve, showLayout: state.showLayout,
     },
   };
 }
@@ -1188,6 +1212,8 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
     if (st.opts) Object.assign(state.opts, st.opts);
+    curvesReset(); state.curves = st.curves ?? []; state.nextCurve = st.nextCurve ?? state.curves.length + 1; state.showLayout = !!st.showLayout;
+    if (state.curves.length) updateLayout();
     state.sel = []; state.mode = null; state.preview = null; state.openReport = null; ptsCache.clear();
     $('#projname').textContent = r.name; $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
     loadCount++; await storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
@@ -1424,10 +1450,11 @@ document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.oncl
 $('#btn-pe-cmp').onclick = () => peToggleCompare();
 $('#btn-pe-undo').onclick = () => peUndo();
 $('#btn-pe-reset').onclick = () => peResetOriginal();
-function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; peClearSel(); viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
+function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; peClearSel(); curveDraft = []; viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
 
 function renderPolyRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => b.classList.toggle('on', pe.tool === b.dataset.pe));
+  $('#btn-curve-draw').classList.toggle('on', pe.tool === 'curve'); $('#btn-curve-layout').classList.toggle('on', state.showLayout);
   $('#btn-pe-cmp').classList.toggle('on', pe.cmp);
   ($('#btn-pe-undo') as HTMLButtonElement).disabled = !pe.undo.length;
   ($('#btn-pe-reset') as HTMLButtonElement).disabled = !pe.undo.length;
@@ -1571,7 +1598,9 @@ async function applyEditedMesh(positions: Float32Array, indices: Uint32Array, la
   if (!pe.origTris) pe.origTris = state.data!.triCount;
   const lists: (Uint32Array | null)[] = [];
   for (const f of state.features) lists.push(f.indices ?? null, f.auxIndices ?? null, f.src ?? null);
-  const r = await busy(engine.call<any>({ op: 'setMesh', positions: positions.slice(), indices: indices.slice(), remap: lists }));
+  const r = await busy(engine.call<any>({ op: 'setMesh', positions: positions.slice(), indices: indices.slice(), remap: lists,
+    chains: state.curves.map((c) => c.chain), kinds: state.curves.map((c) => c.kind) }));
+  if (r.curves) { state.curves.forEach((c, i) => Object.assign(c, r.curves[i], { kind: c.kind })); }
   state.features.forEach((f, i) => {
     const [a, b, c] = [r.remap[3 * i], r.remap[3 * i + 1], r.remap[3 * i + 2]];
     if (a) f.indices = a; f.auxIndices = b ?? undefined; f.src = c ?? undefined;
@@ -1585,6 +1614,7 @@ async function applyEditedMesh(positions: Float32Array, indices: Uint32Array, la
   state.preview = null; clearBrush();
   pe.dev = null; pe.devStats = null;
   if (pe.cmp) await peCompute();
+  if (state.curves.length) await updateLayout();
   storeMeshForAutosave(state.data!.name);
   renderAll();
 }
@@ -1627,3 +1657,82 @@ function paintPolyCompare(): boolean {
   el.innerHTML = `<b>Abweichung zum Original [mm]</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
   return true;
 }
+
+
+// ------------------------------------------------------------------ Kurvennetz (Modeler-artig)
+const CURVE_COLOR: Record<CurveView['kind'], number> = { Kante: 0xd81b60, Tangente: 0x1e88e5, Benutzer: 0x2e7d32 };
+let curveDraft: { v: number; p: number[] }[] = [];
+function curvesReset() { state.curves = []; state.nextCurve = 1; state.curveSel = null; state.layout = null; state.showLayout = false; curveDraft = []; }
+function renderCurves() {
+  for (const c of state.curves) if (c.visible) viewer.addCurve(c.pts, CURVE_COLOR[c.kind], state.curveSel === c.id);
+  if (state.layout && state.curves.some((c) => c.visible)) for (const n of state.layout.nodes) viewer.addNode(n.p, n.degree === 3 ? 0xff8f00 : n.degree === 1 ? 0x9e9e9e : 0x212121, n.degree === 3 ? 1.1 : 0.8);
+  for (const d of curveDraft) viewer.addNode(d.p, 0x2e7d32, 1.2);
+}
+/** Patch-Aufteilung einfärben: 4-seitige Patches grün/türkis, andere warm. */
+function paintLayout(): boolean {
+  const L = state.layout; if (!state.showLayout || !L || !viewer.model || !viewer.colors) return false;
+  const idx = viewer.model.geometry.index!.array as Uint32Array; if (L.regionOf.length !== idx.length / 3) return false;
+  const col = L.regions.map((r, i) => { const h = r.sides === 4 ? 0.28 + 0.18 * ((i * 0.618) % 1) : ((i * 0.618) % 1) * 0.16 + (r.sides === 0 ? 0.62 : 0.0); return hsl(h, r.sides === 4 ? 0.55 : 0.6, 0.62); });
+  for (let t = 0; t < L.regionOf.length; t++) { const c = col[L.regionOf[t]]; for (let k = 0; k < 3; k++) viewer.colors.set(c, 3 * idx[3 * t + k]); }
+  return true;
+}
+function hsl(h: number, s: number, l: number): number[] { const a = s * Math.min(l, 1 - l); const f = (n: number) => { const k = (n + h * 12) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0), f(8), f(4)]; }
+async function updateLayout() {
+  if (!state.curves.length) { state.layout = null; return; }
+  state.layout = await engine.call<any>({ op: 'curveLayout', chains: state.curves.map((c) => c.chain) });
+}
+async function detectCurvesUI() {
+  if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
+  const t0 = performance.now();
+  const r = await busy(engine.call<any>({ op: 'curvesDetect' }));
+  state.curves = state.curves.filter((c) => c.kind === 'Benutzer');
+  for (const c of r.curves) state.curves.push({ id: state.nextCurve, name: `${c.kind === 'Kante' ? 'Kante' : 'Tangente'} ${state.nextCurve++}`, visible: true, ...c });
+  await updateLayout();
+  const L = state.layout!;
+  toast(`✔ ${r.curves.length} Kurven erkannt (${r.curves.filter((c: any) => c.kind === 'Kante').length} Kanten, ${r.curves.filter((c: any) => c.kind === 'Tangente').length} Tangentenlinien) · ${L.regions.length} Patches, ${L.foursided} 4-seitig, ${L.tJunctions} T-Stöße · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  renderAll();
+}
+function curveAddPoint(h: Hit) {
+  const idx = viewer.model!.geometry.index!.array as Uint32Array, P = viewer.model!.geometry.getAttribute('position').array as Float32Array;
+  let best = idx[3 * h.tri], bd = Infinity;
+  for (let k = 0; k < 3; k++) { const v = idx[3 * h.tri + k]; const d = (P[3 * v] - h.point[0]) ** 2 + (P[3 * v + 1] - h.point[1]) ** 2 + (P[3 * v + 2] - h.point[2]) ** 2; if (d < bd) { bd = d; best = v; } }
+  // Einrasten auf bestehende Kurvenknoten in der Nähe (T-Stoß)
+  const snap = (state.data!.diag / 150) ** 2;
+  for (const c of state.curves) for (const v of c.chain) { const d = (P[3 * v] - h.point[0]) ** 2 + (P[3 * v + 1] - h.point[1]) ** 2 + (P[3 * v + 2] - h.point[2]) ** 2; if (d < snap && d < bd) { bd = d; best = v; } }
+  curveDraft.push({ v: best, p: [P[3 * best], P[3 * best + 1], P[3 * best + 2]] });
+  renderScene(); renderDialog(); renderModeBar();
+}
+async function curveFinish() {
+  if (curveDraft.length < 2) { toast('Mindestens zwei Punkte auf das Netz setzen.'); return; }
+  try {
+    const r = await busy(engine.call<any>({ op: 'curvePath', verts: curveDraft.map((d) => d.v) }));
+    state.curves.push({ id: state.nextCurve, name: `Kurve ${state.nextCurve++}`, visible: true, ...r.curve });
+    curveDraft = []; await updateLayout(); toast(`✔ Kurve erzeugt (${r.curve.length.toFixed(1)} mm) – Patches: ${state.layout!.regions.length}, 4-seitig: ${state.layout!.foursided}`);
+  } catch (e: any) { toast('Fehler: ' + e.message); }
+  renderAll();
+}
+async function curveDelete(id = state.curveSel) {
+  if (id == null) { toast('Zuerst eine Kurve im Baum wählen.'); return; }
+  state.curves = state.curves.filter((c) => c.id !== id); state.curveSel = null;
+  await updateLayout(); renderAll();
+}
+$('#btn-curve-detect').onclick = () => detectCurvesUI();
+$('#btn-curve-draw').onclick = () => {
+  if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
+  if (pe.tool === 'curve') { peExit(); return; }
+  state.mode = null; state.preview = null; clearBrush(); pe.tool = 'curve'; curveDraft = []; renderAll();
+};
+$('#btn-curve-del').onclick = () => curveDelete();
+$('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Zuerst Kurven erkennen oder zeichnen.'); return; } state.showLayout = !state.showLayout; if (!state.layout) await updateLayout(); renderAll(); };
+function renderCurveDialog(d: HTMLElement) {
+  const L = state.layout;
+  d.innerHTML = `<h3>Kurve zeichnen</h3><p class="note">Punkte auf das Netz tippen/klicken; sie werden über den kürzesten Kantenweg verbunden, als kubischer B-Spline gefittet und auf das Netz gelegt. Punkte nahe einer bestehenden Kurve rasten dort ein (T-Stoß).</p>
+    <div class="row"><b>${curveDraft.length}</b>&nbsp;Punkte gesetzt</div>
+    <div class="row"><button class="btn primary" id="cv-ok" ${curveDraft.length > 1 ? '' : 'disabled'}>✔ Kurve erzeugen</button><button class="btn" id="cv-undo" ${curveDraft.length ? '' : 'disabled'}>↶ Punkt</button><button class="btn" id="cv-exit">Schließen</button></div>
+    ${L ? `<h4>Patch-Aufteilung</h4><div class="row"><span class="note">${state.curves.length} Kurven · ${L.nodes.length} Knoten · ${L.tJunctions} T-Stöße · ${L.regions.length} Patches · <b>${L.foursided}</b> 4-seitig</span></div>` : ''}`;
+  d.querySelector('#cv-ok')?.addEventListener('click', () => curveFinish());
+  d.querySelector('#cv-undo')?.addEventListener('click', () => { curveDraft.pop(); renderAll(); });
+  d.querySelector('#cv-exit')?.addEventListener('click', () => peExit());
+}
+/** Test-Hilfe: Projekt speichern und sofort wieder öffnen (Persistenz-Prüfung). */
+(window as any).__app.roundtrip = async () => { const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob()); const p = readProject(bin); await applyProject(p.json, p.mesh, p.idx); return bin.length; };

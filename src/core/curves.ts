@@ -37,7 +37,7 @@ export class EdgeGraph {
     this.el = el / Math.max(1, nt);
   }
   dist(a: number, b: number) { const P = this.m.positions; return Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]); }
-  dihedralCos(kk: number) { const L = this.faces.get(kk)!; if (L.length !== 2) return 1; const [s, t] = L, f = this.fn; return f[3 * s] * f[3 * t] + f[3 * s + 1] * f[3 * t + 1] + f[3 * s + 2] * f[3 * t + 2]; }
+  dihedralCos(kk: number) { const L = this.faces.get(kk)!; if (L.length !== 2) return 1; const [s, t] = L, f = this.fn; return Math.abs(f[3 * s] * f[3 * t] + f[3 * s + 1] * f[3 * t + 1] + f[3 * s + 2] * f[3 * t + 2]); }
   /** Kürzester Kantenweg (Dijkstra), optional mit Bevorzugung markierter Kanten. */
   path(a: number, b: number, cost?: (u: number, v: number) => number): number[] {
     if (a === b) return [a];
@@ -63,13 +63,13 @@ export function faceCurvature(g: EdgeGraph, cosSharp: number, rings: number): Fl
   let N = Float32Array.from(g.fn);
   for (let r = 0; r < Math.max(2, rings + 1); r++) {
     const M = new Float32Array(3 * nt);
-    for (let t = 0; t < nt; t++) { let x = N[3 * t], y = N[3 * t + 1], z = N[3 * t + 2]; for (const u of nbr[t]) { x += N[3 * u]; y += N[3 * u + 1]; z += N[3 * u + 2]; } const l = Math.hypot(x, y, z) || 1; M[3 * t] = x / l; M[3 * t + 1] = y / l; M[3 * t + 2] = z / l; }
+    for (let t = 0; t < nt; t++) { let x = N[3 * t], y = N[3 * t + 1], z = N[3 * t + 2]; for (const u of nbr[t]) { const sg = N[3 * t] * N[3 * u] + N[3 * t + 1] * N[3 * u + 1] + N[3 * t + 2] * N[3 * u + 2] < 0 ? -1 : 1; x += sg * N[3 * u]; y += sg * N[3 * u + 1]; z += sg * N[3 * u + 2]; } const l = Math.hypot(x, y, z) || 1; M[3 * t] = x / l; M[3 * t + 1] = y / l; M[3 * t + 2] = z / l; }
     N = M;
   }
   const acc = new Float32Array(nt), cnt = new Float32Array(nt);
   for (let s = 0; s < nt; s++) for (const t of nbr[s]) {
     if (t < s) continue;
-    const c = N[3 * s] * N[3 * t] + N[3 * s + 1] * N[3 * t + 1] + N[3 * s + 2] * N[3 * t + 2];
+    const c = Math.abs(N[3 * s] * N[3 * t] + N[3 * s + 1] * N[3 * t + 1] + N[3 * s + 2] * N[3 * t + 2]);
     const d = Math.hypot(C[3 * s] - C[3 * t], C[3 * s + 1] - C[3 * t + 1], C[3 * s + 2] - C[3 * t + 2]) || 1e-9;
     const k = Math.acos(Math.min(1, c)) / d; acc[s] += k; acc[t] += k; cnt[s]++; cnt[t]++;
   }

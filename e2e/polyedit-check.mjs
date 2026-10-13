@@ -47,11 +47,14 @@ try {
   await page.waitForFunction(() => window.__app.pe.dev && document.querySelector('#dev-legend'), null, { timeout: 60000 });
   const st = await S(() => window.__app.pe.devStats); console.log('Farbvergleich max', st);
   if (Math.max(st.maxPos, -st.maxNeg) > 0.0501) fail('Abweichung > Toleranz');
-  // Radierer: Klick/Tap in Bildmitte
+  // Radierer: Unebenheit in Bildmitte mit dem Pinsel markieren, dann „Entfernen & füllen“
   await click('[data-pe="erase"]');
   const box = await S(() => { const r = window.__app.viewer.renderer.domElement.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-  const before = await tris(); await sleep(700); // Dialog-Schublade schließt animiert
-  if (MODE === 'desktop') await page.mouse.click(box[0], box[1]); else await page.touchscreen.tap(box[0], box[1]);
+  const before = await tris(); await sleep(700);
+  await S(async ([x, y, touch]) => { const c = window.__app.viewer.renderer.domElement; const ev = (t, X, Y, tgt = c) => tgt.dispatchEvent(new PointerEvent(t, { clientX: X, clientY: Y, pointerType: touch ? 'touch' : 'mouse', button: 0, isPrimary: true, bubbles: true, pointerId: 9 }));
+    ev('pointerdown', x, y); for (let i = 1; i <= 8; i++) { ev('pointermove', x + i * 3, y); await new Promise((r) => setTimeout(r, 80)); } ev('pointerup', x + 24, y, window); }, [box[0], box[1], MODE !== 'desktop']);
+  await page.waitForFunction(() => /Ausgewählt/.test(document.querySelector('#pe-live')?.textContent || ''), null, { timeout: 20000 }).catch(() => fail('Radierer-Pinsel markiert nichts'));
+  await click('#mode-bar [data-a="pe-go"]');
   await page.waitForFunction(() => /Loch geschlossen|nicht gefüllt|Nichts/.test(document.querySelector('#pe-live').textContent), null, { timeout: 60000 }).catch(() => fail('Radierer ohne Wirkung'));
   console.log('Radierer:', await S(() => document.querySelector('#pe-live').textContent));
   await page.waitForFunction(() => window.__app.pe.dev && document.querySelector('#busy').classList.contains('hidden'), null, { timeout: 60000 });
@@ -64,7 +67,24 @@ try {
   await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 30000 }).catch(() => fail('Extraktion nach Bearbeitung'));
   console.log('Extraktion am reduzierten Netz:', await S(() => { const p = window.__app.state.preview; return p && `${p.fit.type} n=${p.indices.length} rms=${p.fit.rms.toFixed(4)}`; }));
   await click('.tab[data-tab="poly"]'); await click('#btn-pe-reset');
-  await page.waitForFunction((t0) => window.__app.state.data.triCount === t0, t0, { timeout: 30000 }).catch(() => fail('Original wiederherstellen'));
+  await page.waitForFunction((t0) => window.__app.state.data.triCount === t0, t0, { timeout: 30000 });
+  // Kurvennetz: erkennen, Layout, Kurve zeichnen, Persistenz
+  await click('#btn-curve-detect');
+  await page.waitForFunction(() => window.__app.state.curves.length > 0 && window.__app.state.layout, null, { timeout: 60000 }).catch(() => fail('Kurvenerkennung'));
+  const cinfo = await S(() => { const s = window.__app.state; return { n: s.curves.length, kanten: s.curves.filter((c) => c.kind === 'Kante').length, tangenten: s.curves.filter((c) => c.kind === 'Tangente').length, patches: s.layout.regions.length, vier: s.layout.foursided, t: s.layout.tJunctions }; });
+  console.log('Kurvennetz:', JSON.stringify(cinfo));
+  await click('#btn-curve-layout'); await sleep(400);
+  if (SHOT) { await page.screenshot({ path: SHOT.replace('.png', '-kurvennetz.png') }); console.log('Screenshot', SHOT.replace('.png', '-kurvennetz.png')); }
+  await click('#btn-curve-draw'); await sleep(700);
+  const pts = await S(() => { const { viewer } = window.__app; const r = viewer.renderer.domElement.getBoundingClientRect(); return [[r.left + r.width * 0.42, r.top + r.height * 0.5], [r.left + r.width * 0.58, r.top + r.height * 0.55]]; });
+  for (const [x, y] of pts) { if (MODE === 'desktop') await page.mouse.click(x, y); else await page.touchscreen.tap(x, y); await sleep(300); }
+  const nd = await S(() => document.querySelector('#mode-bar').textContent);
+  await click('#mode-bar [data-a="ok"]');
+  await page.waitForFunction(() => window.__app.state.curves.some((c) => c.kind === 'Benutzer'), null, { timeout: 30000 }).catch(() => fail('Benutzerkurve: ' + nd));
+  const nBefore = await S(() => window.__app.state.curves.length);
+  await S(() => window.__app.roundtrip());
+  const nAfter = await S(() => [window.__app.state.curves.length, document.querySelectorAll('.curve-node').length]);
+  console.log('Persistenz Kurven:', nBefore, '->', nAfter); if (nAfter[0] !== nBefore || nAfter[1] !== nBefore) fail('Kurven nicht gespeichert/geladen');
   const vis = await S(() => { const r = window.__app.viewer.renderer.domElement.getBoundingClientRect(); return [r.width, r.height]; });
   console.log('3D-Ansicht', vis); if (vis[0] < 100 || vis[1] < 100) fail('3D-Ansicht nicht sichtbar');
 } catch (e) { fail(String(e)); }
