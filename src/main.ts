@@ -61,7 +61,7 @@ type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase';
 const PE_NAME: Record<PeTool, string> = { reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
 const pe = {
   tool: null as PeTool | null,
-  tol: 0.02, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
+  tol: 0.02, normalDeg: 10, featureDeg: 30, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
   cmp: false, scale: 0, dev: null as Float32Array | null, devStats: null as null | { maxPos: number; maxNeg: number },
   undo: [] as { positions: Float32Array; indices: Uint32Array; label: string }[], edits: [] as string[],
   live: '', running: false, origTris: 0,
@@ -213,13 +213,18 @@ let painting = false;
 canvas.addEventListener('pointerdown', (e) => {
   document.body.classList.remove('show-tree', 'show-dialog');
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (pe.tool === 'erase' && e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
+    const h = viewer.pick(e.clientX, e.clientY);
+    if (h) { painting = true; pePaintErase = e.shiftKey; viewer.controls.enabled = false; peStroke.push([]); pePaint(h); }
+    return;
+  }
   if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel' && e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
     const h = viewer.pick(e.clientX, e.clientY);
     if (h) { painting = true; strokeErase = brushErase || e.shiftKey; brushUndo.push([]); viewer.controls.enabled = false; brushAt(h); }
   }
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (pe.tool === 'erase') { viewer.showCursor(viewer.pick(e.clientX, e.clientY), pe.radius); return; }
+  if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); viewer.showCursor(h, pe.radius); if (painting && h) pePaint(h); return; }
   if (state.mode?.kind !== 'fit' || state.mode.method !== 'Pinsel') return;
   const h = viewer.pick(e.clientX, e.clientY);
   viewer.showCursor(h, state.opts.brush);
@@ -233,8 +238,7 @@ window.addEventListener('pointerup', async (e) => {
   if (moved > 8 || dt > 700) return;
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) return;
-  if (pe.tool === 'erase') await peErase(h);
-  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
   else { const f = featureAtHit(h); if (f) selectFeature(f.id); }
 });
@@ -298,9 +302,10 @@ function renderModeBar() {
   if (state.data && pe.tool === 'erase') {
     modeBar.className = 'brush';
     modeBar.innerHTML = `<span class="mb-tool erase">✧ Magischer Radierer</span><label>r <input id="mb-rad" type="number" min="0.1" step="0.1" value="${pe.radius}" style="width:58px" inputmode="decimal"> mm</label>
-      <button data-a="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶</button><button data-a="pe-cmp" class="${pe.cmp ? 'on' : ''}">◐ Vergleich</button><button data-a="pe-exit">✕ Beenden</button>`;
+      <b>${peCount}</b> Pkt <button data-a="pe-go" class="primary" ${peCount ? '' : 'disabled'}>✔ Entfernen &amp; füllen</button><button data-a="pe-sundo" ${peStroke.length ? '' : 'disabled'} title="Pinselstrich zurück">↶ Strich</button><button data-a="pe-clear" ${peCount ? '' : 'disabled'}>Auswahl löschen</button>
+      <button data-a="pe-undo" ${pe.undo.length ? '' : 'disabled'} title="Bearbeitung rückgängig">↶ Netz</button><button data-a="pe-cmp" class="${pe.cmp ? 'on' : ''}">◐ Vergleich</button><button data-a="pe-exit">✕ Beenden</button>`;
     modeBar.querySelector<HTMLInputElement>('#mb-rad')!.oninput = (e) => { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); if (v > 0) { pe.radius = v; const n = document.querySelector<HTMLInputElement>('#pe-rad-n'), r = document.querySelector<HTMLInputElement>('#pe-rad-r'); if (n) n.value = String(v); if (r) r.value = String(v); } };
-    modeBar.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a; if (a === 'pe-undo') peUndo(); else if (a === 'pe-cmp') peToggleCompare(); else peExit(); }));
+    modeBar.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a; if (a === 'pe-go') peErase(); else if (a === 'pe-sundo') peUndoStroke(); else if (a === 'pe-clear') { peClearSel(); renderScene(); renderModeBar(); } else if (a === 'pe-undo') peUndo(); else if (a === 'pe-cmp') peToggleCompare(); else peExit(); }));
     return;
   }
   const m = state.mode;
@@ -1036,6 +1041,7 @@ function renderScene() {
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
   const peOn = paintPolyCompare();
+  if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) { const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i)); viewer.paint(Uint32Array.from(ids), [0.62, 0.2, 0.95]); }
   if (state.colorPts && !peOn) for (const f of state.features) {
     if (f.type === 'Abstand' || !vis(f)) continue;
     const c = rgb(f.color), s = state.sel.includes(f.id);
@@ -1418,7 +1424,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.oncl
 $('#btn-pe-cmp').onclick = () => peToggleCompare();
 $('#btn-pe-undo').onclick = () => peUndo();
 $('#btn-pe-reset').onclick = () => peResetOriginal();
-function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
+function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; peClearSel(); viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
 
 function renderPolyRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => b.classList.toggle('on', pe.tool === b.dataset.pe));
@@ -1443,8 +1449,11 @@ function renderPolyDialog(d: HTMLElement) {
   const t = pe.tool!, tris = state.data?.triCount ?? 0;
   const run = pe.running ? `<button class="btn" id="pe-cancel">✕ Abbrechen</button>` : `<button class="btn primary" id="pe-run">▶ Anwenden</button>`;
   let body = '';
-  if (t === 'reduce') body = `<p class="note">Entfernt Dreiecke, solange jeder Originalpunkt höchstens um die Toleranz vom reduzierten Netz abweicht – wie die Sehnenhöhe beim Polygonisieren eines Kreises. Ebene Bereiche werden stark, Radien und Kanten kaum reduziert.</p>
-    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}<div class="row">${run}</div>`;
+  if (t === 'reduce') body = `<p class="note">Quadrik-Kantenkollaps, krümmungsadaptiv: entfernt Dreiecke, solange das reduzierte Netz beidseitig höchstens um die Toleranz vom Original abweicht und die Normalen kaum kippen – wie die Sehnenhöhe beim Polygonisieren eines Kreises. Ebene Bereiche werden stark, Radien und Kanten kaum reduziert.</p>
+    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
+    <div class="row"><label title="Krümmungsadaptiv: neue Dreiecke dürfen höchstens so stark von den Originalnormalen abweichen">Max. Normalenabw.</label><input type="number" id="pe-nd" value="${pe.normalDeg}" min="1" max="45" step="1"><span class="unit">°</span></div>
+    <div class="row"><label title="Kanten mit größerem Flächenwinkel bleiben als Kante erhalten (Ecken fest)">Kantenwinkel</label><input type="number" id="pe-fd" value="${pe.featureDeg}" min="5" max="90" step="1"><span class="unit">°</span></div>
+    <div class="row">${run}</div>`;
   else if (t === 'subdiv') body = `<p class="note">Teilt jedes Dreieck in vier (Loop). Neue Punkte werden geglättet, aber höchstens um die Toleranz von der ursprünglichen Fläche verschoben.</p>
     ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
     <div class="row"><label>Stufen</label><select id="pe-lv">${[1, 2].map((x) => `<option ${x === pe.levels ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
@@ -1453,7 +1462,9 @@ function renderPolyDialog(d: HTMLElement) {
     <div class="row"><label>Stärke λ</label><input type="number" id="pe-lam" value="${pe.lambda}" min="0.05" max="0.9" step="0.05"></div>
     <div class="row"><label>Iterationen</label><input type="number" id="pe-it" value="${pe.iters}" min="1" max="100" step="1"></div>
     ${tolRow('pe-stol', 'Max. Verschiebung', pe.smoothTol)}<div class="row">${run}</div>`;
-  else body = `<p class="note">In das Netz tippen/klicken: alle Dreiecke im Pinselradius werden ausgestanzt, das Loch wird sofort wieder geschlossen und an die umgebende Krümmung angeglichen (biharmonisch). Entfernt z. B. Markierungen, Spikes oder Löcher-Artefakte.</p>
+  else body = `<p class="note">Unebenheit (Streuung, Schweißspritzer, Beule) mit dem Pinsel markieren (Shift = radieren), dann <b>Entfernen &amp; füllen</b>. Aus dem umgebenden Ring wird die saubere Fläche gefittet (Ebene, Zylinder, Kugel; zwei Flächen mit scharfer Kante oder Verrundungsübergang; sonst Quadrik), das Loch mit gleicher Dreiecksdichte trianguliert und auf diese Fläche gelegt.</p>
+    <div class="row"><b>${peCount}</b>&nbsp;Punkte markiert</div>
+    <div class="row"><button class="btn primary" id="pe-go" ${peCount ? '' : 'disabled'}>✔ Entfernen &amp; füllen</button><button class="btn" id="pe-clear" ${peCount ? '' : 'disabled'}>Auswahl löschen</button></div>
     <div class="row"><label>Pinselradius</label><input type="number" id="pe-rad-n" value="${pe.radius}" min="0.1" step="0.1" inputmode="decimal"><span class="unit">mm</span></div>
     <div class="row pe-tol"><input type="range" id="pe-rad-r" min="0.2" max="${Math.max(1, +((state.data?.diag ?? 100) / 8).toFixed(1))}" step="0.1" value="${pe.radius}" aria-label="Pinselradius"></div>`;
   d.innerHTML = `<h3>${PE_NAME[t]}</h3>${body}
@@ -1478,6 +1489,10 @@ function renderPolyDialog(d: HTMLElement) {
   }
   d.querySelector<HTMLSelectElement>('#pe-lv')?.addEventListener('change', (e) => { pe.levels = +(e.target as HTMLSelectElement).value; renderDialog(); });
   d.querySelector<HTMLInputElement>('#pe-scale')?.addEventListener('change', (e) => { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); pe.scale = isFinite(v) && v > 0 ? v : 0; renderScene(); });
+  d.querySelector<HTMLInputElement>('#pe-nd')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v > 0) pe.normalDeg = v; });
+  d.querySelector<HTMLInputElement>('#pe-fd')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v > 0) pe.featureDeg = v; });
+  d.querySelector('#pe-go')?.addEventListener('click', () => peErase());
+  d.querySelector('#pe-clear')?.addEventListener('click', () => { peClearSel(); renderAll(); });
   d.querySelector('#pe-run')?.addEventListener('click', () => peRun());
   d.querySelector('#pe-cancel')?.addEventListener('click', () => { polyEngine.cancel(); });
   d.querySelector('#pe-cmp')?.addEventListener('click', () => peToggleCompare());
@@ -1490,7 +1505,7 @@ function setLive(html: string) { pe.live = html; const e = document.getElementBy
 async function peRun() {
   if (!state.data || pe.running) return;
   const t = pe.tool!, before = state.data.triCount, t0 = performance.now();
-  const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels }
+  const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol, normalDeg: pe.normalDeg, featureDeg: pe.featureDeg } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels }
     : { op: 'smooth', iterations: pe.iters, lambda: pe.lambda, tol: pe.smoothTol };
   req.mesh = curMesh();
   pe.running = true; setLive(`Läuft … <b>${before.toLocaleString('de-DE')}</b> Dreiecke`); renderDialog(); status(`${PE_NAME[t]} läuft …`);
@@ -1511,18 +1526,43 @@ async function peRun() {
   renderDialog();
 }
 
-async function peErase(h: Hit) {
-  if (pe.running || !state.data) return;
-  const cam = viewer.camera.position, f = [cam.x - h.point[0], cam.y - h.point[1], cam.z - h.point[2]], l = Math.hypot(f[0], f[1], f[2]) || 1;
-  pe.running = true; setLive('Stanze und schließe Loch …');
+/** Radierer-Auswahl: Pinsel (Radius, Blickseite) wie bei der Merkmalsauswahl; Shift = Auswahl radieren. */
+let peMask: Uint8Array | null = null, peCount = 0, pePaintBusy = false, pePaintErase = false;
+const peStroke: number[][] = [];
+async function pePaint(h: Hit) {
+  if (pePaintBusy || !state.data) return;
+  if (!peMask || peMask.length !== state.data.vertexCount) { peMask = new Uint8Array(state.data.vertexCount); peCount = 0; }
+  pePaintBusy = true;
   try {
-    const r = await busy(polyEngine.run<any>({ op: 'erase', mesh: curMesh(), center: h.point, radius: pe.radius, tri: h.tri, facing: f.map((x) => x / l) }));
+    const cam = viewer.camera.position, f = [cam.x - h.point[0], cam.y - h.point[1], cam.z - h.point[2]], l = Math.hypot(f[0], f[1], f[2]) || 1;
+    const r = await engine.call<any>({ op: 'brush', center: h.point, radius: pe.radius, facing: [f[0] / l, f[1] / l, f[2] / l] });
+    const st = peStroke[peStroke.length - 1] ?? [];
+    for (const v of r.indices as Uint32Array) {
+      if (!pePaintErase && !peMask[v]) { peMask[v] = 1; peCount++; st.push(v + 1); }
+      else if (pePaintErase && peMask[v]) { peMask[v] = 0; peCount--; st.push(-(v + 1)); }
+    }
+    renderScene(); renderModeBar(); setLive(`Ausgewählt: <b>${peCount}</b> Punkte – „Entfernen &amp; füllen“`);
+  } finally { pePaintBusy = false; }
+}
+function peClearSel() { peMask = null; peCount = 0; peStroke.length = 0; }
+function peUndoStroke() {
+  const st = peStroke.pop(); if (!st || !peMask) return;
+  for (let i = st.length - 1; i >= 0; i--) { const v = Math.abs(st[i]) - 1, was = st[i] > 0 ? 0 : 1; if (peMask[v] !== was) { peMask[v] = was; peCount += was ? 1 : -1; } }
+  renderScene(); renderModeBar();
+}
+async function peErase() {
+  if (pe.running || !state.data || !peMask || !peCount) { toast('Zuerst die Unebenheit mit dem Pinsel markieren.'); return; }
+  const sel = new Uint32Array(peCount); let k = 0; peMask.forEach((v, i) => { if (v) sel[k++] = i; });
+  pe.running = true; setLive('Entferne Auswahl, fitte Umgebung, fülle Loch …');
+  try {
+    const r = await busy(polyEngine.run<any>({ op: 'erase', mesh: curMesh(), sel }));
     pe.running = false;
-    if (!r.loops) { setLive(r.skipped ? 'Bereich berührt einen offenen Rand – nicht gefüllt.' : 'Nichts entfernt.'); return; }
-    await applyEditedMesh(r.positions, r.indices, `Radierer r=${pe.radius} mm`);
-    setLive(`Loch geschlossen: ${r.removed} Dreiecke entfernt, ${r.added} Punkte neu${r.skipped ? ` · ${r.skipped} offene Ränder übersprungen` : ''}`);
+    if (!r.loops) { setLive(r.skipped ? 'Auswahl berührt einen offenen Rand – nicht gefüllt.' : 'Nichts entfernt.'); return; }
+    peClearSel();
+    await applyEditedMesh(r.positions, r.indices, `Radierer (${r.surfaces.join(', ')})`);
+    setLive(`Loch geschlossen: ${r.removed} Dreiecke entfernt, ${r.added} Punkte neu · Ersatzfläche: <b>${r.surfaces.join(', ')}</b>${r.skipped ? ` · ${r.skipped} offene Ränder übersprungen` : ''}`);
   } catch (e: any) { pe.running = false; setLive('Fehler: ' + e.message); }
-  renderDialog();
+  renderDialog(); renderModeBar();
 }
 
 /** Neues Netz übernehmen: Rückgängig-Stapel, Worker-Netz + Merkmalspunkte umrechnen, Anzeige ohne Kamerasprung, ggf. Farbvergleich neu. */
