@@ -167,9 +167,26 @@ for (const t of TYPES) {
   b.innerHTML = `<span class="ico">${ICON[t]}</span>${t === 'Freiformfläche' ? tr('Freeform') : typeName(t)}`;
   if (t === 'Freiformfläche') b.title = tr('Freeform surface (B-spline/NURBS) – click or brush');
   b.onclick = () => startFitMode(t);
-  typeBtns.appendChild(b);
+  if (t !== 'auto' && t !== 'Freiformfläche') {
+    // split button: main part = From polygon model, ▾ = method menu (Construction, Anchor, CAD later)
+    const w = document.createElement('span'); w.className = 'split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾';
+    dd.title = tr('Choose the creation method'); dd.onclick = (e) => { e.stopPropagation(); splitMenu(dd, t as GeomType); };
+    w.append(b, dd); typeBtns.appendChild(w);
+  } else typeBtns.appendChild(b);
 }
-typeBtns.appendChild($('#btn-distance'));
+{ const w = document.createElement('span'); w.className = 'split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾'; dd.title = tt('Choose the creation method');
+  dd.onclick = (e) => { e.stopPropagation(); splitMenu(dd, 'Abstand'); }; w.append($('#btn-distance'), dd); typeBtns.appendChild(w); }
+function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand') {
+  const items: [string, (() => void) | null][] = [
+    [t === 'Abstand' ? tt('Between features') : tt('From polygon model'), () => (t === 'Abstand' ? startDistanceMode() : startFitMode(t))],
+    [`🔗 ${tt('Construction')}`, t !== 'Abstand' && constructionsFor(t).length ? () => startConstruct(t) : null],
+    [`📍 ${tt('Anchor')}${ANCHOR_N[t] ? ` (${ANCHOR_N[t]} ${tt('pts')})` : ''}`, ANCHOR_N[t] ? () => startAnchor(t) : null],
+    [tt('From CAD reference (later)'), null]];
+  ctxMenu.className = 'ctx-menu';
+  ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
+  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
+  const r = anchorEl.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px';
+}
 $('#btn-distance').onclick = () => startDistanceMode();
 $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
 document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftype]').forEach((b) => (b.onclick = () => startFitMode(b.dataset.ftype as GeomType)));
