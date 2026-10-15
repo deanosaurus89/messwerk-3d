@@ -28,3 +28,15 @@ export function parentsOf(f: Feature): number[] {
   if (p.kind === 'mesh' && p.aux?.refId != null) return [p.aux.refId];
   return [];
 }
+/** Hard parents: the feature's geometry is computed from them (construction, distance). An auxiliary-plane
+ *  reference is soft – the mesh feature keeps its points if that plane goes away. */
+export function hardParentsOf(f: Feature): number[] {
+  const p = provenanceOf(f);
+  return p.kind === 'construction' || p.kind === 'distance' ? [...p.parents] : [];
+}
+/** All features that (transitively) depend hard on `ids` – what a cascade delete removes in addition. */
+export function dependentsOf(fs: Feature[], ids: Iterable<number>): Set<number> {
+  const s = new Set(ids); let grew = true;
+  while (grew) { grew = false; for (const f of fs) if (!s.has(f.id) && hardParentsOf(f).some((r) => s.has(r))) { s.add(f.id); grew = true; } }
+  return s;
+}

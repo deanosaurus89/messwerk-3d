@@ -3,7 +3,7 @@
 import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
 import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
 import { docsHtml } from './docs';
-import { provenanceOf } from './core/provenance';
+import { provenanceOf, hardParentsOf, dependentsOf } from './core/provenance';
 import { AxisAnalysis, analyzeAxis } from './core/axisan';
 import { TRIM_TYPES, trimmedSurface } from './core/trim';
 import { REEX_DEFAULT, ReexParams, SearchRegion, buildRegion, reextract } from './core/reextract';
@@ -716,9 +716,9 @@ function updateDistancePreview() {
 function recomputeDistances() {
   // all derived features (distances, constructions) in parent-first order, so chains update completely
   const byId = new Map(state.features.map((f) => [f.id, f]));
-  const order = recomputeOrder(state.features.filter((f) => f.refs?.length).map((f) => ({ id: f.id, refs: f.refs! })));
+  const order = recomputeOrder(state.features.map((f) => ({ id: f.id, refs: hardParentsOf(f) })).filter((x) => x.refs.length));
   for (const id of order) {
-    const f = byId.get(id)!; const ps = f.refs!.map((r) => byId.get(r)?.measured);
+    const f = byId.get(id)!; const ps = hardParentsOf(f).map((r) => byId.get(r)?.measured);
     if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); continue; }
     if (f.type === 'Abstand' && !f.cons) { f.measured = computeDistance(ps[0]!, ps[1]!); continue; }
     if (f.cons) {
@@ -1016,8 +1016,8 @@ function deleteSelected() {
     state.controls = state.controls.filter((c) => c.id !== state.selControl); state.selControl = null;
   } else if (state.sel.length) {
     const s = new Set(state.sel);
-    // abhängige Abstände mitlöschen
-    for (let k = 0; k < 20; k++) for (const f of state.features) if (f.refs?.some((r) => s.has(r))) s.add(f.id);
+    // cascade: everything computed from the deleted features (provenance: constructions, distances, chains)
+    for (const id of dependentsOf(state.features, s)) s.add(id);
     state.features = state.features.filter((f) => !s.has(f.id));
     state.controls = state.controls.filter((c) => !c.featureIds.some((i) => s.has(i)));
     state.sel = [];
