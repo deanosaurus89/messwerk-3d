@@ -1,0 +1,58 @@
+// CAD-Worker: OpenCascade (WASM, ~50 MB, gzip ~14 MB) wird erst beim ersten CAD-Import geladen.
+import * as C from './cad/occcore';
+import type { TrimOp } from './cad/occcore';
+
+export type CadReq =
+  | { op: 'load'; bytes: Uint8Array; name: string }
+  | { op: 'apply'; ops: TrimOp[] }
+  | { op: 'export'; fmt: 'step' | 'iges'; faces: number[] };
+
+let oc: any = null, orig: any[] = [], diag = 100;
+const cache = new Map<number, { key: string; shape: any; area: number }>();
+async function getOC() {
+  if (oc) return oc;
+  const [{ default: mainJS }, { default: wasmUrl }] = await Promise.all([import('opencascade.js/dist/opencascade.full.js' as any), import('opencascade.js/dist/opencascade.full.wasm?url' as any)]);
+  oc = await new mainJS({ locateFile: (p: string) => (p.endsWith('.wasm') ? wasmUrl : p) });
+  return oc;
+}
+const post = (m: any, tr: Transferable[] = []) => (self as any).postMessage(m, tr);
+self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
+  const { id, req } = e.data; const prog = (text: string) => post({ id, progress: { text } });
+  try {
+    let r: any; const tr: Transferable[] = [];
+    if (req.op === 'load') {
+      const t0 = performance.now(); const first = !oc; if (first) prog('OpenCascade wird geladen …');
+      const o = await getOC(); const tInit = performance.now() - t0;
+      prog('Datei wird gelesen …'); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
+      orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
+      prog(`${orig.length} Flächen werden tesselliert …`);
+      const defl = diag / 1500; const fl = orig.map((f, i) => { const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
+      r = { faces: fl, diag, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
+    } else if (req.op === 'apply') {
+      // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat
+      const o = oc; const changed: any[] = []; const errors: (string | null)[] = req.ops.map(() => null);
+      const touched = new Set<number>(); req.ops.forEach((op) => op.faces.forEach((i) => touched.add(i))); for (const i of cache.keys()) touched.add(i);
+      let n = 0;
+      for (const i of touched) {
+        const chain = req.ops.map((op, k) => ({ op, k })).filter((x) => x.op.faces.includes(i)); const key = JSON.stringify(chain.map((x) => x.op));
+        if (cache.get(i)?.key === key) continue;
+        prog(`Fläche ${i + 1} wird beschnitten (${++n}) …`);
+        let sh = orig[i];
+        for (const { op, k } of chain) { try { sh = C.applyOne(o, sh, op, orig); } catch (err: any) { errors[k] = String(err?.message ?? err); } }
+        if (!chain.length) { cache.delete(i); changed.push({ id: i, reset: true }); continue; }
+        const t = C.tessellate(o, sh, diag / 1500); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
+        const a = C.area(o, sh); cache.set(i, { key, shape: sh, area: a });
+        changed.push({ id: i, tess: t, area: a, pieces: C.faces(o, sh).length });
+      }
+      r = { changed, errors };
+    } else {
+      const o = oc; const list = req.faces.map((i) => cache.get(i)?.shape ?? orig[i]);
+      const bytes = C.writeCAD(o, list, req.fmt);
+      // Prüfung: wieder einlesen, Fläche und Gültigkeit vergleichen
+      const back = C.readCAD(o, bytes, req.fmt === 'step' ? 'x.stp' : 'x.igs');
+      const want = list.reduce((s, x) => s + C.area(o, x), 0), got = C.area(o, back);
+      r = { bytes, check: { faces: C.faces(o, back).length, area: got, expected: want, valid: C.isValid(o, back) } }; tr.push(bytes.buffer);
+    }
+    post({ id, result: r }, tr);
+  } catch (err: any) { post({ id, error: String(err?.message ?? err) }); }
+};

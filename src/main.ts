@@ -9,6 +9,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
+import { initCad, cadTree, cadDialog, cadActive } from './cadui';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
 import { datumText } from './core/features';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -109,6 +110,7 @@ async function busy<T>(p: Promise<T>): Promise<T> {
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll<HTMLElement>('.panel').forEach((p) => p.classList.toggle('hidden', p.dataset.tab !== b.dataset.tab));
+  renderDialog();
 }));
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view as any)));
 $('#ico-dist').innerHTML = ICON['Abstand 3D'];
@@ -238,6 +240,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (painting && h) brushAt(h);
 });
 window.addEventListener('pointerup', async (e) => {
+  if ((e as any).cadHandled) { down = null; return; }
   if (painting) { painting = false; viewer.controls.enabled = true; down = null; return; }
   if (cv.drag) { const d0 = down; down = null; const tap = d0 && Math.hypot(e.clientX - d0.x, e.clientY - d0.y) < 8; if (tap) cv.drag.moved = false; await curveDragEnd(); if (!tap) return; await curveClick(e.clientX, e.clientY); return; }
   if (!down || e.target !== canvas) { down = null; return; }
@@ -722,6 +725,7 @@ function renderTree() {
       cn.dataset.cid = String(c.id);
     }
   }
+  cadTree(node, q);
   if (state.reports.length) {
     node(`<span class="tw">▾</span>${ICON.folder}Berichte (${state.reports.length})`, 'indent1');
     for (const r of state.reports) node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
@@ -796,6 +800,7 @@ function renderPreviewCard() {
 
 function renderDialog() {
   const d = $('#dialog'); d.innerHTML = '';
+  if (cadActive() && cadDialog(d)) return;
   if (pe.tool === 'curve') { renderCurveDialog(d); return; }
   if (pe.tool && pe.tool !== 'curveopts') { renderPolyDialog(d); return; }
   if (pe.tool === 'curveopts') { renderCurveOpts(d); return; }
@@ -1875,3 +1880,5 @@ function renderCurveDialog(d: HTMLElement) {
 }
 /** Test-Hilfe: Projekt speichern und sofort wieder öffnen (Persistenz-Prüfung). */
 (window as any).__app.roundtrip = async () => { const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob()); const p = readProject(bin); await applyProject(p.json, p.mesh, p.idx); return bin.length; };
+
+initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data });

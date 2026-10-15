@@ -17,6 +17,7 @@
     <button class="tab" data-tab="merkmale">Merkmale</button>
     <button class="tab" data-tab="pruef">Prüfmerkmale</button>
     <button class="tab" data-tab="poly">Polygonbearbeitung</button>
+    <button class="tab" data-tab="nuetz">Nützliche Funktionen</button>
     <button class="tab" data-tab="ansicht">Ansicht</button>
     <button class="tab" data-tab="hilfe">Hilfe</button>
   </nav>
@@ -73,6 +74,27 @@
         <button class="big" id="btn-curve-undo" title="Kurvenbearbeitung rückgängig (Strg+Z)"><span class="ico">↶</span>Rückgängig</button>
         <button class="big" id="btn-curve-opts" title="Erkennungs- und Aufräumoptionen"><span class="ico">⚙</span>Optionen</button>
       </div><div class="glabel">Kurvennetz (Flächenrückführung)</div></div>
+    </div>
+    <div class="panel hidden" data-tab="nuetz">
+      <div class="group"><div class="btns">
+        <label class="big" title="CAD-Datei (STEP oder IGES) öffnen"><span class="ico">📐</span>CAD öffnen<input type="file" id="cad-file" accept=".stp,.step,.igs,.iges,.STP,.STEP,.IGS,.IGES" hidden /></label>
+        <button class="big" id="btn-cad-all" title="Alle sichtbaren Flächen wählen / Auswahl aufheben"><span class="ico">▣</span>Alle wählen</button>
+        <button class="big" id="btn-cad-hide" title="Gewählte Flächen ausblenden (ohne Auswahl: alle einblenden)"><span class="ico">◌</span>Ausblenden</button>
+      </div><div class="glabel">CAD-Flächen</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-cadtool="offset" title="Rand der Fläche(n) um einen Abstand nach innen versetzen"><span class="ico">⬚</span>Rand-Offset</button>
+        <button class="big" data-cadtool="cut" title="Linie/Polylinie zeichnen, auf Fläche projizieren, Seite entfernen"><span class="ico">✂</span>Schnittlinie</button>
+        <button class="big" data-cadtool="circle" title="Kreisförmiges Loch ausschneiden"><span class="ico">◯</span>Insel Kreis</button>
+        <button class="big" data-cadtool="rect" title="Rechteckiges Loch ausschneiden"><span class="ico">▭</span>Insel Rechteck</button>
+      </div><div class="glabel">Beschneiden</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cad-undo" title="Letzten Beschnitt rückgängig (Strg+Z)"><span class="ico">↶</span>Rückgängig</button>
+        <button class="big" id="btn-cad-reset" title="Alle Beschnitte entfernen (Original)"><span class="ico">⟲</span>Original</button>
+        <button class="big on" id="btn-cad-removed" title="Entfernte Bereiche rot anzeigen"><span class="ico">◐</span>Entferntes zeigen</button>
+      </div><div class="glabel">Nicht-destruktiv</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-cadtool="export" title="Beschnittene Flächen als STEP (AP214) oder IGES (144) speichern"><span class="ico">⤒</span>Exportieren</button>
+      </div><div class="glabel">Export</div></div>
     </div>
     <div class="panel hidden" data-tab="hilfe">
       <div class="group"><div class="btns">
