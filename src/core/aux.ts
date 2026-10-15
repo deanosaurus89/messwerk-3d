@@ -2,7 +2,7 @@
 // Vorgehen wie in gängiger Messsoftware: Ebene aus der angrenzenden Planfläche, Wandpunkte (z. B. Bohrungswand)
 // senkrecht in diese Ebene projizieren, Kreis bzw. Stadion-Kontur in der Ebene fitten; Mittelpunkt liegt in der Ebene,
 // Orientierung = Ebenennormale.
-import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitPlane, fitSlot, fitType } from './fit';
+import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitLine, fitPlane, fitSlot, fitType } from './fit';
 import { Vec3, dot, scale, sub } from './linalg';
 import { MeshData } from './mesh';
 import { GrowOptions, MeshTopology, gather } from './region';
@@ -180,4 +180,59 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
     } catch { /* keine Hilfsebene */ }
   }
   return { ...base, aux: undefined as undefined | { plane: FitResult; indices: Uint32Array } };
+}
+
+export interface LineResult {
+  fit: FitResult; plane: FitResult;
+  wallIdx: Uint32Array; planeIdx: Uint32Array;
+  /** beide angrenzenden Flächen (0 = angeklickte, 1 = Nachbar) für die Vorschau/Auswahl der Hilfsebene */
+  faces: [Uint32Array, Uint32Array];
+}
+
+/** Linie mit Hilfsebene an einer Kante: angeklickte Fläche + nächstgelegene Nachbarfläche. auxSide wählt, welche der beiden
+ *  die Hilfsebene ist; die Punkte der anderen Fläche werden in die Hilfsebene projiziert und eine Gerade gefittet. */
+export function extractLine(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
+  auxSide: 0 | 1, givenPlane?: FitResult): LineResult {
+  H = topo.localEdge(seedTri) * 0.4;
+  const visited = new Uint8Array(mesh.indices.length / 3);
+  const mk = (tris: Uint32Array): Region => {
+    for (const t of tris) visited[t] = 1;
+    const v = topo.regionVertices(tris); const verts = v.interior.length >= 20 ? v.interior : v.all;
+    const g = gather(mesh, verts, 20000); return { tris, verts, p: g.p, n: g.n };
+  };
+  const P = mesh.positions, F = mesh.indices;
+  const triDist = (t: number) => { let d = Infinity; for (let k = 0; k < 3; k++) { const v = F[3 * t + k];
+    d = Math.min(d, Math.hypot(P[3 * v] - seedPoint[0], P[3 * v + 1] - seedPoint[1], P[3 * v + 2] - seedPoint[2])); } return d; };
+  const r1 = mk(topo.growRegion(seedTri, seedPoint, { ...o, radius: 0 }));
+  if (r1.verts.length < 3) throw new Error('Too few points on the clicked face');
+  const n1 = isPlanar(r1).normal;
+  // Nachbarfläche: über die Regionsgrenze, nach Abstand zum Klickpunkt; Normale deutlich verschieden (echte Kante)
+  const cand = new Map<number, number>();
+  for (const t of r1.tris) for (const u of topo.neighbors(t)) if (!visited[u] && !cand.has(u)) cand.set(u, triDist(u));
+  let r2: Region | undefined; let tried = 0;
+  for (const [u] of [...cand.entries()].sort((a, b) => a[1] - b[1])) {
+    if (visited[u] || topo.sliver[u]) continue;
+    let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.3 });
+    if (!gt.length) gt = topo.growFit(u, seedPoint, { ...o, radius: 0 });
+    if (!gt.length) { visited[u] = 1; if (++tried > 300) break; continue; }
+    const g = mk(gt);
+    if (g.verts.length >= 8 && Math.abs(dot(isPlanar(g).normal, n1)) < 0.985) { r2 = g; break; }
+    if (++tried > 300) break;
+  }
+  if (!r2 && !givenPlane) throw new Error('No adjacent face found – click closer to an edge');
+  const [auxR, wallR] = givenPlane ? [undefined, r1] : auxSide === 0 ? [r1, r2!] : [r2!, r1];
+  let plane = givenPlane ?? fitType('Ebene', auxR!.p, auxR!.n);
+  if (auxR) { const pn = isPlanar(auxR).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
+  // robuster Geradenfit in der Ebene
+  let pts = wallR.p, fit = fitLine(pts, plane);
+  for (let it = 0; it < 3; it++) {
+    const res = fit.residuals!, abs = Array.from(res, Math.abs).sort((a, b) => a - b);
+    const thr = Math.max(3 * 1.4826 * abs[abs.length >> 1], 1e-9);
+    const keep = pts.filter((_, i) => Math.abs(res[i]) <= thr);
+    if (keep.length === pts.length || keep.length < 10) break;
+    pts = keep; fit = fitLine(pts, plane);
+  }
+  fit.outliers = wallR.p.length - pts.length; fit.n = wallR.verts.length;
+  delete fit.residuals; delete plane.residuals;
+  return { fit, plane, wallIdx: wallR.verts, planeIdx: auxR ? auxR.verts : new Uint32Array(0), faces: [r1.verts, r2 ? r2.verts : new Uint32Array(0)] };
 }

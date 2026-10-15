@@ -96,7 +96,7 @@ describe('Abstand', () => {
 describe('Katalog', () => {
   it('Formtoleranz je Typ und Winkel', async () => {
     const F = await import('../src/core/features');
-    expect(F.controlCatalog('Kreis')[0].items[0].label).toBe('Rundheit');
+    expect(F.controlCatalog('Kreis')[0].items[0].label).toBe('Roundness');
     expect(F.controlCatalog('Ebene')[0].items[0].symbol).toBe('⏥');
     expect(F.availableControls('Abstand')).toEqual(['Abstand 3D', 'Abstand X', 'Abstand Y', 'Abstand Z']);
     const f = { id: 1, name: 'E', type: 'Ebene' as const, pointCount: 0, method: 'Klick' as const,
@@ -116,14 +116,14 @@ describe('Bericht', () => {
     const c = [{ id: 1, kind: 'Durchmesser' as const, featureIds: [1], nominal: 10, tolUp: 0.01, tolLo: -0.01 },
       { id: 2, kind: 'Form' as const, featureIds: [1], nominal: 0, tolUp: 0.05, tolLo: 0 }];
     const r = R.buildReport(1, [f], c, 'teil.stl');
-    expect(r.name).toBe('Tabelle 1'); expect(r.nio).toBe(1); expect(r.io).toBe(1);
-    expect(r.controls[1].control).toBe('Rundheit');
+    expect(r.name).toBe('Table 1'); expect(r.nio).toBe(1); expect(r.io).toBe(1);
+    expect(r.controls[1].control).toBe('Roundness');
     m.diameter = 99; // Momentaufnahme bleibt unverändert
     expect(r.controls[0].measured).toBeCloseTo(10.02, 6);
     const csv = R.reportCSV(r);
-    expect(csv).toContain('Kreis 1;Durchmesser;10,0000;10,0200;0,0200;0,0100;-0,0100;NIO');
-    expect(csv).toContain('Hilfsebene (automatisch');
-    expect(R.reportHTML(r)).toContain('<span class="st NIO">NIO</span>');
+    expect(csv).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;NOK');
+    expect(csv).toContain('Aux. plane (automatisch');
+    expect(R.reportHTML(r)).toContain('<span class="st NIO">NOK</span>');
     void F;
   });
 });

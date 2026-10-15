@@ -45,13 +45,13 @@ export interface Control {
 export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; }
 
 export const FORM_NAME: Record<GeomType, string> = {
-  Ebene: 'Ebenheit', Kreis: 'Rundheit', Zylinder: 'Zylindrizität', Langloch: 'Profil',
-  Kegel: 'Kegelform', Kugel: 'Kugelform', Torus: 'Torusform', Punkt: 'Form', Freiformfläche: 'Flächenprofil', Abstand: 'Form',
+  Ebene: 'Flatness', Kreis: 'Roundness', Zylinder: 'Cylindricity', Langloch: 'Profile',
+  Kegel: 'Cone form', Kugel: 'Sphere form', Torus: 'Torus form', Punkt: 'Form', Linie: 'Straightness', Freiformfläche: 'Surface profile', Abstand: 'Form',
 };
 
 /** ISO-1101-Symbol der Formtoleranz je Merkmalstyp. */
 export const FORM_SYMBOL: Record<GeomType, string> = {
-  Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Abstand: '',
+  Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Linie: '⏤', Abstand: '',
  Freiformfläche: '⌓',
 };
 
@@ -65,51 +65,54 @@ export interface CatalogGroup { group: string; items: CatalogItem[]; }
  */
 export function controlCatalog(t: GeomType): CatalogGroup[] {
   const form = (note: string): CatalogGroup => ({ group: 'Form (ISO 1101)', items: [{ kind: 'Form', label: FORM_NAME[t], symbol: FORM_SYMBOL[t], note },
-    { kind: 'Std.-Abw.', label: 'Standardabweichung', symbol: 'σ', note: 'RMS der Abstände zum Ausgleichselement' }] });
-  const pos: CatalogGroup = { group: 'Ort (Koordinaten)', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: k, label: `Position ${k}`, symbol: '⌖' })) };
-  const dir = (what: string): CatalogGroup => ({ group: 'Richtung', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: `Winkel ${k}` as ControlKind, label: `Winkel ${what} zur ${k}-Achse`, symbol: '∠' })) });
-  const dia: CatalogItem[] = [{ kind: 'Durchmesser', label: 'Durchmesser', symbol: '⌀' }, { kind: 'Radius', label: 'Radius', symbol: 'R' }];
-  const D = (kinds: DatumKindCtl[]): CatalogGroup => ({ group: 'Mit Bezug (ISO 1101 / ISO 5459)', items: kinds.map((k) => DATUM_ITEM[k]) });
+    { kind: 'Std.-Abw.', label: 'Standard deviation', symbol: 'σ', note: 'RMS of the distances to the best-fit element' }] });
+  const pos: CatalogGroup = { group: 'Location (coordinates)', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: k, label: `Position ${k}`, symbol: '⌖' })) };
+  const dir = (what: string): CatalogGroup => ({ group: 'Orientation', items: (['X', 'Y', 'Z'] as const).map((k) => ({ kind: `Winkel ${k}` as ControlKind, label: `Angle of ${what} to ${k} axis`, symbol: '∠' })) });
+  const dia: CatalogItem[] = [{ kind: 'Durchmesser', label: 'Diameter', symbol: '⌀' }, { kind: 'Radius', label: 'Radius', symbol: 'R' }];
+  const D = (kinds: DatumKindCtl[]): CatalogGroup => ({ group: 'With datum (ISO 1101 / ISO 5459)', items: kinds.map((k) => DATUM_ITEM[k]) });
   switch (t) {
-    case 'Ebene': return [form('zwei parallele Ebenen'), pos, dir('Normale'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position', 'Symmetrie', 'Profil (Bezug)'])];
-    case 'Kreis': return [form('zwei konzentrische Kreise'), { group: 'Maß', items: dia }, pos, dir('Normale'), D(['Position', 'Konzentrizität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit'])];
-    case 'Zylinder': return [form('zwei koaxiale Zylinder'), { group: 'Maß', items: dia }, pos, dir('Achse'), D(['Position', 'Koaxialität', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Rundlauf', 'Gesamtrundlauf'])];
-    case 'Kugel': return [form('Flächenprofil (zwei Kugelschalen)'), { group: 'Maß', items: dia }, pos, D(['Position', 'Konzentrizität', 'Profil (Bezug)'])];
-    case 'Kegel': return [form('Flächenprofil'), { group: 'Maß', items: [{ kind: 'Kegelwinkel', label: 'Kegelwinkel', symbol: '∢' }, ...dia] }, pos, dir('Achse'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Profil (Bezug)'])];
-    case 'Langloch': return [form('Linienprofil der Kontur'), { group: 'Maß', items: [{ kind: 'Länge', label: 'Länge', symbol: '↔' }, { kind: 'Breite', label: 'Breite', symbol: '↕' }] }, pos, dir('Normale'), D(['Position', 'Symmetrie', 'Parallelität', 'Rechtwinkligkeit'])];
-    case 'Torus': return [form('Flächenprofil (Torusform)'), { group: 'Maß', items: [
-      { kind: 'Durchmesser', label: 'Leitkreis-Ø (2R)', symbol: '⌀', note: 'Durchmesser des Kreises durch die Rohrmitten' }, { kind: 'Radius', label: 'Hauptradius R', symbol: 'R' },
-      { kind: 'Rohrdurchmesser', label: 'Rohr-Ø (2r)', symbol: '⌀', note: 'Ringdurchmesser / Nebendurchmesser' }, { kind: 'Rohrradius', label: 'Rohrradius r', symbol: 'r' }] },
-      pos, dir('Achse'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Profil (Bezug)'])];
+    case 'Ebene': return [form('two parallel planes'), pos, dir('normal'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position', 'Symmetrie', 'Profil (Bezug)'])];
+    case 'Kreis': return [form('two concentric circles'), { group: 'Size', items: dia }, pos, dir('normal'), D(['Position', 'Konzentrizität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit'])];
+    case 'Zylinder': return [form('two coaxial cylinders'), { group: 'Size', items: dia }, pos, dir('axis'), D(['Position', 'Koaxialität', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Rundlauf', 'Gesamtrundlauf'])];
+    case 'Kugel': return [form('surface profile (two spherical shells)'), { group: 'Size', items: dia }, pos, D(['Position', 'Konzentrizität', 'Profil (Bezug)'])];
+    case 'Kegel': return [form('surface profile'), { group: 'Size', items: [{ kind: 'Kegelwinkel', label: 'Cone angle', symbol: '∢' }, ...dia] }, pos, dir('axis'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Profil (Bezug)'])];
+    case 'Langloch': return [form('line profile of the contour'), { group: 'Size', items: [{ kind: 'Länge', label: 'Length', symbol: '↔' }, { kind: 'Breite', label: 'Width', symbol: '↕' }] }, pos, dir('normal'), D(['Position', 'Symmetrie', 'Parallelität', 'Rechtwinkligkeit'])];
+    case 'Torus': return [form('surface profile (torus form)'), { group: 'Size', items: [
+      { kind: 'Durchmesser', label: 'Center circle Ø (2R)', symbol: '⌀', note: 'Diameter of the circle through the tube centers' }, { kind: 'Radius', label: 'Major radius R', symbol: 'R' },
+      { kind: 'Rohrdurchmesser', label: 'Tube Ø (2r)', symbol: '⌀', note: 'Minor diameter' }, { kind: 'Rohrradius', label: 'Tube radius r', symbol: 'r' }] },
+      pos, dir('axis'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Profil (Bezug)'])];
     case 'Punkt': return [pos, D(['Position'])];
-    case 'Freiformfläche': return [form('Flächenprofil ohne Bezug: Abweichung zur rückgeführten B-Spline-Fläche (max − min)')];
-    case 'Abstand': return [{ group: 'Abstand', items: (['3D', 'X', 'Y', 'Z'] as const).map((k) => ({ kind: `Abstand ${k}` as ControlKind, label: `Abstand ${k}`, symbol: '↔' })) }];
+    case 'Linie': return [form('two parallel lines in the auxiliary plane'), { group: 'Size', items: [{ kind: 'Länge', label: 'Length', symbol: '↔' }] }, pos, dir('direction'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position'])];
+    case 'Freiformfläche': return [form('Surface profile without datum: deviation to the fitted B-spline surface (max − min)')];
+    case 'Abstand': return [{ group: 'Distance', items: (['3D', 'X', 'Y', 'Z'] as const).map((k) => ({ kind: `Abstand ${k}` as ControlKind, label: `Distance ${k}`, symbol: '↔' })) }];
   }
 }
 
 export const DATUM_ITEM: Record<DatumKindCtl, CatalogItem> = {
-  Parallelität: { kind: 'Parallelität', label: 'Parallelität', symbol: '∥' },
-  Rechtwinkligkeit: { kind: 'Rechtwinkligkeit', label: 'Rechtwinkligkeit', symbol: '⟂' },
-  Neigung: { kind: 'Neigung', label: 'Neigung (Winkligkeit)', symbol: '∠', note: 'theoretisch genauer Winkel einstellbar' },
-  Position: { kind: 'Position', label: 'Position', symbol: '⌖', note: 'Soll-Lage im Bezugssystem A|B|C; Achsen: zylindrische Zone Ø' },
-  Koaxialität: { kind: 'Koaxialität', label: 'Koaxialität', symbol: '◎' },
-  Konzentrizität: { kind: 'Konzentrizität', label: 'Konzentrizität', symbol: '◎' },
-  Symmetrie: { kind: 'Symmetrie', label: 'Symmetrie', symbol: '⌯' },
-  Rundlauf: { kind: 'Rundlauf', label: 'Rundlauf (radial)', symbol: '↗' },
-  Gesamtrundlauf: { kind: 'Gesamtrundlauf', label: 'Gesamtrundlauf', symbol: '⌰' },
-  'Profil (Bezug)': { kind: 'Profil (Bezug)', label: 'Flächenprofil mit Bezug', symbol: '⌓' },
+  Parallelität: { kind: 'Parallelität', label: 'Parallelism', symbol: '∥' },
+  Rechtwinkligkeit: { kind: 'Rechtwinkligkeit', label: 'Perpendicularity', symbol: '⟂' },
+  Neigung: { kind: 'Neigung', label: 'Angularity', symbol: '∠', note: 'theoretically exact angle adjustable' },
+  Position: { kind: 'Position', label: 'Position', symbol: '⌖', note: 'nominal location in datum system A|B|C; axes: cylindrical zone Ø' },
+  Koaxialität: { kind: 'Koaxialität', label: 'Coaxiality', symbol: '◎' },
+  Konzentrizität: { kind: 'Konzentrizität', label: 'Concentricity', symbol: '◎' },
+  Symmetrie: { kind: 'Symmetrie', label: 'Symmetry', symbol: '⌯' },
+  Rundlauf: { kind: 'Rundlauf', label: 'Circular run-out', symbol: '↗' },
+  Gesamtrundlauf: { kind: 'Gesamtrundlauf', label: 'Total run-out', symbol: '⌰' },
+  'Profil (Bezug)': { kind: 'Profil (Bezug)', label: 'Surface profile with datum', symbol: '⌓' },
 };
 export { DATUM_CONTROLS, isDatumControl, datumKind };
 /** Bezugsbuchstaben eines Prüfmerkmals als Rahmen-Text, z. B. "A|B|C". */
 export const datumText = (c: Control, feats: Map<number, Feature>) => (c.datumIds ?? []).map((id) => feats.get(id)?.datum ?? '?').join('|');
 
+const KIND_EN: Partial<Record<ControlKind, string>> = { Durchmesser: 'Diameter', Länge: 'Length', Breite: 'Width', Kegelwinkel: 'Cone angle', 'Std.-Abw.': 'Std. dev.', Rohrdurchmesser: 'Tube Ø', Rohrradius: 'Tube radius' };
 export function controlLabel(c: Control, f?: Feature): string {
   if (isDatumControl(c.kind)) return DATUM_ITEM[c.kind].label;
-  if (f?.type === 'Torus' && c.kind === 'Durchmesser') return 'Leitkreis-Ø';
+  if (f?.type === 'Torus' && c.kind === 'Durchmesser') return 'Center circle Ø';
   if (c.kind === 'Form' && f) return FORM_NAME[f.type];
   if (c.kind === 'X' || c.kind === 'Y' || c.kind === 'Z') return 'Position ' + c.kind;
-  if (c.kind.startsWith('Winkel ')) return `Winkel zur ${c.kind.slice(7)}-Achse`;
-  return c.kind;
+  if (c.kind.startsWith('Winkel ')) return `Angle to ${c.kind.slice(7)} axis`;
+  if (c.kind.startsWith('Abstand ')) return 'Distance ' + c.kind.slice(8);
+  return KIND_EN[c.kind] ?? c.kind;
 }
 
 /** Welche Prüfmerkmale sind für einen Merkmalstyp verfügbar? */

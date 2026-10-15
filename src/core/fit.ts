@@ -1,7 +1,7 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Freiformfläche' | 'Abstand';
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Linie' | 'Freiformfläche' | 'Abstand';
 export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
@@ -66,6 +66,27 @@ export function fitPlane(p: Vec3[], normalHint?: Vec3): FitResult {
   const res = new Float64Array(p.length);
   p.forEach((q, i) => (res[i] = dot(sub(q, c), n)));
   return { type: 'Ebene', center: c, normal: n, residuals: res, ...stats(res) };
+}
+
+// ---------------------------------------------------------------- Linie
+/** Gerade (Line). Mit Ebene: Punkte in die Ebene projizieren, 2D-Ausgleichsgerade in der Ebene (Geradheit in der Ebene).
+ *  Ohne Ebene: 3D-Ausgleichsgerade (Hauptachse). normal = direction = Linienrichtung, center = Mitte der Ausdehnung. */
+export function fitLine(p: Vec3[], plane?: { center: Vec3; normal: Vec3 }): FitResult {
+  if (p.length < 2) throw new Error('Line: at least 2 points');
+  const P = plane ? p.map((q) => sub(q, scale(plane.normal, dot(sub(q, plane.center), plane.normal)))) : p;
+  const c = centroid(P);
+  const ev = eigSym3(scatter(P, c)).vectors;
+  let d = ev[2];
+  if (plane) { d = unit(sub(d, scale(plane.normal, dot(d, plane.normal)))); }
+  const m = plane ? unit(cross(plane.normal, d)) : ev[1];
+  let lo = Infinity, hi = -Infinity; const res = new Float64Array(P.length);
+  P.forEach((q, i) => { const v = sub(q, c); const t = dot(v, d); lo = Math.min(lo, t); hi = Math.max(hi, t);
+    res[i] = plane ? dot(v, m) : Math.hypot(...(sub(v, scale(d, t)) as [number, number, number])); });
+  const center = add(c, scale(d, (lo + hi) / 2));
+  // Richtung kanonisch (größte Komponente positiv), damit Winkel/Parallelität reproduzierbar sind
+  const big = [0, 1, 2].reduce((a, b) => (Math.abs(d[b]) > Math.abs(d[a]) ? b : a), 0);
+  if (d[big] < 0) d = scale(d, -1);
+  return { type: 'Linie', center, normal: d, direction: d, length: hi - lo, residuals: res, ...stats(res) };
 }
 
 // ---------------------------------------------------------------- Kreis 2D
@@ -357,6 +378,7 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit: boolean
       case 'Kegel': return fitCone(pp, nn);
       case 'Torus': return fitTorus(pp, nn);
       case 'Punkt': return fitPoint(pp, nn);
+      case 'Linie': return fitLine(pp);
       default: throw new Error('Typ nicht fitbar: ' + type);
     }
   };
@@ -381,6 +403,7 @@ export function modelNormal(f: FitResult, p: Vec3): Vec3 {
       const d = sub(p, f.center); const r = unit(sub(d, scale(a, dot(d, a))));
       return unit(sub(p, add(f.center, scale(r, f.radius ?? 0))));
     }
+    case 'Linie': { const d = sub(p, f.center); return unit(sub(d, scale(a, dot(d, a)))); }
     default: return a;
   }
 }
@@ -445,3 +468,29 @@ function extent(p: Vec3[]) {
 }
 
 export { cross };
+
+/** Vorzeichenbehafteter Abstand eines Punkts zum Ausgleichselement (positiv = außerhalb Material/entlang Normale).
+ *  Grundlage der Abweichungs-Farbkarte (Analyse); Linie: Abstand in der Ebene senkrecht zur Linie (Betrag). */
+export function signedDistance(f: FitResult, p: Vec3): number {
+  const a = f.normal, d = sub(p, f.center);
+  switch (f.type) {
+    case 'Ebene': return dot(d, a);
+    case 'Kugel': return norm(d) - (f.radius ?? 0);
+    case 'Zylinder': case 'Kreis': return norm(sub(d, scale(a, dot(d, a)))) - (f.radius ?? 0);
+    case 'Kegel': {
+      if (!f.apex || f.halfAngle == null) return norm(sub(d, scale(a, dot(d, a)))) - (f.radius ?? 0);
+      const q = sub(p, f.apex); const s0 = Math.sign(dot(sub(f.center, f.apex), a)) || 1;
+      const t = dot(q, a) * s0, rr = norm(sub(q, scale(a, dot(q, a))));
+      return rr * Math.cos(f.halfAngle) - t * Math.sin(f.halfAngle);
+    }
+    case 'Torus': { const r = sub(d, scale(a, dot(d, a))); const rn = norm(r) || 1e-12;
+      const c = add(f.center, scale(r, (f.radius ?? 0) / rn)); return norm(sub(p, c)) - (f.minorRadius ?? 0); }
+    case 'Langloch': {
+      const u = unit(f.direction ?? [1, 0, 0]), v = unit(cross(a, u)); const x = dot(d, u), y = dot(d, v);
+      const r = f.width != null ? f.width / 2 : (f.radius ?? 0), h = Math.max(0, (f.length ?? 0) / 2 - r);
+      return Math.hypot(Math.max(Math.abs(x) - h, 0), y) - r;
+    }
+    case 'Linie': return norm(sub(d, scale(a, dot(d, a))));
+    default: return dot(d, a);
+  }
+}

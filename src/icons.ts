@@ -11,6 +11,7 @@ export const ICON: Record<string, string> = {
   Freiformfläche: s('<path d="M3 17c3-9 6-9 9-4s6 5 9-4"/><path d="M3 20c3-9 6-9 9-4s6 5 9-4" opacity=".5"/>'),
   Torus: s('<ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="11.5" rx="4" ry="1.6"/>'),
   Punkt: s('<path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>'),
+  Linie: s('<path d="M3 19L21 5"/><circle cx="7" cy="16" r="1.6" fill="currentColor"/><circle cx="17" cy="8" r="1.6" fill="currentColor"/><path d="M2 22h20" stroke-dasharray="2 2" opacity=".6"/>'),
   eye: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   eyeOff: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" opacity=".35"/><path d="M4 4l16 16"/>'),
   aux: s('<path d="M3 16 L8 11 H21 L16 16 Z" stroke-dasharray="2 2"/><circle cx="12" cy="10" r="3.5"/>'),

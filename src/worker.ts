@@ -2,9 +2,9 @@
 import { parseByName } from './core/io';
 import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
-import { autoFit, fitType, FitResult, GeomType, normalFilter, NormalFilter } from './core/fit';
+import { autoFit, fitType, FitResult, GeomType, modelNormal, normalFilter, NormalFilter, signedDistance } from './core/fit';
 import type { Vec3 } from './core/linalg';
-import { autoExtract, extractWithAuxPlane } from './core/aux';
+import { autoExtract, extractLine, extractWithAuxPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
@@ -77,7 +77,9 @@ export type Req =
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
-  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult };
+  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult }
+  | { op: 'dev'; indices: Uint32Array; fit: FitResult }
+  | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult };
 
 export interface FitParams { k: number; nf?: NormalFilter | null; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
@@ -176,6 +178,17 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       if (!topo) throw new Error('Hilfsebene benötigt ein Polygonmodell (Dreiecke).');
       const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane);
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
+    } else if (req.op === 'dev') {
+      // Abweichungen der Merkmalspunkte zum Ausgleichselement (Farbkarte/Whisker der Analyse)
+      const idx = req.indices, P = mesh!.positions, n = idx.length, dev = new Float32Array(n), dir = new Float32Array(3 * n), pos = new Float32Array(3 * n);
+      for (let i = 0; i < n; i++) { const v = idx[i], q: Vec3 = [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+        dev[i] = signedDistance(req.fit, q); const nn = modelNormal(req.fit, q);
+        pos.set(q, 3 * i); dir.set(nn, 3 * i); }
+      result = { dev, dir, pos }; transfer.push(dev.buffer, dir.buffer, pos.buffer);
+    } else if (req.op === 'auxLine') {
+      if (!topo) throw new Error('Line with auxiliary plane needs a polygon model (triangles).');
+      const r = extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, req.plane);
+      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx }, faces: r.faces };
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
     } else if (req.op === 'nurbs') {

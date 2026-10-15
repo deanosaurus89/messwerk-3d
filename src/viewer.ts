@@ -119,14 +119,32 @@ export class Viewer {
   resetColors() { if (!this.colors) return; for (let i = 0; i < this.colors.length / 3; i++) this.colors.set(BASE_COLOR, 3 * i); }
   paint(idx: Uint32Array, rgb: number[]) { if (!this.colors) return; for (const v of idx) this.colors.set(rgb, 3 * v); }
   /** Abweichungs-Farbkarte: −r blau → 0 grün → +r rot. */
-  paintScalar(idx: Uint32Array, val: Float32Array, r: number) {
+  paintScalar(idx: Uint32Array, val: Float32Array, r: number, steps = 0) {
     if (!this.colors) return;
     for (let k = 0; k < idx.length; k++) {
-      const t = Math.max(-1, Math.min(1, val[k] / r)); let c: number[];
+      let t = Math.max(-1, Math.min(1, val[k] / r)); let c: number[];
+      if (steps > 0) t = Math.max(-1, Math.min(1, (Math.round(((t + 1) / 2) * steps - 0.5) + 0.5) / steps * 2 - 1));
       if (t < 0) { const a = -t; c = a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]; }
       else { const a = t; c = a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0]; }
       this.colors.set(c, 3 * idx[k]);
     }
+  }
+  /** Analyse: Modell halbtransparent (Abweichungskarte über einem durchscheinenden Netz). */
+  setModelOpacity(a: number) {
+    if (!this.model) return; const m = this.model.material as THREE.MeshStandardMaterial;
+    const tr = a < 1; if (m.transparent !== tr || m.opacity !== a) { m.transparent = tr; m.opacity = a; m.depthWrite = !tr; m.needsUpdate = true; }
+  }
+  /** Analyse-Whisker: Linie je Punkt entlang der Elementnormalen, Länge = Abweichung × Überhöhung, Farbe wie Farbkarte. */
+  addWhiskers(pos: Float32Array, dir: Float32Array, dev: Float32Array, exag: number, r: number, maxN = 6000) {
+    const n = dev.length, step = Math.max(1, Math.ceil(n / maxN)), v: number[] = [], col: number[] = [];
+    for (let i = 0; i < n; i += step) {
+      const p = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]], d = dev[i] * exag;
+      v.push(p[0], p[1], p[2], p[0] + dir[3 * i] * d, p[1] + dir[3 * i + 1] * d, p[2] + dir[3 * i + 2] * d);
+      const t = Math.max(-1, Math.min(1, dev[i] / r)); const c = t < 0 ? [0, 0.4 + 0.6 * (1 + t), 1] : [1, 0.4 + 0.6 * (1 - t), 0];
+      col.push(...c, ...c);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true })); l.renderOrder = 4; this.prims.add(l);
   }
   /** Freiformfläche: halbtransparente Fläche + Isolinien, Randkurven (kräftig), optional Kontrollnetz. */
   addFreeform(nb: NurbsInfo, color: number, selected: boolean, net: boolean) {
@@ -290,6 +308,11 @@ export class Viewer {
         const d = new THREE.Vector3(...f.direction!).normalize(), y = new THREE.Vector3().crossVectors(n, d);
         obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(d, y, n)); break;
       }
+      case 'Linie': {
+        const L = (f.length || s * 0.1) / 2, d = new THREE.Vector3(...f.direction!).normalize();
+        obj = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(d.clone().multiplyScalar(-L), d.clone().multiplyScalar(L)), 1, s / (selected ? 350 : 500), 6),
+          new THREE.MeshBasicMaterial({ color, depthTest: !selected })); break;
+      }
       default: obj = new THREE.Mesh(new THREE.SphereGeometry(s / 150, 12, 8), new THREE.MeshBasicMaterial({ color })); break;
     }
     obj.position.copy(c);
@@ -303,18 +326,33 @@ export class Viewer {
     dot.position.copy(c); dot.renderOrder = 6; this.prims.add(dot);
   }
 
-  /** Abstand: Linie p1→p2, gestrichelte X/Y/Z-Komponenten, Beschriftung. */
-  addDistance(p1: number[], p2: number[], color: number, selected: boolean) {
+  /** Abstand. Ohne dim: Linie p1→p2 mit gestrichelten X/Y/Z-Komponenten. Mit dim (CAD-Bemaßung): Hilfslinien p1→d1, p2→d2,
+   *  Maßlinie d1→d2 mit Pfeilspitzen (Lage aus dem Versatz der Annotation). */
+  addDistance(p1: number[], p2: number[], color: number, selected: boolean, dim?: { d1: number[]; d2: number[] }) {
     const a = new THREE.Vector3(...p1), b = new THREE.Vector3(...p2);
-    const main = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 1, this.radius / (selected ? 260 : 400), 6), new THREE.MeshBasicMaterial({ color, depthTest: false }));
-    main.renderOrder = 7; this.prims.add(main);
-    const cx = new THREE.Vector3(b.x, a.y, a.z), cy = new THREE.Vector3(b.x, b.y, a.z);
-    const legs: [THREE.Vector3, THREE.Vector3, number][] = [[a, cx, 0xd32f2f], [cx, cy, 0x2e9d3a], [cy, b, 0x1f5fa8]];
-    for (const [u, v, c] of legs) {
-      if (u.distanceTo(v) < 1e-6) continue;
-      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([u, v]),
-        new THREE.LineDashedMaterial({ color: c, dashSize: this.radius / 80, gapSize: this.radius / 120, depthTest: false }));
-      l.computeLineDistances(); l.renderOrder = 6; this.prims.add(l);
+    const tube = (u: THREE.Vector3, v: THREE.Vector3, w: number) => {
+      const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(u, v), 1, w, 6), new THREE.MeshBasicMaterial({ color, depthTest: false })); m.renderOrder = 7; this.prims.add(m); };
+    const thin = (u: THREE.Vector3, v: THREE.Vector3, c = color) => { if (u.distanceTo(v) < 1e-6) return;
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([u, v]), new THREE.LineBasicMaterial({ color: c, depthTest: false })); l.renderOrder = 6; this.prims.add(l); };
+    if (dim) {
+      const d1 = new THREE.Vector3(...dim.d1), d2 = new THREE.Vector3(...dim.d2);
+      thin(a, d1); thin(b, d2);
+      tube(d1, d2, this.radius / (selected ? 300 : 450));
+      const L = d1.distanceTo(d2);
+      if (L > 1e-6) { const u = d2.clone().sub(d1).normalize(), h = Math.min(this.radius / 40, L / 3), rr = h / 3;
+        for (const [p, s] of [[d1, -1], [d2, 1]] as [THREE.Vector3, number][]) {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(rr, h, 12), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), u.clone().multiplyScalar(s)); cone.position.copy(p).addScaledVector(u, -s * h / 2); cone.renderOrder = 8; this.prims.add(cone); } }
+    } else {
+      tube(a, b, this.radius / (selected ? 260 : 400));
+      const cx = new THREE.Vector3(b.x, a.y, a.z), cy = new THREE.Vector3(b.x, b.y, a.z);
+      const legs: [THREE.Vector3, THREE.Vector3, number][] = [[a, cx, 0xd32f2f], [cx, cy, 0x2e9d3a], [cy, b, 0x1f5fa8]];
+      for (const [u, v, c] of legs) {
+        if (u.distanceTo(v) < 1e-6) continue;
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([u, v]),
+          new THREE.LineDashedMaterial({ color: c, dashSize: this.radius / 80, gapSize: this.radius / 120, depthTest: false }));
+        l.computeLineDistances(); l.renderOrder = 6; this.prims.add(l);
+      }
     }
     for (const p of [a, b]) {
       const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / 160, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
@@ -377,12 +415,14 @@ export class Viewer {
     d.position.set(p[0], p[1], p[2]); d.renderOrder = 6; this.prims.add(d);
   }
   /** Kamera auf einen Bereich zentrieren (Blickrichtung bleibt). */
-  focus(c: [number, number, number], r: number) {
-    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+  /** Center on c with radius r; optional view direction (camera placed on the +dir side, looking along −dir). */
+  focus(c: [number, number, number], r: number, look?: [number, number, number]) {
+    const dir = look ? new THREE.Vector3(...look).normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
+    if (look && Math.abs(dir.z) > 0.999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
     const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
     const dist = Math.max(r, this.radius / 200) / Math.sin(Math.min(vf, hf) / 2) * 1.15;
     this.controls.target.set(...c);
-    this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
+    this.camera.position.copy(this.controls.target).addScaledVector(dir, dist); if (look) this.camera.lookAt(this.controls.target);
     this.camera.near = dist / 100; this.camera.far = dist * 10 + this.radius * 4; this.camera.updateProjectionMatrix();
     this.controls.update(); this.camera.updateMatrixWorld();
   }
