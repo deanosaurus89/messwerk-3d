@@ -6,7 +6,7 @@ import { docsHtml } from './docs';
 import { provenanceOf } from './core/provenance';
 import { AxisAnalysis, analyzeAxis } from './core/axisan';
 import { TRIM_TYPES, trimmedSurface } from './core/trim';
-import { REEX_DEFAULT, ReexParams, reextract } from './core/reextract';
+import { REEX_DEFAULT, ReexParams, SearchRegion, buildRegion, reextract } from './core/reextract';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
 function trimFor(f: FeatureView) {
@@ -1535,6 +1535,7 @@ function renderScene() {
   viewer.clearPrims();
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
+  if (reexPrev && state.features.some((x) => x.id === reexPrev!.id)) viewer.addRegion(reexPrev.R);
   if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res));
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
@@ -2861,6 +2862,8 @@ function conRows(fit: FitResult): [string, string][] {
 }
 const REEX_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Kreis', 'Linie', 'Torus'];
 let reexP: ReexParams = { ...REEX_DEFAULT };
+/** Search-region preview (transparent body) shown before running the re-extraction. */
+let reexPrev: { id: number; R: SearchRegion } | null = null;
 function reexHTML(f: FeatureView): string {
   if (f.cons || !REEX_TYPES.includes(f.type) || !f.measured) return '';
   const p = f.reex ? { ...reexP, ...f.reex } : reexP;
@@ -2870,12 +2873,19 @@ function reexHTML(f: FeatureView): string {
     ${inp('maxDist', tt('Max. distance [mm]'), p.maxDist, tt('Points farther from the geometry are ignored'))}
     ${inp('sigma', tt('σ filter (n·σ)'), p.sigma, tt('Remove points deviating more than n standard deviations from the mean'))}
     ${inp('maxAngleDeg', tt('Max. normal angle [°]'), p.maxAngleDeg, tt('Surface normal must agree with the geometry normal within this angle'))}
-    ${inp('margin', tt('Search margin [mm]'), p.margin, tt('Search region = bounding box of the current points + this margin'))}
-    <div class="row"><button class="btn primary" id="rx-run">🔁 ${f.reex ? tt('Re-run extraction') : tt('Run extraction')}</button></div></details>`;
+    ${inp('margin', tt('Search margin [mm]'), p.margin, tt('Search region follows the geometry (trimmed contour / shell / band) and is widened at its edges by this margin'))}
+    <div class="row"><button class="btn" id="rx-show">👁 ${tt('Show search region')}</button><button class="btn primary" id="rx-run">🔁 ${f.reex ? tt('Re-run extraction') : tt('Run extraction')}</button></div></details>`;
 }
 function bindReex(d: HTMLElement, f: FeatureView) {
   d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) (reexP as any)[i.dataset.rx!] = v; }));
+  d.querySelector('#rx-show')?.addEventListener('click', () => previewRegion(f));
   d.querySelector('#rx-run')?.addEventListener('click', () => runReextract(f));
+}
+function previewRegion(f: FeatureView) {
+  const g = viewer.model?.geometry; if (!g || !f.measured) return;
+  try { reexPrev = { id: f.id, R: buildRegion(f.measured, g.getAttribute('position').array as Float32Array, f.indices, reexP, f.anchor?.pts ?? []) }; renderAll();
+    toast(tt('Search region shown (transparent). Check it, then run the extraction.')); }
+  catch (e: any) { toast(tt('Re-extraction failed: {0}', tt(e.message))); }
 }
 function runReextract(f: FeatureView) {
   const g = viewer.model?.geometry; if (!g || !f.measured) return;
@@ -2883,7 +2893,7 @@ function runReextract(f: FeatureView) {
     const before = f.indices.length;
     const r = reextract(f.measured, g.getAttribute('position').array as Float32Array, (g.getAttribute('normal')?.array as Float32Array) ?? null, f.indices, reexP, f.anchor?.pts ?? []);
     f.measured = { ...r.fit, type: f.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length; f.dev = undefined; f.hit = undefined; ptsCache.delete(f.id); trimCache.delete(f.id);
-    f.reex = { ...reexP, points: r.indices.length, removed: r.removedSigma, before };
+    f.reex = { ...reexP, points: r.indices.length, removed: r.removedSigma, before }; reexPrev = null;
     recomputeDistances(); renderAll(); scheduleAutosave();
     toast(tt('{0}: re-extracted {1} points ({2} removed by σ filter, {3} iterations)', f.name, r.indices.length, r.removedSigma, r.iterations));
   } catch (e: any) { toast(tt('Re-extraction failed: {0}', tt(e.message))); }

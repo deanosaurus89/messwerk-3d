@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
 import { AxisAnalysis, exaggerate } from './core/axisan';
+import type { SearchRegion } from './core/reextract';
 import type { Vec3 } from './core/linalg';
 import { Labels, ViewCube } from './overlay';
 
@@ -183,6 +184,33 @@ export class Viewer {
     m.renderOrder = selected ? 4 : 2; m.raycast = () => {}; this.prims.add(m);
     const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.BufferAttribute(edges, 3));
     const l = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: selected ? 0xff2bd6 : color, depthTest: !selected })); l.renderOrder = 6; this.prims.add(l);
+  }
+  /** Re-extraction search region as a transparent body (preview before running). */
+  addRegion(R: SearchRegion) {
+    const V = (p: number[]) => new THREE.Vector3(p[0], p[1], p[2]);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x00a0ff, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+    const add = (g: THREE.BufferGeometry, q?: THREE.Quaternion, p?: THREE.Vector3) => { const m = new THREE.Mesh(g, mat); if (q) m.quaternion.copy(q); if (p) m.position.copy(p); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m);
+      const e = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), new THREE.LineBasicMaterial({ color: 0x0077cc, transparent: true, opacity: 0.6 })); if (q) e.quaternion.copy(q); if (p) e.position.copy(p); this.prims.add(e); };
+    const up = new THREE.Vector3(0, 1, 0);
+    switch (R.kind) {
+      case 'prism': { const pts: number[] = []; const o = V(R.o), n = V(R.n), u = V(R.u), v = V(R.v);
+        const P = (i: number, j: number, z: number) => o.clone().addScaledVector(u, (i + R.i0) * R.h).addScaledVector(v, (j + R.j0) * R.h).addScaledVector(n, z);
+        for (let j = 0; j < R.hgt; j++) for (let i = 0; i < R.w; i++) if (R.cells[j * R.w + i]) for (const z of [-R.d, R.d]) { const a = P(i, j, z), b = P(i + 1, j, z), c = P(i + 1, j + 1, z), d = P(i, j + 1, z); pts.push(...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray()); }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const m = new THREE.Mesh(g, mat); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m); break; }
+      case 'box': { const g = new THREE.BoxGeometry(R.u1 - R.u0, R.v1 - R.v0, 2 * R.d); const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(R.u), V(R.v), V(R.n)));
+        add(g, q, V(R.o).addScaledVector(V(R.u), (R.u0 + R.u1) / 2).addScaledVector(V(R.v), (R.v0 + R.v1) / 2)); break; }
+      case 'shell': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)), H = R.t1 - R.t0, mid = V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2);
+        const ta = R.type === 'Kegel' ? Math.tan(R.fit.halfAngle ?? 0) : 0, rr = (t: number) => Math.max(1e-3, R.fit.radius! + t * ta);
+        for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(rr(R.t1) + s, rr(R.t0) + s, H, 48, 1, true), q, mid); break; }
+      case 'sphere': for (const s of [-R.d, R.d]) add(new THREE.SphereGeometry(Math.max(1e-3, R.r + s), 32, 20), undefined, V(R.c)); break;
+      case 'band': { const f = R.fit, a = V(f.normal).normalize(), q = new THREE.Quaternion().setFromUnitVectors(up, a), H = R.t1 - R.t0, mid = V(f.center).addScaledVector(a, (R.t0 + R.t1) / 2);
+        if (R.type === 'Kreis') { for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(f.radius! + s, f.radius! + s, H, 64, 1, true), q, mid); }
+        else { const r = f.radius!, hl = f.length! / 2 - r; for (const s of [-R.d, R.d]) { const sh = new THREE.Shape(); sh.absarc(hl, 0, r + s, -Math.PI / 2, Math.PI / 2, false); sh.absarc(-hl, 0, r + s, Math.PI / 2, 1.5 * Math.PI, false);
+          const g = new THREE.ExtrudeGeometry(sh, { depth: H, bevelEnabled: false }); g.translate(0, 0, -H / 2); const dx = V(f.direction!).normalize(), y = new THREE.Vector3().crossVectors(a, dx);
+          add(g, new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(dx, y, a)), mid); } }
+        break; }
+      case 'tube': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)); add(new THREE.CylinderGeometry(R.d, R.d, R.t1 - R.t0, 24, 1, true), q, V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2)); break; }
+    }
   }
   /** Axis analysis: nominal axis (grey), tolerance cylinder Ø t (green), required zone envelope (orange),
    *  exaggerated actual axis (red) and section centres (red dots). All radial offsets × exag. */
