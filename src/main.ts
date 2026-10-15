@@ -4,6 +4,18 @@ import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
 import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
 import { docsHtml } from './docs';
 import { provenanceOf } from './core/provenance';
+import { AxisAnalysis, analyzeAxis } from './core/axisan';
+import { TRIM_TYPES, trimmedSurface } from './core/trim';
+import { REEX_DEFAULT, ReexParams, reextract } from './core/reextract';
+/** cache of trimmed geometry per feature (key: fit centre + point count) */
+const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
+function trimFor(f: FeatureView) {
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
+  const c = trimCache.get(f.id); if (c && c.key === key) return c;
+  const g = viewer.model!.geometry; if (!g.index) return null;
+  const r = trimmedSurface(f.measured!, g.getAttribute('position').array as Float32Array, g.index.array as ArrayLike<number>, f.indices);
+  const e = { key, ...r }; trimCache.set(f.id, e); return e;
+}
 import { t as tt, typeName, kindName, methodName } from './i18n';
 import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
 import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
@@ -22,7 +34,7 @@ import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
-import type { Vec3 } from './core/linalg';
+import { type Vec3, sub, scale, dot, norm } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
 import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
@@ -63,7 +75,7 @@ const state = {
   mode: null as Mode,
   preview: null as Preview | null,
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -83,7 +95,7 @@ const state = {
   ctab: 'katalog' as 'katalog' | 'liste',
   brushMask: null as Uint8Array | null,
   brushCount: 0,
-  showPrims: true, colorPts: true, devMap: true, ctrlNet: true,
+  showPrims: true, trimGeo: true, colorPts: true, devMap: true, ctrlNet: true,
   nurbs: { nu: 12, nv: 12, deg: 3, smooth: 1e-4 } as NurbsParams,
   nextId: 1, nextCtrl: 1, typeCount: {} as Record<string, number>,
   addFeat: null as number | null,
@@ -739,8 +751,8 @@ function distSpec(m: DistMode): CtxSpec {
 // Architektur: eine Abweichungsquelle liefert Knotenindizes + vorzeichenbehaftete Abweichungen (+ optional Lage/Richtung
 // für Whisker). Quellen heute: Formabweichung je Merkmal (Punkte ↔ Ausgleichselement) und Polygon ↔ Original;
 // eine CAD-Quelle (Netz ↔ Sollgeometrie) lässt sich als weiterer Eintrag in AN_SOURCES ergänzen.
-type AnKind = 'form' | 'mesh';
-interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[] }
+type AnKind = 'form' | 'mesh' | 'axis';
+interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[]; axes?: AxisAnalysis[] }
 const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   form: async () => {
     let fs = state.features.filter((f) => state.sel.includes(f.id) && f.type !== 'Abstand' && f.indices.length);
@@ -752,6 +764,30 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     state.an.ids = fs.map((f) => f.id);
     let off = 0; const feats = fs.map((f) => { let lo = Infinity, hi = -Infinity; for (let i = off; i < off + f.indices.length; i++) { lo = Math.min(lo, dev[i]); hi = Math.max(hi, dev[i]); } off += f.indices.length; return { id: f.id, lo, hi }; });
     return { feats, idx, dev, pos, dir, label: fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
+  },
+  axis: async () => {
+    let fs = state.features.filter((f) => state.sel.includes(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
+    if (!fs.length) fs = state.features.filter((f) => !state.hidden.has(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
+    if (!fs.length) { toast(tt('Axis analysis needs a cylinder or cone – create one first.')); return null; }
+    const P = viewer.model!.geometry.getAttribute('position').array as Float32Array;
+    const axes = fs.map((f) => {
+      const pts: Vec3[] = []; const st = Math.max(1, Math.floor(f.indices.length / 20000));
+      for (let i = 0; i < f.indices.length; i += st) { const v = f.indices[i]; pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); }
+      const c = state.controls.find((c) => c.featureIds[0] === f.id && ['Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Position', 'Koaxialität'].includes(c.kind) && c.datumIds?.length);
+      const D = c ? state.features.find((x) => x.id === c.datumIds![0])?.measured : undefined;
+      let nominal: { dir: Vec3; point?: Vec3 } | undefined; const a = f.measured!.normal;
+      if (c && D) {
+        const g = D.normal;
+        if (D.type === 'Ebene') {
+          if (c.kind === 'Parallelität') { const pr = sub(a, scale(g, dot(a, g))); nominal = { dir: norm(pr) > 1e-9 ? pr : a }; }
+          else nominal = { dir: g }; // perpendicularity / position to a plane: nominal axis ⟂ plane
+        } else { nominal = { dir: g, point: c.kind === 'Koaxialität' ? D.center : undefined }; }
+      }
+      return analyzeAxis(f.measured!, pts, nominal, c && c.tolUp > 0 ? c.tolUp : null, 8,
+        `${f.name}${c ? ` · ${kindName(c.kind)} → ${nameOf(c.datumIds![0])}` : ` · ${tt('vs. fitted axis')}`}`);
+    });
+    state.an.ids = fs.map((f) => f.id);
+    return { idx: new Uint32Array(0), dev: new Float32Array(0), axes, label: tt('Axis analysis') };
   },
   mesh: async () => {
     if (!pe.dev) await peCompute();
@@ -787,9 +823,21 @@ function anRange(r: AnResult): { c: number; h: number } {
   if (a.scale > 0) h = a.scale;
   return { c, h: Math.max(1e-4, h) };
 }
+function axisExag(r: AnResult) {
+  if (state.an.axExag > 0) return state.an.axExag;
+  const z = Math.max(1e-6, ...r.axes!.map((x) => Math.max(x.zone, x.tol ?? 0) / 2)), R = Math.min(...r.axes!.map((x) => x.radius));
+  return Math.max(1, Math.round((0.6 * R) / z));
+}
 function paintAnalysis(): boolean {
   const a = state.an, r = a.res;
   if (!a.on || !r || !viewer.colors) return false;
+  if (r.axes) {
+    viewer.setModelOpacity(a.trans ? 0.35 : 1);
+    let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
+    el.innerHTML = `<b>${r.label} · × ${axisExag(r)}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}</small>`).join('')
+      + `<small><span style="color:#777">━</span> ${tt('nominal')} · <span style="color:#e53935">━</span> ${tt('actual axis')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('envelope')}</small>`;
+    return true;
+  }
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }
   const { c, h } = anRange(r);
   viewer.paintScalar(r.idx, r.dev, h, a.steps, c);
@@ -805,6 +853,12 @@ function paintAnalysis(): boolean {
 }
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
+  if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
+    controls: `<label title="${tt('Exaggeration of radial axis deviations (tilt, section centres, zones). 0 = automatic')}">× <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
+    bind: (el) => { const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
+      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else { a.trans = !a.trans; renderAll(); } })); },
+    cancel: { run: analyzeOff, title: tt('Close analysis') } };
   return {
     title: `◐ ${tt('Analyze')}`, cls: 'an',
     controls: `<label title="${tt('Centre of the color scale. Zone mid (default, ISO 1101): green = middle of the form zone; 0 = fitted element; custom = your value')}">${tt('Centre')} <select id="an-cm"><option value="zone" ${a.center === 'zone' ? 'selected' : ''}>${tt('Zone mid')}</option><option value="zero" ${a.center === 'zero' ? 'selected' : ''}>0</option><option value="custom" ${a.center === 'custom' ? 'selected' : ''}>${tt('Custom')}</option></select></label>
@@ -995,6 +1049,7 @@ function renderRibbon() {
     (state.mode?.kind === 'fit' && state.mode.type === b.dataset.ftype) || (state.mode?.kind === 'dist' && b.dataset.ftype === 'Abstand')));
   document.querySelectorAll<HTMLButtonElement>('[data-con]').forEach((b) => b.classList.toggle('on', state.mode?.kind === 'con' && (b.dataset.con === state.mode.out || b.dataset.con === state.mode.key) && !(b.dataset.con === 'Kreis' && state.mode.key === 'bc-pattern')));
   $('#btn-toggle-prims').classList.toggle('on', state.showPrims);
+  $('#btn-toggle-trim').classList.toggle('on', state.trimGeo);
   $('#btn-toggle-pts').classList.toggle('on', state.colorPts);
   $('#btn-toggle-labels').classList.toggle('on', state.showLabels);
 }
@@ -1224,7 +1279,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label></div>
-    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}
+    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${reexHTML(f)}
     <h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}
@@ -1249,6 +1304,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   ($('#d-del') as HTMLButtonElement).onclick = () => { state.selControl = null; deleteSelected(); };
   ($('#d-addctrl') as HTMLButtonElement).onclick = () => { state.addFeat = f.id; state.ctab = 'katalog'; renderTable(); togglePanel('table', true); };
   if (f.cons) bindConDefinition(d, f); else bindFitParams(d, f);
+  bindReex(d, f);
 }
 const auxSourceText = (a: AuxPlane) => (a.refId ? nameOf(a.refId) : tt('automatic (adjacent face)'));
 
@@ -1462,6 +1518,7 @@ function renderScene() {
   viewer.clearPrims();
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
+  if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res));
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
   if (state.showPrims) for (const f of state.features) {
@@ -1470,6 +1527,9 @@ function renderScene() {
     if (f.type === 'Winkel') viewer.addAngle(f.measured!, f.color, sel);
     else if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
     else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
+    else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
+      const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+    }
     else viewer.addPrimitive(f.measured!, f.color, sel);
   }
   if (p) {
@@ -1602,6 +1662,7 @@ function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({
 try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; } } catch { /* */ }
 $('#btn-options').onclick = () => openOptions();
 $('#btn-whatsnew').onclick = () => showWhatsNew();
+$('#btn-toggle-trim').onclick = () => { state.trimGeo = !state.trimGeo; renderAll(); };
 $('#ver-box').textContent = versionText();
 setTimeout(() => maybeShowWhatsNew(), 1500);
 
@@ -1616,6 +1677,7 @@ function openContext(x: number, y: number, fid: number | null) {
     items.push([`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
     items.push([`⌖ ${tt('Center')}`, () => centerOn(fid)]);
     if (f.type !== 'Abstand') items.push([`◐ ${tt('Analyze form deviation')}`, () => analyze('form')]);
+    if (!f.cons && REEX_TYPES.includes(f.type)) items.push([`🔁 ${tt('Re-extract …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); renderDialog(); setTimeout(() => { const el = document.querySelector<HTMLDetailsElement>('details.reex'); if (el) { el.open = true; el.scrollIntoView({ block: 'nearest' }); } }, 50); }]);
     items.push(null);
     items.push([state.hidden.has(f.id) ? `👁 ${tt('Show geometry')}` : `👁 ${tt('Hide geometry')}`, () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
     items.push([state.hiddenLabels.has(f.id) ? `🏷 ${tt('Show annotation')}` : `🏷 ${tt('Hide annotation')}`, () => { state.hiddenLabels.has(f.id) ? state.hiddenLabels.delete(f.id) : state.hiddenLabels.add(f.id); renderAll(); }]);
@@ -1929,7 +1991,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
+Object.assign((window as any).__app, { ensureFeature, addControl, TRAIN_FEATS, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
@@ -2457,6 +2519,23 @@ function featOptions(step: 'primary' | 'secondary' | 'origin', cur: number | nul
 }
 const axisSel = (id: string, cur: Axis, flip: boolean) => `<select id="${id}" class="cs-ax">${(['X', 'Y', 'Z'] as Axis[]).flatMap((a) => [[a, false], [a, true]] as [Axis, boolean][])
   .map(([a, fl]) => `<option value="${fl ? '-' : '+'}${a}" ${a === cur && fl === flip ? 'selected' : ''}>${fl ? '−' : '+'}${a}</option>`).join('')}</select>`;
+/** Translations a step's feature can lock (logical defaults): plane → along its own axis; axis (cylinder/cone/line) →
+ *  the two axes ⟂ to it; circle/sphere/point → all three. */
+function dofAllowed(cs: CSys, step: 'p' | 's'): Axis[] {
+  const id = step === 'p' ? cs.primary.fid : cs.secondary.fid, f = state.features.find((x) => x.id === id); if (!f) return [];
+  const ax = step === 'p' ? cs.primary.axis : cs.secondary.axis, others = (['X', 'Y', 'Z'] as Axis[]).filter((a) => a !== ax);
+  if (f.type === 'Ebene') return [ax];
+  if (['Zylinder', 'Kegel', 'Linie', 'Torus'].includes(f.type)) return step === 'p' ? others : others.filter((a) => a !== cs.primary.axis);
+  return ['X', 'Y', 'Z'];
+}
+function dofSection(cs: CSys, step: 'p' | 's'): string {
+  const id = step === 'p' ? cs.primary.fid : cs.secondary.fid; if (id == null) return '';
+  const al = dofAllowed(cs, step), rot = step === 'p' ? tt('2 rotations (level)') : tt('1 rotation (about the primary axis)');
+  return `<details class="cs-dofs"><summary>${tt('Constrained DOF')}</summary>
+    <label><input type="checkbox" checked disabled> ${rot}</label>
+    ${(['X', 'Y', 'Z'] as Axis[]).map((a) => `<label title="${al.includes(a) ? tt('Lock the {0} translation with this feature (sets origin {0})', a) : tt('This feature cannot define the {0} translation', a)}"><input type="checkbox" data-dof="${step}${a}" ${cs.origin[a].fid === id ? 'checked' : ''} ${al.includes(a) ? '' : 'disabled'}> ${tt('Translation {0}', a)}</label>`).join('')}
+  </details>`;
+}
 function renderCsEdit(d: HTMLElement) {
   const e = state.csEdit!, cs = e.draft, r = csResult(cs);
   const pickBtn = (k: CsField) => `<button class="btn cs-pick ${e.field === k ? 'on' : ''}" data-pick="${k}" title="${tt('Pick in 3D view or tree')}">⌖</button>`;
@@ -2466,10 +2545,10 @@ function renderCsEdit(d: HTMLElement) {
     <div class="cs-dof ${r.error ? 'err' : r.dof === 6 ? 'ok' : ''}">${tt('DOF locked')} <b>${r.error ? '—' : r.dof}/6</b>${r.error ? ` · ⚠ ${tt(r.error)}` : ''}${r.warnings.map((w) => `<div class="note">⚠ ${tt(w)}</div>`).join('')}</div>
     <h4>1 · ${tt('Primary – orientation')}</h4>
     ${row('p', tt('Feature'), `<select id="cs-p">${featOptions('primary', cs.primary.fid)}</select>${axisSel('cs-pa', cs.primary.axis, cs.primary.flip)}`)}
-    <p class="note">${tt('Plane: normal · cylinder, cone, line: axis. Locks 2 rotations.')}</p>
+    <p class="note">${tt('Plane: normal · cylinder, cone, line: axis. Locks 2 rotations.')}</p>${dofSection(cs, 'p')}
     <h4>2 · ${tt('Secondary – rotation')}</h4>
     ${row('s', tt('Feature'), `<select id="cs-s">${featOptions('secondary', cs.secondary.fid)}</select>${axisSel('cs-sa', cs.secondary.axis, cs.secondary.flip)}`)}
-    <p class="note">${tt('Projected into the primary plane. Circle/sphere/point: direction from the origin feature to its center. Locks 1 rotation.')}</p>
+    <p class="note">${tt('Projected into the primary plane. Circle/sphere/point: direction from the origin feature to its center. Locks 1 rotation.')}</p>${dofSection(cs, 's')}
     <h4>3 · ${tt('Origin')}</h4>
     ${(['X', 'Y', 'Z'] as Axis[]).map((a) => row(a, a, `<select id="cs-o${a}">${featOptions('origin', cs.origin[a].fid)}</select><input id="cs-off${a}" class="cs-off" type="text" inputmode="decimal" value="${cs.origin[a].off}" title="${tt('Offset [mm]')}">${cs.origin[a].auto ? `<small class="cs-auto" title="${tt('Auto-filled – pick another feature or choose “—” to override')}">auto: ${tt(cs.origin[a].auto!)}</small>` : ''}`)).join('')}
     <p class="note">${tt('Each axis from one feature (+ offset in mm). Plane: along its normal · circle/cylinder: the two other axes. Entries marked “auto” were filled from steps 1–2 and can be overridden.')} <a href="#" id="cs-help">${tt('Why?')}</a></p>
@@ -2485,9 +2564,11 @@ function renderCsEdit(d: HTMLElement) {
   q<HTMLSelectElement>('#cs-sa').onchange = (ev) => { [cs.secondary.axis, cs.secondary.flip] = ax((ev.target as HTMLSelectElement).value); renderAll(); };
   for (const a of ['X', 'Y', 'Z'] as Axis[]) {
     q<HTMLSelectElement>('#cs-o' + a).onchange = (ev) => { cs.origin[a].fid = fid((ev.target as HTMLSelectElement).value); cs.origin[a].auto = undefined; renderAll(); };
-    d.querySelector('#cs-help')?.addEventListener('click', (ev) => { ev.preventDefault(); showDocs('csys'); });
     q<HTMLInputElement>('#cs-off' + a).onchange = (ev) => { const v = Number((ev.target as HTMLInputElement).value.replace(',', '.')); if (isFinite(v)) cs.origin[a].off = v; renderAll(); };
   }
+  d.querySelectorAll<HTMLInputElement>('[data-dof]').forEach((i) => (i.onchange = () => { const st = i.dataset.dof![0], ax = i.dataset.dof![1] as Axis, id = st === 'p' ? cs.primary.fid : cs.secondary.fid;
+    cs.origin[ax] = i.checked ? { ...cs.origin[ax], fid: id, auto: undefined } : { ...cs.origin[ax], fid: null, auto: undefined }; renderAll(); }));
+  d.querySelector('#cs-help')?.addEventListener('click', (ev) => { ev.preventDefault(); showDocs('csys'); });
   d.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => (b.onclick = () => { e.field = e.field === b.dataset.pick ? null : (b.dataset.pick as CsField); renderAll(); if (isPhone() && e.field) togglePanel('dialog', false); }));
   q<HTMLInputElement>('#cs-act').onchange = (ev) => { e.activate = (ev.target as HTMLInputElement).checked; };
   q('#cs-ok').onclick = () => csOk(); q('#cs-cancel').onclick = () => csCancel();
@@ -2761,6 +2842,35 @@ function conRows(fit: FitResult): [string, string][] {
   if (fit.type !== 'Winkel') rows.push(...fitRows(fit, 0).filter(([k]) => k !== tt('Points') && k !== 'Max. +' && k !== 'Max. −' && k !== tt('Std. dev. (RMS)')));
   return rows;
 }
+const REEX_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Kreis', 'Linie', 'Torus'];
+let reexP: ReexParams = { ...REEX_DEFAULT };
+function reexHTML(f: FeatureView): string {
+  if (f.cons || !REEX_TYPES.includes(f.type) || !f.measured) return '';
+  const p = f.reex ? { ...reexP, ...f.reex } : reexP;
+  const inp = (k: string, lbl: string, v: number, tip: string) => `<div class="row" title="${tip}"><label>${lbl}</label><input data-rx="${k}" value="${v}" inputmode="decimal"></div>`;
+  return `<details class="reex" ${f.reex ? 'open' : ''}><summary>🔁 ${tt('Extraction (re-extract)')}</summary>
+    <p class="note">${tt('Uses the current actual geometry as start and re-collects scan points. Overwrites the actual geometry; the initial method stays in the provenance.')}</p>
+    ${inp('maxDist', tt('Max. distance [mm]'), p.maxDist, tt('Points farther from the geometry are ignored'))}
+    ${inp('sigma', tt('σ filter (n·σ)'), p.sigma, tt('Remove points deviating more than n standard deviations from the mean'))}
+    ${inp('maxAngleDeg', tt('Max. normal angle [°]'), p.maxAngleDeg, tt('Surface normal must agree with the geometry normal within this angle'))}
+    ${inp('margin', tt('Search margin [mm]'), p.margin, tt('Search region = bounding box of the current points + this margin'))}
+    <div class="row"><button class="btn primary" id="rx-run">🔁 ${f.reex ? tt('Re-run extraction') : tt('Run extraction')}</button></div></details>`;
+}
+function bindReex(d: HTMLElement, f: FeatureView) {
+  d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) (reexP as any)[i.dataset.rx!] = v; }));
+  d.querySelector('#rx-run')?.addEventListener('click', () => runReextract(f));
+}
+function runReextract(f: FeatureView) {
+  const g = viewer.model?.geometry; if (!g || !f.measured) return;
+  try {
+    const before = f.indices.length;
+    const r = reextract(f.measured, g.getAttribute('position').array as Float32Array, (g.getAttribute('normal')?.array as Float32Array) ?? null, f.indices, reexP, f.anchor?.pts ?? []);
+    f.measured = { ...r.fit, type: f.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length; f.dev = undefined; f.hit = undefined; ptsCache.delete(f.id); trimCache.delete(f.id);
+    f.reex = { ...reexP, points: r.indices.length, removed: r.removedSigma, before };
+    recomputeDistances(); renderAll(); scheduleAutosave();
+    toast(tt('{0}: re-extracted {1} points ({2} removed by σ filter, {3} iterations)', f.name, r.indices.length, r.removedSigma, r.iterations));
+  } catch (e: any) { toast(tt('Re-extraction failed: {0}', tt(e.message))); }
+}
 /** Provenance (how the feature was created) – one structure for all methods (core/provenance). */
 function provenanceHTML(f: FeatureView): string {
   const p = provenanceOf(f, { seed: f.hit?.point as Vec3 | undefined, params: f.fp as any });
@@ -2771,6 +2881,7 @@ function provenanceHTML(f: FeatureView): string {
     if (p.aux) rows.push([tt('Auxiliary plane'), `${p.aux.source} (${p.aux.points} ${tt('pts')})`]); }
   else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }
   else return '';
+  if (f.reex) rows.push([tt('Then: re-extraction'), tt('max. dist. {0} mm · {1}σ · {2}° · margin {3} mm → {4} pts ({5} before, {6} removed)', f.reex.maxDist, f.reex.sigma, f.reex.maxAngleDeg, f.reex.margin, f.reex.points, f.reex.before, f.reex.removed)]);
   return `<h4>${tt('Provenance')}</h4>${kv(rows)}`;
 }
 /** Feature dialog part for constructed features: definition, parameters (editable → recompute). */

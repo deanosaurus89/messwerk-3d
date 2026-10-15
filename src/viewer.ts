@@ -4,6 +4,8 @@ import { NurbsInfo, evalCurve, evalSurface, insideTrim, tessellate } from './cor
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
+import { AxisAnalysis, exaggerate } from './core/axisan';
+import type { Vec3 } from './core/linalg';
 import { Labels, ViewCube } from './overlay';
 
 (THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
@@ -167,6 +169,35 @@ export class Viewer {
       col.setRGB(c[0], c[1], c[2]); S.setColorAt(k, col); H.setColorAt(k, col);
     }
     S.count = H.count = k; S.renderOrder = H.renderOrder = 4; this.prims.add(S, H);
+  }
+  /** Normal/axis arrow + centre dot (used with trimmed geometry). */
+  addPrimitiveMarkers(f: FitResult, color: number) {
+    const c = new THREE.Vector3(...f.center), n = new THREE.Vector3(...f.normal).normalize(), s = this.radius;
+    this.prims.add(new THREE.ArrowHelper(n, c, Math.max(s * 0.08, 3), color, s * 0.02, s * 0.012));
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(s / 250, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false })); dot.position.copy(c); dot.renderOrder = 6; this.prims.add(dot);
+  }
+  /** Trimmed feature geometry: fitted surface over the selected triangles + boundary contour. */
+  addTrimmed(tri: Float32Array, edges: Float32Array, color: number, selected: boolean) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(tri, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: selected ? 0.35 : 0.2, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    m.renderOrder = selected ? 4 : 2; m.raycast = () => {}; this.prims.add(m);
+    const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.BufferAttribute(edges, 3));
+    const l = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: selected ? 0xff2bd6 : color, depthTest: !selected })); l.renderOrder = 6; this.prims.add(l);
+  }
+  /** Axis analysis: nominal axis (grey), tolerance cylinder Ø t (green), required zone envelope (orange),
+   *  exaggerated actual axis (red) and section centres (red dots). All radial offsets × exag. */
+  addAxisAnalysis(an: AxisAnalysis, exag: number) {
+    const V = (p: Vec3) => new THREE.Vector3(...p), d = V(an.dir), o = V(an.origin), L = an.length * 1.15;
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    const tube = (a: THREE.Vector3, b: THREE.Vector3, r: number, color: number, op = 1) => { const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 1, r, 8), new THREE.MeshBasicMaterial({ color, transparent: op < 1, opacity: op, depthTest: false })); m.renderOrder = 6; this.prims.add(m); };
+    const w = Math.max(this.radius / 600, an.radius / 60);
+    tube(o.clone().addScaledVector(d, -L / 2), o.clone().addScaledVector(d, L / 2), w * 0.6, 0x777777, 0.8);
+    const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(o); m.renderOrder = 5; this.prims.add(m); };
+    if (an.tol) cyl((an.tol / 2) * exag, 0x22aa44, 0.18);
+    cyl((an.zone / 2) * exag, 0xff8c1a, 0.14);
+    const ex = (p: Vec3) => V(exaggerate(an, p, exag));
+    tube(ex(an.actualBot), ex(an.actualTop), w, 0xe53935);
+    for (const c of an.centers) { const s = new THREE.Mesh(new THREE.SphereGeometry(w * 2.2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc62828, depthTest: false })); s.position.copy(ex(c)); s.renderOrder = 7; this.prims.add(s); }
   }
   /** Toleranz-/Formzone (ISO 1101): Grenzflächen bei Abweichung lo und hi entlang der Normalen des Ausgleichselements. */
   addZone(f: FitResult, lo: number, hi: number) {

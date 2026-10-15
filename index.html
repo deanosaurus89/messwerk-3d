@@ -88,6 +88,7 @@
     <div class="panel hidden" data-tab="analyze">
       <div class="group"><div class="btns">
         <button class="big" data-an="form" title="Form deviation of the selected feature(s): points vs. fitted geometry"><span class="ico">◐</span>Feature deviation</button>
+        <button class="big" data-an="axis" title="Axis of cylinders/cones vs. the nominal axis from the datum of a perpendicularity/parallelism/position/coaxiality control: tilt, section centres, tolerance cylinder and zone envelope (exaggerated)"><span class="ico">⟂</span>Axis analysis</button>
         <button class="big" data-an="mesh" title="Edited polygon model vs. original polygon model"><span class="ico">◑</span>Mesh vs. original</button>
         <button class="big" id="btn-an-off" title="Remove the deviation display"><span class="ico">✕</span>Off</button>
       </div><div class="glabel">Deviation color map</div></div>
@@ -157,6 +158,7 @@
       </div><div class="glabel">Standard views</div></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-toggle-prims" data-vt="prims" title="Show/hide the geometry of all features"><span class="ico">◎</span>Geometries</button>
+        <button class="big on" id="btn-toggle-trim" title="Trimmed geometry: show planes, cylinders, spheres and cones only over their selected points (contour), instead of a generic patch"><span class="ico">✂</span>Trimmed</button>
         <button class="big" id="btn-toggle-labels" data-vt="labels" title="Show/hide the annotations of all features"><span class="ico">🏷</span>Annotations</button>
         <button class="big" id="btn-toggle-pts" title="Color the points of each feature"><span class="ico">⁘</span>Color points</button>
         <button class="big" id="btn-toggle-wire" data-vt="wire" title="Show triangle edges"><span class="ico">▦</span>Mesh edges</button>
