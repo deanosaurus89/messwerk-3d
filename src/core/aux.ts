@@ -3,7 +3,7 @@
 // senkrecht in diese Ebene projizieren, Kreis bzw. Stadion-Kontur in der Ebene fitten; Mittelpunkt liegt in der Ebene,
 // Orientierung = Ebenennormale.
 import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitLine, fitPlane, fitSlot, fitType } from './fit';
-import { Vec3, dot, scale, sub } from './linalg';
+import { Vec3, dot, norm, scale, sub, unit } from './linalg';
 import { MeshData } from './mesh';
 import { GrowOptions, MeshTopology, gather } from './region';
 
@@ -247,7 +247,7 @@ export interface LineResult {
 /** Linie mit Hilfsebene an einer Kante: angeklickte Fläche + nächstgelegene Nachbarfläche. auxSide wählt, welche der beiden
  *  die Hilfsebene ist; die Punkte der anderen Fläche werden in die Hilfsebene projiziert und eine Gerade gefittet. */
 export function extractLine(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
-  auxSide: 0 | 1, givenPlane?: FitResult): LineResult {
+  auxSide: 0 | 1, givenPlane?: FitResult, ring?: AuxRing): LineResult {
   H = topo.localEdge(seedTri) * 0.4;
   const visited = new Uint8Array(mesh.indices.length / 3);
   const mk = (tris: Uint32Array): Region => {
@@ -287,7 +287,19 @@ export function extractLine(mesh: MeshData, topo: MeshTopology, seedTri: number,
     if (keep.length === pts.length || keep.length < 10) break;
     pts = keep; fit = fitLine(pts, plane);
   }
+  // local band (item 7 for lines): only aux-plane points at in-plane distance gap … gap+width from the line,
+  // within the line's extent; refit the plane, then the line in the new plane
+  let planeIdx = auxR ? auxR.verts : new Uint32Array(0);
+  if (ring && auxR) {
+    const d = unit(fit.direction!), c = fit.center, half = (fit.length || 0) / 2 + ring.width;
+    const keepI: number[] = [], keepP: Vec3[] = [], keepN: Vec3[] = [];
+    auxR.p.forEach((q, i) => { const w = sub(q, c), t = dot(w, d), r = norm(sub(w, scale(d, t))); if (Math.abs(t) <= half && r >= ring.gap && r <= ring.gap + ring.width) { keepI.push(i); keepP.push(q); keepN.push(auxR.n[i]); } });
+    if (keepP.length < 20) throw new Error('Local band: fewer than 20 plane points – increase the width or reduce the gap');
+    let pl = fitType('Ebene', keepP, keepN); if (dot(pl.normal, plane.normal) < 0) pl = { ...pl, normal: scale(pl.normal, -1) };
+    plane = pl; fit = fitLine(pts, plane);
+    planeIdx = Uint32Array.from(keepI.filter((i) => i < auxR.verts.length).map((i) => auxR.verts[i]));
+  }
   fit.outliers = wallR.p.length - pts.length; fit.n = wallR.verts.length;
   delete fit.residuals; delete plane.residuals;
-  return { fit, plane, wallIdx: wallR.verts, planeIdx: auxR ? auxR.verts : new Uint32Array(0), faces: [r1.verts, r2 ? r2.verts : new Uint32Array(0)] };
+  return { fit, plane, wallIdx: wallR.verts, planeIdx, faces: [r1.verts, r2 ? r2.verts : new Uint32Array(0)] };
 }

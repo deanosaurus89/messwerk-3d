@@ -516,7 +516,7 @@ const usesAuxType = usesAux;
 /** Hilfsebenen-Extraktion im Worker: Kreis/Langloch (Wand in Ebene) bzw. Linie (Kante, Seite wählbar). */
 function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView, ring?: { gap: number; width: number }) {
   return type === 'Linie'
-    ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured })
+    ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured, ring })
     : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring });
 }
 async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch' | 'Linie') {
@@ -1258,7 +1258,7 @@ function renderFitDialog(d: HTMLElement) {
     <div class="row"><select id="d-aux"><option value="auto" ${state.opts.aux === 'auto' ? 'selected' : ''}>${tt('Automatic – full adjacent planar face')}</option><option value="ring" ${state.opts.aux === 'ring' ? 'selected' : ''}>${tt('Local ring around the contour')}</option>
       ${state.features.filter((f) => f.type === 'Ebene').map((f) => `<option value="${f.id}" ${state.opts.aux === f.id ? 'selected' : ''}>${tt('Existing plane')}: ${f.name}</option>`).join('')}
       <option value="none" ${state.opts.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
-    ${state.opts.aux === 'ring' && m.type !== 'Linie' ? `<div class="row"><label>${tt('Ring gap [mm]')}</label><input id="d-rg" value="${state.opts.ring.gap}" inputmode="decimal"></div><div class="row"><label>${tt('Ring width [mm]')}</label><input id="d-rw" value="${state.opts.ring.width}" inputmode="decimal"></div><p class="note">${tt('Only the plane points in a ring (circle) or stadium band (slot) around the contour are used: starting at the gap outside the edge, with the given width. Useful when the face is not flat far away from the hole.')}</p>` : ''}
+    ${state.opts.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap [mm]')}</label><input id="d-rg" value="${state.opts.ring.gap}" inputmode="decimal"></div><div class="row"><label>${tt('Ring width [mm]')}</label><input id="d-rw" value="${state.opts.ring.width}" inputmode="decimal"></div><p class="note">${tt('Only the plane points in a ring (circle), stadium band (slot) or band along the edge (line) are used: starting at the gap outside the edge, with the given width. Useful when the face is not flat far away from the hole.')}</p>` : ''}
     <p class="note">${m.type === 'Linie' ? tt('Click on the edge between two faces. The line is the intersection edge fitted inside the auxiliary plane; choose which adjacent face is the auxiliary plane in the Action Bar.') : tt('Click near the transition face/wall (or on the wall): the wall points are projected into the plane and the feature is fitted in the plane. The center lies in the plane, orientation = plane normal.')}</p>` : ''}`
     : `<h4>${tt('Brush')}</h4><p class="note">${tt('Paint: stroke over the mesh. Erase: Erase button or hold Shift. Undo: Ctrl+Z. Esc clears the selection, a second Esc returns to Click & grow.')}</p>`}
     ${p ? `<h4>${tt('Preview')}: ${typeName(p.fit.type)}</h4>${p.aux ? auxStats(p) : ''}${kv(fitRows(p.fit, p.indices.length))}
@@ -1357,7 +1357,7 @@ function fitParamsHTML(f: FeatureView) {
     <p class="note">${tt('Normal filter: points whose measured surface normal deviates from the fitted element by more than the angle (edges, chamfers, adjacent faces) are discarded – worst first, at most the percentage.')}${m.nfRemoved ? ` <b>${tt('Currently {0} points discarded.', m.nfRemoved)}</b>` : ''}</p>
     ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option><option value="ring" ${fp.aux === 'ring' ? 'selected' : ''}>${tt('Local ring')}</option>
       ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
-      ${fp.aux === 'ring' && f.type !== 'Linie' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
+      ${fp.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
     </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {

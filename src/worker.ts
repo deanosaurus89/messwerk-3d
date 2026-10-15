@@ -79,7 +79,7 @@ export type Req =
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number } }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
-  | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult };
+  | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number } };
 
 export interface FitParams { k: number; nf?: NormalFilter | null; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
@@ -187,7 +187,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { dev, dir, pos }; transfer.push(dev.buffer, dir.buffer, pos.buffer);
     } else if (req.op === 'auxLine') {
       if (!topo) throw new Error('Line with auxiliary plane needs a polygon model (triangles).');
-      const r = extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, req.plane);
+      const r = extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, req.plane, req.ring);
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx }, faces: r.faces };
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
