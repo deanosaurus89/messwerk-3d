@@ -8,6 +8,34 @@ type V3 = [number, number, number];
 // ------------------------------------------------------------------ ViewCube
 const FACES: [string, V3][] = [['RECHTS', [1, 0, 0]], ['LINKS', [-1, 0, 0]], ['OBEN', [0, 0, 1]], ['UNTEN', [0, 0, -1]], ['VORNE', [0, -1, 0]], ['HINTEN', [0, 1, 0]]];
 
+/** Würfel 2×2×2 mit abgeschrägten Ecken (Fasen k): Achteck-Flächen mit Beschriftung (UV wie BoxGeometry), Dreiecke an den Ecken. */
+function chamferedCube(k: number): THREE.BufferGeometry {
+  const box = new THREE.BoxGeometry(2, 2, 2); const bp = box.getAttribute('position'), bu = box.getAttribute('uv');
+  const pos: number[] = [], uv: number[] = [], groups: [number, number, number][] = [];
+  for (let f = 0; f < 6; f++) {
+    const a = f >> 1, sg = f % 2 ? -1 : 1, b = (a + 1) % 3, c = (a + 2) % 3;
+    // affine Abbildung (pb, pc) -> uv aus drei Eckpunkten der Box-Fläche
+    const P = [0, 1, 2].map((i) => [bp.getComponent(4 * f + i, b), bp.getComponent(4 * f + i, c)]), U = [0, 1, 2].map((i) => [bu.getX(4 * f + i), bu.getY(4 * f + i)]);
+    const det = (P[1][0] - P[0][0]) * (P[2][1] - P[0][1]) - (P[2][0] - P[0][0]) * (P[1][1] - P[0][1]);
+    const uvAt = (x: number, y: number) => { const s1 = ((x - P[0][0]) * (P[2][1] - P[0][1]) - (P[2][0] - P[0][0]) * (y - P[0][1])) / det, t1 = ((P[1][0] - P[0][0]) * (y - P[0][1]) - (x - P[0][0]) * (P[1][1] - P[0][1])) / det;
+      return [U[0][0] + s1 * (U[1][0] - U[0][0]) + t1 * (U[2][0] - U[0][0]), U[0][1] + s1 * (U[1][1] - U[0][1]) + t1 * (U[2][1] - U[0][1])]; };
+    const m = 1 - k; const oct = [[1, m], [m, 1], [-m, 1], [-1, m], [-1, -m], [-m, -1], [m, -1], [1, -m]];
+    const v3 = (x: number, y: number) => { const q = [0, 0, 0]; q[a] = sg; q[b] = x; q[c] = y; return q; };
+    const start = pos.length / 3;
+    for (let i = 0; i < 8; i++) { let [x0, y0] = oct[i], [x1, y1] = oct[(i + 1) % 8]; if (sg < 0) { [x0, y0, x1, y1] = [x1, y1, x0, y0]; }
+      for (const [x, y] of [[0, 0], [x0, y0], [x1, y1]]) { pos.push(...v3(x, y)); uv.push(...uvAt(x, y)); } }
+    groups.push([start, 24, f]);
+  }
+  const cs = pos.length / 3;
+  for (const sx of [1, -1]) for (const sy of [1, -1]) for (const sz of [1, -1]) {
+    let tri = [[sx * (1 - k), sy, sz], [sx, sy * (1 - k), sz], [sx, sy, sz * (1 - k)]];
+    if (sx * sy * sz < 0) tri = [tri[0], tri[2], tri[1]];
+    for (const q of tri) { pos.push(...q); uv.push(0, 0); } }
+  groups.push([cs, 24, 6]);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  for (const [s0, n, mi] of groups) g.addGroup(s0, n, mi); g.computeVertexNormals(); box.dispose(); return g;
+}
+
 export class ViewCube {
   scene = new THREE.Scene();
   cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
@@ -23,19 +51,28 @@ export class ViewCube {
       g.fillStyle = '#22303f'; g.font = `bold ${t.length > 5 ? 22 : 26}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(t, 64, 66);
       const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-      return new THREE.MeshBasicMaterial({ map: tex });
+      return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
     });
     // Würfel im Y-oben-System bauen und um X drehen, damit Seitenbeschriftungen bei Z-oben aufrecht stehen
     const local = [mats[0], mats[1], mats[2], mats[3], mats[4], mats[5]];
-    this.cube = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), local);
+    const edgeMat = new THREE.MeshBasicMaterial({ color: 0xc9d3de, side: THREE.DoubleSide });
+    this.cube = new THREE.Mesh(chamferedCube(0.32), [...local, edgeMat]);
+    this.cube.add(new THREE.LineSegments(new THREE.EdgesGeometry(this.cube.geometry, 10), new THREE.LineBasicMaterial({ color: 0x6f7f90 })));
     this.cube.rotation.x = Math.PI / 2;
     this.scene.add(this.cube);
-    const ax = new THREE.AxesHelper(1.6); ax.position.set(-1.12, -1.12, -1.12); this.scene.add(ax);
-    for (const [txt, p, col] of [['X', [0.7, -1.12, -1.12], '#d32f2f'], ['Y', [-1.12, 0.7, -1.12], '#2e9d3a'], ['Z', [-1.12, -1.12, 0.7], '#1f5fa8']] as const) {
+    // Achsenkreuz: kräftige Pfeile mit Beschriftung an den Spitzen, Ursprung an der hinteren unteren linken Würfelecke
+    const O = new THREE.Vector3(-1.2, -1.2, -1.2);
+    for (const [txt, d, col] of [['X', [1, 0, 0], 0xd32f2f], ['Y', [0, 1, 0], 0x2e9d3a], ['Z', [0, 0, 1], 0x1f5fa8]] as const) {
+      const dir = new THREE.Vector3(...d); const L = 2.75;
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, L - 0.35, 10), new THREE.MeshBasicMaterial({ color: col }));
+      shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); shaft.position.copy(O).addScaledVector(dir, (L - 0.35) / 2); this.scene.add(shaft);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.4, 14), new THREE.MeshBasicMaterial({ color: col }));
+      tip.quaternion.copy(shaft.quaternion); tip.position.copy(O).addScaledVector(dir, L - 0.2); this.scene.add(tip);
       const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d')!;
-      g.fillStyle = col; g.font = 'bold 44px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 32, 34);
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
-      s.position.set(p[0], p[1], p[2]); s.scale.setScalar(0.55); this.scene.add(s);
+      g.fillStyle = '#ffffffd0'; g.beginPath(); g.arc(32, 32, 26, 0, 7); g.fill();
+      g.fillStyle = '#' + col.toString(16).padStart(6, '0'); g.font = 'bold 42px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 32, 35);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); sp.renderOrder = 5;
+      sp.position.copy(O).addScaledVector(dir, L + 0.3); sp.scale.setScalar(0.6); this.scene.add(sp);
     }
     this.hl = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x1f5fa8, transparent: true, opacity: 0.45, depthTest: false }));
     this.hl.visible = false; this.scene.add(this.hl);
@@ -70,7 +107,7 @@ export class ViewCube {
   }
   syncCam() {
     const q = this.v.camera.quaternion;
-    this.cam.quaternion.copy(q); this.cam.position.set(0, 0, 6.2).applyQuaternion(q); this.cam.updateMatrixWorld();
+    this.cam.quaternion.copy(q); this.cam.position.set(0, 0, 7.4).applyQuaternion(q); this.cam.updateMatrixWorld();
   }
   render(r: THREE.WebGLRenderer) {
     const size = this.el.clientWidth; if (!size) return;

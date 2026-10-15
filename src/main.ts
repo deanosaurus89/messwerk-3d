@@ -10,7 +10,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cadTree, cadDialog, cadActive } from './cadui';
+import { initCad, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
 import { datumText } from './core/features';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -87,6 +87,7 @@ function featPoints(fid: number): Vec3[] | null {
   ptsCache.set(fid, out); return out;
 }
 const ctx = { points: featPoints };
+let showCurves = true;
 const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
 const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -186,7 +187,10 @@ $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; 
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features));
 $('#btn-delete-feat').onclick = () => deleteSelected();
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); };
-$('#btn-toggle-wire').onclick = () => { const on = !viewer.wire; viewer.setWireframe(on); $('#btn-toggle-wire').classList.toggle('on', on); };
+$('#btn-toggle-wire').onclick = () => toggleWire();
+$('#btn-toggle-curves').onclick = () => toggleCurves();
+$('#btn-view-center').onclick = () => centerOn();
+$('#btn-view-fit').onclick = () => viewer.view('fit');
 $('#btn-toggle-pts').onclick = () => { state.colorPts = !state.colorPts; renderScene(); renderRibbon(); };
 
 function download(name: string, text: string, type = 'text/csv;charset=utf-8') {
@@ -230,7 +234,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale
     state.opts.brush = +(r.bounds.diag / 25).toFixed(1);
     $('#projname').textContent = r.name;
     status(`${name} geladen in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
-    $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
+    $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`; showBBoxInfo(r.bounds);
     renderAll();
   } catch (e: any) { status('Fehler beim Import: ' + e.message); }
 }
@@ -1230,6 +1234,34 @@ function centerOn(id?: number | null) {
   b.addEventListener('pointerdown', (e) => e.stopPropagation());
   viewer.el.appendChild(b);
 }
+// ------------------------------------------------------------------ Ansichts-Menü (Zahnrad über dem Navigationswürfel) + Menüband „Ansicht"
+
+function toggleWire() { const on = !viewer.wire; viewer.setWireframe(on); syncViewToggles(); }
+function toggleCurves() { showCurves = !showCurves; setCadEdges(showCurves); renderScene(); syncViewToggles(); }
+function syncViewToggles() {
+  for (const el of document.querySelectorAll('[data-vt="wire"]')) el.classList.toggle('on', !!viewer.wire);
+  for (const el of document.querySelectorAll('[data-vt="curves"]')) el.classList.toggle('on', showCurves && cadEdgesOn);
+  $('#btn-toggle-wire').classList.toggle('on', !!viewer.wire);
+}
+{
+  const g = document.createElement('div'); g.id = 'view-gear';
+  g.innerHTML = `<button class="vg-btn" title="Ansicht" aria-label="Ansichtsmenü">⚙</button><div class="vg-menu">
+    <button data-vg="center">⌖ Zentrieren</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ Einpassen</button>
+    <button data-vg="wire" data-vt="wire">▦ Dreieckskanten</button><button data-vg="curves" data-vt="curves" class="on">〰 Kurven/CAD-Kanten</button></div>`;
+  g.addEventListener('pointerdown', (e) => e.stopPropagation());
+  g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => g.classList.toggle('open');
+  g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
+    if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status('Eingepasst.'); } else if (a === 'wire') toggleWire(); else toggleCurves();
+    if (a !== 'wire' && a !== 'curves') g.classList.remove('open'); }));
+  window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
+  viewer.el.appendChild(g);
+  const info = document.createElement('div'); info.id = 'bbox-info'; info.className = 'hidden'; viewer.el.appendChild(info);
+}
+function showBBoxInfo(b: { min: number[]; max: number[] } | null) {
+  const el = $('#bbox-info'); if (!b) { el.classList.add('hidden'); return; }
+  const d = [0, 1, 2].map((k) => b.max[k] - b.min[k]); el.classList.remove('hidden');
+  el.innerHTML = `<b>mm</b> · ${d.map((x) => x.toFixed(1)).join(' × ')}`; el.title = `Einheit mm · Gesamt-Bounding-Box X × Y × Z`;
+}
 
 // ------------------------------------------------------------------ Kontextmenü (Rechtsklick / langes Tippen)
 const ctxMenu = document.createElement('div'); ctxMenu.id = 'ctx-menu'; ctxMenu.className = 'hidden'; document.body.appendChild(ctxMenu);
@@ -1857,7 +1889,7 @@ async function acceptSuggestions() {
 let curveDraft: { v: number; p: number[] }[] = [];
 function curvesReset() { cv.undo.length = 0; cv.edit = null; state.curves = []; state.nextCurve = 1; state.curveSel = null; state.layout = null; state.showLayout = false; curveDraft = []; }
 function renderCurves() {
-  for (const c of state.curves) if (c.visible) viewer.addCurve(c.pts, CURVE_COLOR[c.kind], state.curveSel === c.id, c.id, cv.hover === c.id);
+  for (const c of state.curves) if (c.visible && showCurves) viewer.addCurve(c.pts, CURVE_COLOR[c.kind], state.curveSel === c.id, c.id, cv.hover === c.id);
   const L = state.layout;
   if (L && state.curves.some((c) => c.visible)) {
     for (const n of L.nodes) viewer.addNode(n.p, n.degree === 3 ? 0xff8f00 : n.degree === 1 ? 0x9e9e9e : 0x212121, n.degree === 3 ? 1.1 : 0.8);
