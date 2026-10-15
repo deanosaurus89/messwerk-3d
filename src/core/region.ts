@@ -235,22 +235,22 @@ export class MeshTopology {
     const inR = new Uint8Array(nt); const out: number[] = [seedTri]; inR[seedTri] = 1; let area = fa[seedTri];
     const cap = 0.6 * this.totalArea; let next = Math.max(40, seed.length * 1.6);
     // Breitensuche (Reihenfolge unabhängig von der Lage im Raum)
-    let head = 0;
+    let head = 0; const rej: number[] = [];
     while (head < out.length) {
       const t = out[head++];
       for (const u of this.neighbors(t)) {
         if (inR[u]) continue;
         if (dotN(fn, t, u) < cosA && dotN(sn, t, u) < cosA) continue;
         if (!inRad(u)) continue;
-        if (!accept(u)) { inR[u] = 2; continue; }
+        if (!accept(u)) { inR[u] = 2; rej.push(u); continue; }
         inR[u] = 1; out.push(u); area += fa[u];
         if (area > cap) { info.capped = true; head = out.length; break; }
         if (out.length >= next && model && !prism) {
           // Neu-Fit auf der gewachsenen Region (folgt leichter Formabweichung), Toleranz bleibt am Saat-Rauschen verankert
-          const nm = fitOf(out, autoType ? 'auto' : model.type); if (nm) { model = nm; info.refits++; const s2 = resid(nm, out); tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
+          const nm = fitOf(out, autoType && info.refits < 2 ? 'auto' : model.type); if (nm) { model = nm; info.refits++; const s2 = resid(nm, out); tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
           next = out.length * 1.6;
           // abgelehnte Nachbarn mit neuem Modell erneut prüfen
-          for (let i = 0; i < nt; i++) if (inR[i] === 2) inR[i] = 0;
+          for (const i of rej) inR[i] = 0; rej.length = 0;
           head = 0;
         }
       }

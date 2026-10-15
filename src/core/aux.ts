@@ -102,6 +102,19 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     }
     return backup;
   };
+  /** Von der Klickstelle über die Fläche zur nächsten Wand (Normale ⟂ Ebenennormale) laufen und dort prismatisch wachsen. */
+  const wallByWalk = (N: Vec3): Region | undefined => {
+    const sn = topo.smoothN, seen = new Set<number>([seedTri]); let q = [seedTri]; const lim = Math.min(maxDist, 60 * topo.localEdge(seedTri));
+    for (let it = 0; it < 4000 && q.length; it++) { const nq: number[] = [];
+      for (const t of q) for (const u of topo.neighbors(t)) { if (seen.has(u)) continue; seen.add(u); if (triDist(u) > lim) continue;
+        if (Math.abs(sn[3 * u] * N[0] + sn[3 * u + 1] * N[1] + sn[3 * u + 2] * N[2]) < 0.15) {
+          let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.1 });
+          if (!gt.length) gt = topo.growFit(u, seedPoint, { ...o, radius: 0, prismAxis: N });
+          if (!gt.length) return undefined; const g = mk(gt); return g.verts.length >= 8 && !isPlanar(g).ok && prismatic(g, N) ? g : undefined; }
+        nq.push(u); }
+      q = nq; }
+    return undefined;
+  };
   const prismatic = (r: Region, axis: Vec3) => { const a = axisFromNormals(r.n); return a.ratio < 0.05 && Math.abs(dot(a.axis, axis)) > 0.95; };
 
   let p1 = isPlanar(r1);
@@ -115,7 +128,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   let wall: Region | undefined, planeReg: Region | undefined;
   if (p1.ok && !givenPlane) {
     planeReg = r1;
-    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
+    wall = wallByWalk(p1.normal) ?? findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
     if (!wall) { if (isFinite(maxDist)) return null; throw new Error('Keine Wand (Bohrung/Langloch) neben der angeklickten Ebene gefunden'); }
   } else if (p1.ok && givenPlane) {
     wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist, { prismAxis: givenPlane.normal });
@@ -142,6 +155,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     fit = fs && fs.rms < 0.6 * fc.rms && fs.length! - fs.width! > 0.2 * fs.width! ? fs : fc;
   } else fit = fitInPlane(type, wall.p, plane);
   fit.n = wall.verts.length;
+  // Plausibilität (relativ zur Netzauflösung): Wand passt nicht zu Kreis/Langloch -> keine Hilfsebenen-Lösung
+  if (!(fit.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)))) { if (isFinite(maxDist)) return null; throw new Error(`Wand passt nicht zu ${type === 'auto' ? 'Kreis/Langloch' : type} (RMS ${fit.rms.toFixed(2)} mm)`); }
   delete fit.residuals; delete plane.residuals;
   return { fit, plane, wallIdx: wall.verts, planeIdx: planeReg ? planeReg.verts : new Uint32Array(0) };
 }

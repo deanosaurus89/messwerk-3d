@@ -302,7 +302,7 @@ function scheduleAuxHover(h: Hit | null) {
       if (seq !== auxSeq || state.preview) return;
       viewer.showHoverSets([{ idx: r.aux.indices, color: 0x2f7de1 }, { idx: r.indices, color: 0xff8c1a }]);
       status(`Vorschau beim Überfahren: ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Hilfsebenen-Punkte (blau) – Klick übernimmt.`);
-    } catch (err: any) { if (seq === auxSeq) { viewer.showHoverSets([]); status("Vorschau: " + err.message); } } finally { auxBusy = false; }
+    } catch (err: any) { if (seq === auxSeq) { viewer.showHoverSets([]); status("Vorschau: hier keine Hilfsebenen-Kombination (" + err.message + ")"); } } finally { auxBusy = false; }
   }, 220);
 }
 window.addEventListener('pointerup', async (e) => {
