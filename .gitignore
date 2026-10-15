@@ -6,3 +6,4 @@ dist/
 test-results/
 playwright-report/
 tests/fixtures/cad/
+docs/cad-*
