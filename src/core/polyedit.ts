@@ -61,18 +61,25 @@ function quality(P: ArrayLike<number>, a: number, b: number, c: number, n: numbe
   return s > 0 ? (2 * Math.sqrt(3) * A2) / s : 0;
 }
 
+/** Sinus des kleinsten Innenwinkels (gegenüber der kürzesten Kante) */
+function minAngleSin(P: ArrayLike<number>, a: number, b: number, c: number): number {
+  const l = (i: number, j: number) => Math.hypot(P[3 * i] - P[3 * j], P[3 * i + 1] - P[3 * j + 1], P[3 * i + 2] - P[3 * j + 2]);
+  const x = l(a, b), y = l(b, c), z = l(c, a); const ux = P[3 * b] - P[3 * a], uy = P[3 * b + 1] - P[3 * a + 1], uz = P[3 * b + 2] - P[3 * a + 2], vx = P[3 * c] - P[3 * a], vy = P[3 * c + 1] - P[3 * a + 1], vz = P[3 * c + 2] - P[3 * a + 2];
+  const A2 = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx); const mx = Math.max(x * y, y * z, z * x); return mx ? A2 / mx : 0;
+}
+
 /** Ungenutzte Knoten entfernen, tote Dreiecke weglassen. */
-function compact(P: ArrayLike<number>, F: ArrayLike<number>, alive: (t: number) => boolean, nt: number): RawMesh {
-  const map = new Int32Array(P.length / 3).fill(-1); const pos: number[] = []; const idx: number[] = [];
+function compact(P: ArrayLike<number>, F: ArrayLike<number>, alive: (t: number) => boolean, nt: number): RawMesh & { vmap: Uint32Array } {
+  const map = new Int32Array(P.length / 3).fill(-1); const pos: number[] = []; const idx: number[] = []; const vm: number[] = [];
   for (let t = 0; t < nt; t++) {
     if (!alive(t)) continue;
     for (let k = 0; k < 3; k++) {
       const v = F[3 * t + k];
-      if (map[v] < 0) { map[v] = pos.length / 3; pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); }
+      if (map[v] < 0) { map[v] = pos.length / 3; vm.push(v); pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); }
       idx.push(map[v]);
     }
   }
-  return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+  return { positions: new Float32Array(pos), indices: new Uint32Array(idx), vmap: new Uint32Array(vm) };
 }
 
 /** Randkanten (genau einem Dreieck zugeordnet) -> Knoten am Rand markieren. */
@@ -88,21 +95,22 @@ export function boundaryEdges(indices: ArrayLike<number>, nv: number): { count: 
 }
 
 // ---------------------------------------------------------------- Dreiecksreduktion
-class Heap { // Min-Heap (Kosten, Halbkante u->v, Zeitstempel)
-  c: number[] = []; u: number[] = []; v: number[] = []; s: number[] = [];
-  get size() { return this.c.length; }
+class Heap { // Min-Heap (Kosten, Halbkante u->v, Zeitstempel) – typisierte Felder, wachsend, ohne Allokation je Eintrag
+  c = new Float64Array(1024); u = new Int32Array(1024); v = new Int32Array(1024); s = new Int32Array(1024); size = 0;
+  pu = 0; pv = 0; ps = 0;
+  private grow() { const n = this.c.length * 2; const c = new Float64Array(n); c.set(this.c); this.c = c; const u = new Int32Array(n); u.set(this.u); this.u = u; const v = new Int32Array(n); v.set(this.v); this.v = v; const s = new Int32Array(n); s.set(this.s); this.s = s; }
   push(c: number, u: number, v: number, s: number) {
-    let i = this.c.length; this.c.push(c); this.u.push(u); this.v.push(v); this.s.push(s);
-    while (i > 0) { const p = (i - 1) >> 1; if (this.c[p] <= this.c[i]) break; this.swap(i, p); i = p; }
+    if (this.size === this.c.length) this.grow(); let i = this.size++; const C = this.c, U = this.u, V = this.v, S = this.s;
+    while (i > 0) { const p = (i - 1) >> 1; if (C[p] <= c) break; C[i] = C[p]; U[i] = U[p]; V[i] = V[p]; S[i] = S[p]; i = p; }
+    C[i] = c; U[i] = u; V[i] = v; S[i] = s;
   }
-  pop(): [number, number, number, number] {
-    const r: [number, number, number, number] = [this.c[0], this.u[0], this.v[0], this.s[0]];
-    const last = this.c.length - 1; this.swap(0, last); this.c.pop(); this.u.pop(); this.v.pop(); this.s.pop();
-    let i = 0; const n = this.c.length;
-    for (;;) { const l = 2 * i + 1, rr = l + 1; let m = i; if (l < n && this.c[l] < this.c[m]) m = l; if (rr < n && this.c[rr] < this.c[m]) m = rr; if (m === i) break; this.swap(i, m); i = m; }
-    return r;
+  /** kleinstes Element nach pu/pv/ps */
+  pop() {
+    const C = this.c, U = this.u, V = this.v, S = this.s; this.pu = U[0]; this.pv = V[0]; this.ps = S[0];
+    const n = --this.size; const c = C[n], u = U[n], v = V[n], s = S[n]; let i = 0;
+    for (;;) { let m = 2 * i + 1; if (m >= n) break; if (m + 1 < n && C[m + 1] < C[m]) m++; if (C[m] >= c) break; C[i] = C[m]; U[i] = U[m]; V[i] = V[m]; S[i] = S[m]; i = m; }
+    C[i] = c; U[i] = u; V[i] = v; S[i] = s;
   }
-  private swap(i: number, j: number) { for (const a of [this.c, this.u, this.v, this.s]) { const t = a[i]; a[i] = a[j]; a[j] = t; } }
 }
 
 export interface DecimateOptions { tol: number; minTris?: number; minQuality?: number; onProgress?: Progress; progressEvery?: number;
@@ -113,8 +121,16 @@ export interface DecimateOptions { tol: number; minTris?: number; minQuality?: n
   /** beidseitige Toleranz: Schwerpunkte/Kantenmitten neuer Dreiecke ≤ tol vom Original (Default an) */
   twoSided?: boolean;
   /** Glättungsringe der Referenznormalen (Scanrauschen), Default 3 */
-  normalSmooth?: number; }
-export interface DecimateResult extends RawMesh { before: number; after: number; maxDev: number; collapses: number; rejects?: Record<string, number>; noiseDeg?: number; }
+  normalSmooth?: number;
+  /** max. Kantenlänge der reduzierten Dreiecke (begrenzt die Dreiecksgröße), 0/undefined = ohne */
+  maxEdge?: number;
+  /** kleinster Innenwinkel neuer Dreiecke [°] (keine zu spitzen Dreiecke; schlechtere nur, wenn vorher schon schlechter) */
+  minAngleDeg?: number;
+  /** Knoten, die nicht bewegt/entfernt werden dürfen (z. B. Partitionsgrenzen) */
+  frozen?: Uint8Array;
+  /** Referenz-Original, falls m bereits reduziert ist (Nahtdurchgang): Toleranz/Normalen gegen dieses Netz */
+  ref?: RawMesh; }
+export interface DecimateResult extends RawMesh { before: number; after: number; maxDev: number; collapses: number; rejects?: Record<string, number>; noiseDeg?: number; /** je Ausgabeknoten der Eingabeknotenindex */ vmap?: Uint32Array; }
 
 /**
  * Halbkanten-Kollaps (Knoten u wandert auf Nachbarknoten v; alle verbleibenden Knoten liegen damit auf dem Original),
@@ -123,7 +139,7 @@ export interface DecimateResult extends RawMesh { before: number; after: number;
  * Randknoten bleiben fest; Kollapse, die Dreiecke umklappen oder Splitter erzeugen, werden verworfen.
  */
 export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
-  const P = Float64Array.from(m.positions), F = Int32Array.from(m.indices);
+  const P = Float64Array.from(m.positions), F = Int32Array.from(m.indices); const R = o.ref ?? m;
   const nv = P.length / 3, nt = F.length / 3, tol2 = o.tol * o.tol;
   // CAD-Tessellierung (Median-Dreiecksqualität < 0,3: lange Splitter) → Splitterschutz lockern, sonst wäre kaum ein Kollaps möglich
   let minQ = o.minQuality ?? 0.12;
@@ -131,7 +147,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const alive = new Uint8Array(nt).fill(1);
   const vf: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vf[F[3 * t + k]].push(t);
-  const { isB } = boundaryEdges(F, nv);
+  const { isB } = boundaryEdges(F, nv); if (o.frozen) for (let v = 0; v < nv; v++) if (o.frozen[v]) isB[v] = 1;
   // Quadriken (flächengewichtet)
   const Q = new Float64Array(10 * nv); const n = [0, 0, 0];
   for (let t = 0; t < nt; t++) {
@@ -145,10 +161,14 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     return q(0) * x * x + 2 * q(1) * x * y + 2 * q(2) * x * z + 2 * q(3) * x + q(4) * y * y + 2 * q(5) * y * z + 2 * q(6) * y + q(7) * z * z + 2 * q(8) * z + q(9);
   };
   // Originalpunkte je Dreieck
-  const own: number[][] = Array.from({ length: nt }, () => []);
-  for (let v = 0; v < nv; v++) if (vf[v].length) own[vf[v][0]].push(v);
-  const O = m.positions; // Original (unverändert)
-  // Originalnormalen (flächengewichtet) für die Normalenabweichung
+  // als verkettete Listen in typisierten Feldern (keine Allokation je Kollaps)
+  const ownH = new Int32Array(nt).fill(-1), ownN = new Int32Array(R.positions.length / 3).fill(-1);
+  if (!o.ref) { for (let v = 0; v < nv; v++) if (vf[v].length) { const t = vf[v][0]; ownN[v] = ownH[t]; ownH[t] = v; } }
+  else { const bc = buildBVH(m); const q = new THREE.Vector3(); const tg: any = {}; const RPs = R.positions;
+    for (let v = 0; v < RPs.length / 3; v++) { q.set(RPs[3 * v], RPs[3 * v + 1], RPs[3 * v + 2]); const h = bc.closestPointToPoint(q, tg); if (!h) continue; const t = h.faceIndex!; ownN[v] = ownH[t]; ownH[t] = v; } }
+  const O = R.positions; // Original (unverändert)
+  // Originalnormalen (flächengewichtet, geglättet) für die Normalenabweichung – je Knoten eines Netzes
+  const refNormals = (P: Float64Array, F: Int32Array): Float32Array => { const nv = P.length / 3, nt = F.length / 3;
   const ON = new Float32Array(3 * nv);
   // vorzeichenunabhängig (STL mit uneinheitlicher Orientierung): Flächennormalen am ersten Beitrag ausrichten
   for (let t = 0; t < nt; t++) { const a = F[3 * t], b = F[3 * t + 1], c = F[3 * t + 2]; faceNormal(P, a, b, c, n); for (const v of [a, b, c]) { const sg = ON[3 * v] * n[0] + ON[3 * v + 1] * n[1] + ON[3 * v + 2] * n[2] < 0 ? -1 : 1; ON[3 * v] += sg * n[0]; ON[3 * v + 1] += sg * n[1]; ON[3 * v + 2] += sg * n[2]; } }
@@ -162,10 +182,13 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
       for (const v of [a, b, c]) { const sv = ON[3 * v] * x + ON[3 * v + 1] * y + ON[3 * v + 2] * z < 0 ? -1 : 1; if (Math.abs(ON[3 * v] * x + ON[3 * v + 1] * y + ON[3 * v + 2] * z) < 2.4) { S[3 * v] += ON[3 * v]; S[3 * v + 1] += ON[3 * v + 1]; S[3 * v + 2] += ON[3 * v + 2]; continue; } S[3 * v] += sv * x; S[3 * v + 1] += sv * y; S[3 * v + 2] += sv * z; } }
     for (let v = 0; v < nv; v++) { const l = Math.hypot(S[3 * v], S[3 * v + 1], S[3 * v + 2]) || 1; ON[3 * v] = S[3 * v] / l; ON[3 * v + 1] = S[3 * v + 1] / l; ON[3 * v + 2] = S[3 * v + 2] / l; }
   }
+    return ON; };
+  const RP = R === m ? P : Float64Array.from(R.positions), RF = R === m ? F : Int32Array.from(R.indices);
+  const ON = refNormals(RP, RF); const ONc = R === m ? ON : refNormals(P, F);
   // Rauschniveau: 90. Perzentil des Winkels Originaldreieck ↔ geglättete Normale; erlaubt = Vorgabe + Rauschwinkel
   let noiseDeg = 0;
-  { const a: number[] = []; const step = Math.max(1, Math.floor(nt / 20000));
-    for (let t = 0; t < nt; t += step) { const x = F[3 * t], y = F[3 * t + 1], z = F[3 * t + 2]; const l = faceNormal(P, x, y, z, n) || 1; let w = 0; for (const v of [x, y, z]) w = Math.max(w, Math.acos(Math.min(1, Math.abs(n[0] * ON[3 * v] + n[1] * ON[3 * v + 1] + n[2] * ON[3 * v + 2]) / l))); a.push(w); }
+  { const a: number[] = []; const rt = RF.length / 3, step = Math.max(1, Math.floor(rt / 20000));
+    for (let t = 0; t < rt; t += step) { const x = RF[3 * t], y = RF[3 * t + 1], z = RF[3 * t + 2]; const l = faceNormal(RP, x, y, z, n) || 1; let w = 0; for (const v of [x, y, z]) w = Math.max(w, Math.acos(Math.min(1, Math.abs(n[0] * ON[3 * v] + n[1] * ON[3 * v + 1] + n[2] * ON[3 * v + 2]) / l))); a.push(w); }
     a.sort((p2, q2) => p2 - q2); noiseDeg = ((a[Math.floor(0.9 * a.length)] ?? 0) * 180) / Math.PI; }
   const cosN = Math.cos((Math.min(80, (o.maxNormalDeg ?? 10) + noiseDeg) * Math.PI) / 180);
   // Merkmalskanten (Flächenwinkel) – Knoten mit ≠ 0/2 Merkmalskanten (Ecken, Enden) bleiben fest
@@ -180,85 +203,131 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     } }
   const fdeg = new Uint8Array(nv); for (const kk of feat) { const a = Math.floor(kk / nv), b = kk % nv; if (fdeg[a] < 255) fdeg[a]++; if (fdeg[b] < 255) fdeg[b]++; }
   const twoSided = o.twoSided ?? true; let bvh: MeshBVH | null = null; const qv = new THREE.Vector3(); const qt: any = {};
-  if (twoSided) bvh = buildBVH({ positions: m.positions, indices: m.indices });
+  if (twoSided) bvh = buildBVH({ positions: R.positions, indices: R.indices });
   const farFromOrig = (x: number, y: number, z: number) => { qv.set(x, y, z); const r = bvh!.closestPointToPoint(qv, qt, 0, o.tol * 1.0001); return !r || r.distance > o.tol; };
   const stamp = new Int32Array(nv);
   const heap = new Heap();
-  const neigh = (u: number) => { const s = new Set<number>(); for (const t of vf[u]) for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== u) s.add(w); } return s; };
+  // Nachbarn ohne Set: Markierung je Durchlauf (epoch), Ergebnis in wiederverwendetem Puffer
+  const mark = new Int32Array(nv); let epoch = 0; let NB: Int32Array<ArrayBufferLike> = new Int32Array(64), NB2: Int32Array<ArrayBufferLike> = new Int32Array(64);
+  const neighInto = (u: number, out: Int32Array<ArrayBufferLike>): [Int32Array<ArrayBufferLike>, number] => { epoch++; let k = 0; const L = vf[u];
+    for (let j = 0; j < L.length; j++) { const i = 3 * L[j]; for (let e = 0; e < 3; e++) { const w = F[i + e]; if (w !== u && mark[w] !== epoch) { mark[w] = epoch; if (k === out.length) { const o2 = new Int32Array(2 * k); o2.set(out); out = o2; } out[k++] = w; } } }
+    return [out, k]; };
   const pushV = (u: number) => {
     if (isB[u] || !vf[u].length || (fdeg[u] !== 0 && fdeg[u] !== 2)) return; stamp[u]++;
-    for (const v of neigh(u)) { if (fdeg[u] === 2 && !feat.has(ekey(u, v))) continue; heap.push(qerr(u, v), u, v, stamp[u]); }
+    const [b, k] = neighInto(u, NB2); NB2 = b;
+    for (let j = 0; j < k; j++) { const v = b[j]; if (fdeg[u] === 2 && !feat.has(ekey(u, v))) continue; heap.push(qerr(u, v), u, v, stamp[u]); }
   };
   for (let u = 0; u < nv; u++) pushV(u);
   let tris = nt, collapses = 0; const minTris = o.minTris ?? 4, every = o.progressEvery ?? 20000;
-  const n0 = [0, 0, 0], n1 = [0, 0, 0]; const rej = { geoQ: 0, geoFlip: 0, shared: 0, link: 0, geo: 0, tol: 0, normal: 0, twoSided: 0 };
+  const n0 = [0, 0, 0], n1 = [0, 0, 0]; const rej = { geoQ: 0, geoFlip: 0, shared: 0, link: 0, geo: 0, tol: 0, normal: 0, twoSided: 0, planarFast: 0, angle: 0, edge: 0 };
+  const maxE2 = o.maxEdge ? o.maxEdge * o.maxEdge : 0, minSin = o.minAngleDeg ? Math.sin((o.minAngleDeg * Math.PI) / 180) : 0;
+  // wiederverwendete Puffer
+  let MV = new Int32Array(64); const SH = new Int32Array(2); let PTS = new Int32Array(256), ASG = new Int32Array(256); let NN = new Float64Array(192);
+  const heap0 = heap.size; const cosPlanar = Math.cos((2 * Math.PI) / 180), band = o.tol / 4;
   while (heap.size && tris > minTris) {
-    const [, u, v, s] = heap.pop();
+    heap.pop(); const u = heap.pu, v = heap.pv, s = heap.ps;
     if (s !== stamp[u] || !vf[u].length || !vf[v].length) continue;
     // Dreiecke an Kante uv / übrige Dreiecke von u
-    const shared: number[] = [], moved: number[] = [];
-    for (const t of vf[u]) (F[3 * t] === v || F[3 * t + 1] === v || F[3 * t + 2] === v ? shared : moved).push(t);
-    if (shared.length !== 2) { rej.shared++; continue; }
+    const VU = vf[u]; let ns = 0, nm = 0; if (MV.length < VU.length) MV = new Int32Array(2 * VU.length);
+    for (let j = 0; j < VU.length; j++) { const t = VU[j]; if (F[3 * t] === v || F[3 * t + 1] === v || F[3 * t + 2] === v) { if (ns < 2) SH[ns] = t; ns++; } else MV[nm++] = t; }
+    if (ns !== 2) { rej.shared++; continue; }
     // Link-Bedingung: gemeinsame Nachbarn genau 2
-    const nu = neigh(u), nvs = neigh(v); let common = 0; for (const w of nu) if (nvs.has(w)) common++;
+    let r1 = neighInto(v, NB2); NB2 = r1[0]; const ev = epoch; const r0 = neighInto(u, NB); NB = r0[0]; const nuN = r0[1];
+    // mark[] trägt jetzt epoch von u; v-Nachbarn erneut prüfen über zweiten Durchlauf
+    let common = 0; { const eu = epoch; const NV2 = NB2, nvN = r1[1]; for (let j = 0; j < nvN; j++) if (mark[NV2[j]] === eu) common++; void ev; }
     if (common !== 2) { rej.link++; continue; }
     // Geometrie prüfen (Umklappen, Splitter)
     let ok = true;
-    for (const t of moved) {
+    for (let j = 0; j < nm; j++) { const t = MV[j];
       const i = 3 * t; const a = F[i], b = F[i + 1], c = F[i + 2];
       faceNormal(P, a, b, c, n0);
       const a2 = a === u ? v : a, b2 = b === u ? v : b, c2 = c === u ? v : c;
       const q = quality(P, a2, b2, c2, n1);
       const l0 = Math.hypot(n0[0], n0[1], n0[2]), l1 = Math.hypot(n1[0], n1[1], n1[2]);
-      // Splitterschutz: schlechter als minQ nur zulassen, wenn das Dreieck vorher schon schlechter war (CAD-Tessellierung)
       const q0 = l0 ? quality(P, a, b, c, n0) : 0;
       if (q < minQ && q < q0) { rej.geoQ++; ok = false; break; }
       if (!l1 || (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * l1) < 0.5) { rej.geoFlip++; ok = false; break; }
+      if (minSin && minAngleSin(P, a2, b2, c2) < minSin && minAngleSin(P, a2, b2, c2) < minAngleSin(P, a, b, c)) { rej.angle++; ok = false; break; }
+      if (maxE2) { const w1 = a === u ? b : a, w2 = c === u ? b : c; for (const w of [w1, w2]) { const dx = P[3 * w] - P[3 * v], dy = P[3 * w + 1] - P[3 * v + 1], dz = P[3 * w + 2] - P[3 * v + 2]; if (dx * dx + dy * dy + dz * dz > maxE2) { rej.edge++; ok = false; break; } } if (!ok) break; }
     }
     if (!ok) { rej.geo++; continue; }
+    // neue Dreiecksnormalen
+    if (NN.length < 3 * nm) NN = new Float64Array(6 * nm);
+    for (let j = 0; j < nm; j++) { const i = 3 * MV[j]; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2]; const l = faceNormal(P, a, b, c, n1) || 1; NN[3 * j] = n1[0] / l; NN[3 * j + 1] = n1[1] / l; NN[3 * j + 2] = n1[2] / l; }
     // Toleranz: Originalpunkte aller Dreiecke von u auf neue Dreiecke verteilen
-    const pts: number[] = []; for (const t of vf[u]) for (const p of own[t]) pts.push(p);
-    const assign = new Int32Array(pts.length);
-    for (let k = 0; k < pts.length && ok; k++) {
-      const p = pts[k], px = O[3 * p], py = O[3 * p + 1], pz = O[3 * p + 2]; let bd = Infinity, bt = -1;
-      for (const t of moved) {
-        const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
-        const d = pointTriDist2(px, py, pz, P, a, b, c); if (d < bd) { bd = d; bt = t; }
-      }
-      if (bd > tol2) ok = false; else assign[k] = bt;
+    let np = 0; for (let j = 0; j < VU.length; j++) for (let p = ownH[VU[j]]; p >= 0; p = ownN[p]) { if (np === PTS.length) { const x = new Int32Array(2 * np); x.set(PTS); PTS = x; const y = new Int32Array(2 * np); y.set(ASG); ASG = y; } PTS[np++] = p; }
+    for (let k = 0; k < np && ok; k++) {
+      const p = PTS[k], px = O[3 * p], py = O[3 * p + 1], pz = O[3 * p + 2]; let bd = Infinity, bt = -1;
+      for (let j = 0; j < nm; j++) { const i = 3 * MV[j]; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
+        const d = pointTriDist2(px, py, pz, P, a, b, c); if (d < bd) { bd = d; bt = j; } }
+      if (bd > tol2) ok = false; else ASG[k] = bt;
     }
     if (!ok) { rej.tol++; continue; }
     // Normalenabweichung neuer Dreiecke gegenüber den Originalnormalen ihrer Punkte (hält Verrundungen/Übergänge fein)
-    const nn = new Map<number, number[]>();
-    for (const t of moved) { const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2]; const q = [0, 0, 0]; const l = faceNormal(P, a, b, c, q) || 1; nn.set(t, [q[0] / l, q[1] / l, q[2] / l]);
-      // Ecken des neuen Dreiecks selbst
-      for (const w of [a, b, c]) if (Math.abs(q[0] / l * ON[3 * w] + q[1] / l * ON[3 * w + 1] + q[2] / l * ON[3 * w + 2]) < cosN) ok = false; }
-    for (let k = 0; k < pts.length && ok; k++) { const q = nn.get(assign[k])!, p = pts[k]; if (Math.abs(q[0] * ON[3 * p] + q[1] * ON[3 * p + 1] + q[2] * ON[3 * p + 2]) < cosN) ok = false; }
+    for (let j = 0; j < nm && ok; j++) { const i = 3 * MV[j]; const qx = NN[3 * j], qy = NN[3 * j + 1], qz = NN[3 * j + 2];
+      for (let e = 0; e < 3; e++) { const w = F[i + e] === u ? v : F[i + e]; if (Math.abs(qx * ONc[3 * w] + qy * ONc[3 * w + 1] + qz * ONc[3 * w + 2]) < cosN) { ok = false; break; } } }
+    for (let k = 0; k < np && ok; k++) { const j = ASG[k], p = PTS[k]; if (Math.abs(NN[3 * j] * ON[3 * p] + NN[3 * j + 1] * ON[3 * p + 1] + NN[3 * j + 2] * ON[3 * p + 2]) < cosN) ok = false; }
     if (!ok) { rej.normal++; continue; }
-    // beidseitig: Schwerpunkt und Mitten der neuen Kanten müssen nahe am Original liegen
+    // beidseitig: Schwerpunkt und Mitten der neuen Kanten müssen nahe am Original liegen.
+    // Schnellpfad Ebene: alle neuen Normalen innerhalb 2° von der Normale bei v, Ring und zugeordnete Originalpunkte innerhalb tol/4 der Ebene
+    // → neue Dreiecke liegen im Band ±tol/4, das Original ebenso → Abstand ≤ tol/2, BVH-Abfrage überflüssig.
     if (bvh) {
-      for (const t of moved) { if (!ok) break; const i = 3 * t; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
-        if (farFromOrig((P[3 * a] + P[3 * b] + P[3 * c]) / 3, (P[3 * a + 1] + P[3 * b + 1] + P[3 * c + 1]) / 3, (P[3 * a + 2] + P[3 * b + 2] + P[3 * c + 2]) / 3)) ok = false; }
-      for (const w of nu) { if (!ok) break; if (w === v) continue; if (farFromOrig((P[3 * v] + P[3 * w]) / 2, (P[3 * v + 1] + P[3 * w + 1]) / 2, (P[3 * v + 2] + P[3 * w + 2]) / 2)) ok = false; }
-      if (!ok) { rej.twoSided++; continue; }
+      let planar = true; const ex = NN[0], ey = NN[1], ez = NN[2], d0 = ex * P[3 * v] + ey * P[3 * v + 1] + ez * P[3 * v + 2];
+      for (let j = 1; j < nm && planar; j++) if (NN[3 * j] * ex + NN[3 * j + 1] * ey + NN[3 * j + 2] * ez < cosPlanar) planar = false;
+      for (let j = 0; j < nuN && planar; j++) { const w = NB[j]; if (Math.abs(ex * P[3 * w] + ey * P[3 * w + 1] + ez * P[3 * w + 2] - d0) > band) planar = false; }
+      for (let k = 0; k < np && planar; k++) { const p = PTS[k]; if (Math.abs(ex * O[3 * p] + ey * O[3 * p + 1] + ez * O[3 * p + 2] - d0) > band) planar = false; }
+      if (planar) rej.planarFast++;
+      else {
+        for (let j = 0; j < nm && ok; j++) { const i = 3 * MV[j]; const a = F[i] === u ? v : F[i], b = F[i + 1] === u ? v : F[i + 1], c = F[i + 2] === u ? v : F[i + 2];
+          if (farFromOrig((P[3 * a] + P[3 * b] + P[3 * c]) / 3, (P[3 * a + 1] + P[3 * b + 1] + P[3 * c + 1]) / 3, (P[3 * a + 2] + P[3 * b + 2] + P[3 * c + 2]) / 3)) ok = false; }
+        for (let j = 0; j < nuN && ok; j++) { const w = NB[j]; if (w === v) continue; if (farFromOrig((P[3 * v] + P[3 * w]) / 2, (P[3 * v + 1] + P[3 * w + 1]) / 2, (P[3 * v + 2] + P[3 * w + 2]) / 2)) ok = false; }
+        if (!ok) { rej.twoSided++; continue; }
+      }
     }
     // Kollaps ausführen
-    for (const t of vf[u]) own[t] = [];
-    for (let k = 0; k < pts.length; k++) own[assign[k]].push(pts[k]);
-    for (const t of shared) { alive[t] = 0; for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== u) { const L = vf[w]; L.splice(L.indexOf(t), 1); } } }
-    for (const t of moved) { for (let k = 0; k < 3; k++) if (F[3 * t + k] === u) F[3 * t + k] = v; vf[v].push(t); }
-    if (fdeg[u]) for (const w of nu) { const kk = ekey(u, w); if (feat.has(kk)) { feat.delete(kk); if (w !== v) feat.add(ekey(v, w)); } }
+    for (let j = 0; j < VU.length; j++) ownH[VU[j]] = -1;
+    for (let k = 0; k < np; k++) { const t = MV[ASG[k]], p = PTS[k]; ownN[p] = ownH[t]; ownH[t] = p; }
+    for (let h = 0; h < 2; h++) { const t = SH[h]; alive[t] = 0; for (let k = 0; k < 3; k++) { const w = F[3 * t + k]; if (w !== u) { const L = vf[w]; const ix = L.indexOf(t); L[ix] = L[L.length - 1]; L.pop(); } } }
+    const VV = vf[v]; for (let j = 0; j < nm; j++) { const t = MV[j]; for (let k = 0; k < 3; k++) if (F[3 * t + k] === u) F[3 * t + k] = v; VV.push(t); }
+    if (fdeg[u]) for (let j = 0; j < nuN; j++) { const w = NB[j]; const kk = ekey(u, w); if (feat.has(kk)) { feat.delete(kk); if (w !== v) feat.add(ekey(v, w)); } }
     vf[u] = []; tris -= 2; collapses++;
     for (let i = 0; i < 10; i++) Q[10 * v + i] += Q[10 * u + i];
-    pushV(v); for (const w of neigh(v)) pushV(w);
-    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses);
+    pushV(v); { const [b, k] = neighInto(v, NB); NB = b; const cp = b.slice(0, k); for (let j = 0; j < k; j++) pushV(cp[j]); }
+    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses, { frac: Math.min(0.99, 1 - heap.size / Math.max(1, heap0)), label: `Reduktion: ${tris.toLocaleString('de-DE')} Dreiecke` });
   }
   const r = compact(P, F, (t) => !!alive[t], nt);
   return { ...r, before: nt, after: tris, maxDev: NaN, collapses, rejects: rej, noiseDeg };
 }
 
 // ---------------------------------------------------------------- Unterteilung
-export interface SubdivideOptions { tol: number; levels?: number; maxTris?: number; onProgress?: Progress; }
+export interface SubdivideOptions { tol: number; levels?: number; maxTris?: number; onProgress?: Progress;
+  /** danach Kanten länger als maxEdge halbieren (Längste-Kante-Bisektion, Winkel bleiben ≥ ½ der Ausgangswinkel) */
+  maxEdge?: number; }
+
+/** Längste-Kante-Bisektion, bis alle Kanten ≤ maxEdge (lineare Mittelpunkte: Fläche unverändert) */
+export function splitLongEdges(P0: ArrayLike<number>, F0: ArrayLike<number>, maxEdge: number, maxTris = 3_000_000): { P: Float64Array; F: Uint32Array } {
+  const P: number[] = Array.from(P0), F: number[] = Array.from(F0); const m2 = maxEdge * maxEdge;
+  const l2 = (a: number, b: number) => (P[3 * a] - P[3 * b]) ** 2 + (P[3 * a + 1] - P[3 * b + 1]) ** 2 + (P[3 * a + 2] - P[3 * b + 2]) ** 2;
+  for (let pass = 0; pass < 30 && F.length / 3 < maxTris; pass++) {
+    const nv0 = P.length / 3; const split = new Map<number, number>(); const key = (a: number, b: number) => (a < b ? a * nv0 + b : b * nv0 + a);
+    const nt = F.length / 3; const lk = new Int8Array(nt).fill(-1);
+    for (let t = 0; t < nt; t++) { let best = -1, bl = m2; for (let k = 0; k < 3; k++) { const d = l2(F[3 * t + k], F[3 * t + (k + 1) % 3]); if (d > bl) { bl = d; best = k; } } lk[t] = best; if (best >= 0) { const a = F[3 * t + best], b = F[3 * t + (best + 1) % 3]; const kk = key(a, b); if (!split.has(kk)) { split.set(kk, P.length / 3); P.push((P[3 * a] + P[3 * b]) / 2, (P[3 * a + 1] + P[3 * b + 1]) / 2, (P[3 * a + 2] + P[3 * b + 2]) / 2); } } }
+    if (!split.size) break;
+    // jedes Dreieck: an seiner Kante mit Mittelpunkt teilen (längste zuerst; je Durchgang höchstens eine Teilung je Dreieck – Rest im nächsten Durchgang, Nachbar-T-Stellen über alle 3 Kanten prüfen)
+    const out: number[] = [];
+    for (let t = 0; t < nt; t++) { let k = -1; for (let e = 0; e < 3; e++) if (split.has(key(F[3 * t + e], F[3 * t + (e + 1) % 3]))) { if (k < 0 || e === lk[t]) k = e; }
+      if (k < 0) { out.push(F[3 * t], F[3 * t + 1], F[3 * t + 2]); continue; }
+      const a = F[3 * t + k], b = F[3 * t + (k + 1) % 3], c = F[3 * t + (k + 2) % 3], mm = split.get(key(a, b))!;
+      // weitere markierte Kanten dieses Dreiecks rekursiv mitteilen (keine T-Stellen)
+      const sub = (x: number, y: number, z: number, depth: number): void => { // Dreieck x,y,z
+        if (depth > 0) for (let e = 0; e < 3; e++) { const p = [x, y, z][e], q = [x, y, z][(e + 1) % 3], r = [x, y, z][(e + 2) % 3]; const kk = p < nv0 && q < nv0 ? key(p, q) : -1; const s2 = kk >= 0 ? split.get(kk) : undefined;
+          if (s2 !== undefined) { sub(p, s2, r, depth - 1); sub(s2, q, r, depth - 1); return; } }
+        out.push(x, y, z); };
+      sub(a, mm, c, 2); sub(mm, b, c, 2); }
+    F.length = 0; for (const x of out) F.push(x);
+  }
+  return { P: Float64Array.from(P), F: Uint32Array.from(F) };
+}
 /** Loop-Unterteilung (1→4); jede Knotenverschiebung gegenüber der linearen Lage (liegt auf dem Original) wird auf tol begrenzt. Randknoten linear. */
 export function subdivide(m: RawMesh, o: SubdivideOptions): RawMesh & { before: number; after: number } {
   let P = Float64Array.from(m.positions), F = Uint32Array.from(m.indices); const before = F.length / 3;
@@ -310,6 +379,7 @@ export function subdivide(m: RawMesh, o: SubdivideOptions): RawMesh & { before: 
     // Nach Stufe 1 sind die „linearen“ Lagen nicht mehr auf dem Original: weitere Stufen nur linear + begrenzt (konservativ)
     if (lv === 0) o = { ...o, tol: o.tol / 4 };
   }
+  if (o.maxEdge && o.maxEdge > 0) { const r = splitLongEdges(P, F, o.maxEdge, maxTris); P = r.P as any; F = r.F as any; }
   return { positions: Float32Array.from(P), indices: F, before, after: F.length / 3 };
 }
 
