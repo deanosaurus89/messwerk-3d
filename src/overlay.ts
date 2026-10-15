@@ -61,9 +61,9 @@ export class ViewCube {
     this.cube.rotation.x = Math.PI / 2;
     this.scene.add(this.cube);
     // Achsenkreuz: kräftige Pfeile mit Beschriftung an den Spitzen, Ursprung an der hinteren unteren linken Würfelecke
-    const O = new THREE.Vector3(-1.2, -1.2, -1.2);
+    const O = new THREE.Vector3(-1.15, -1.15, -0.9);
     for (const [txt, d, col] of [['X', [1, 0, 0], 0xd32f2f], ['Y', [0, 1, 0], 0x2e9d3a], ['Z', [0, 0, 1], 0x1f5fa8]] as const) {
-      const dir = new THREE.Vector3(...d); const L = 2.75;
+      const dir = new THREE.Vector3(...d); const L = 2.2;
       const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, L - 0.35, 10), new THREE.MeshBasicMaterial({ color: col }));
       shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); shaft.position.copy(O).addScaledVector(dir, (L - 0.35) / 2); this.scene.add(shaft);
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.4, 14), new THREE.MeshBasicMaterial({ color: col }));
@@ -71,8 +71,8 @@ export class ViewCube {
       const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d')!;
       g.fillStyle = '#ffffffd0'; g.beginPath(); g.arc(32, 32, 26, 0, 7); g.fill();
       g.fillStyle = '#' + col.toString(16).padStart(6, '0'); g.font = 'bold 42px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 32, 35);
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); sp.renderOrder = 5;
-      sp.position.copy(O).addScaledVector(dir, L + 0.3); sp.scale.setScalar(0.6); this.scene.add(sp);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) })); sp.renderOrder = 5;
+      sp.position.copy(O).addScaledVector(dir, L + 0.25); sp.scale.setScalar(0.55); this.scene.add(sp);
     }
     this.hl = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x1f5fa8, transparent: true, opacity: 0.45, depthTest: false }));
     this.hl.visible = false; this.scene.add(this.hl);
@@ -107,7 +107,7 @@ export class ViewCube {
   }
   syncCam() {
     const q = this.v.camera.quaternion;
-    this.cam.quaternion.copy(q); this.cam.position.set(0, 0, 7.4).applyQuaternion(q); this.cam.updateMatrixWorld();
+    this.cam.quaternion.copy(q); this.cam.position.set(0, 0, 8.6).applyQuaternion(q); this.cam.updateMatrixWorld();
   }
   render(r: THREE.WebGLRenderer) {
     const size = this.el.clientWidth; if (!size) return;
