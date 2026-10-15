@@ -180,12 +180,15 @@ export function evaluate(c: Control, feats: Map<number, Feature>, ctx: EvalCtx =
   }
   const m = measuredValue(c, feats, ctx);
   if (m == null) return { measured: null, deviation: null, status: '—' };
+  if (isZoneControl(c.kind)) { const ok = m <= c.tolUp + 1e-12; return { measured: m, deviation: m, status: ok ? 'IO' : 'NIO' }; }
   if (c.nominal == null) return { measured: m, deviation: null, status: '—' };
   const dev = m - c.nominal;
   const ok = dev <= c.tolUp + 1e-12 && dev >= c.tolLo - 1e-12;
   return { measured: m, deviation: dev, status: ok ? 'IO' : 'NIO' };
 }
 
+/** Form-/Lage-Prüfmerkmale (Toleranzzone 0..t, nur ein Toleranzwert) – im Gegensatz zu Maßen mit Soll + oberem/unterem Abmaß. */
+export const isZoneControl = (k: ControlKind) => k === 'Form' || k === 'Std.-Abw.' || isDatumControl(k);
 export function defaultTolerance(kind: ControlKind): { nominal: number | null; up: number; lo: number } {
   if (kind === 'Position' || kind === 'Profil (Bezug)') return { nominal: 0, up: 0.1, lo: 0 };
   if (isDatumControl(kind)) return { nominal: 0, up: 0.05, lo: 0 };
@@ -199,17 +202,17 @@ const fmt = (v: number | null | undefined, d = 4) => (v == null ? '' : v.toFixed
 
 /** CSV (Semikolon, deutsches Dezimalkomma) für Excel. */
 export function controlsCSV(controls: Control[], feats: Map<number, Feature>, ctx: EvalCtx = {}): string {
-  const head = ['Merkmal', 'Prüfmerkmal', 'Bezug', 'Soll', 'Ist', 'Abweichung', 'Tol +', 'Tol -', 'Status'];
+  const head = ['Feature', 'Control', 'Datum', 'Nominal', 'Actual', 'Deviation', 'Tol +', 'Tol -', 'Status'];
   const rows = controls.map((c) => {
     const r = evaluate(c, feats, ctx), f = feats.get(c.featureIds[0]);
     return [f?.name ?? '?', controlLabel(c, f), datumText(c, feats), fmt(c.nominal), fmt(r.measured), fmt(r.deviation),
-      fmt(c.tolUp), fmt(c.tolLo), r.flag ? r.flag : r.status].map((s) => String(s).replace('.', ',').replace(/;/g, ','));
+      fmt(c.tolUp), isZoneControl(c.kind) ? '' : fmt(c.tolLo), r.flag ? r.flag : r.status === 'IO' ? 'OK' : r.status === 'NIO' ? 'NOK' : r.status].map((s) => String(s).replace('.', ',').replace(/;/g, ','));
   });
   return '\ufeff' + [head, ...rows].map((r) => r.join(';')).join('\r\n') + '\r\n';
 }
 
 export function featureCSV(feats: Feature[]): string {
-  const head = ['Name', 'Typ', 'Bezug', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Durchmesser', 'Länge', 'Breite', 'Kegelwinkel', 'Rohr-Ø', 'Abstand 3D', 'Form', 'RMS', 'Punkte'];
+  const head = ['Name', 'Type', 'Datum', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Diameter', 'Length', 'Width', 'Cone angle', 'Tube Ø', 'Distance 3D', 'Form', 'RMS', 'Points'];
   const rows = feats.map((f) => {
     const m = f.measured!;
     return [f.name, f.type, f.datum ?? '', ...m.center.map((v) => fmt(v)), ...m.normal.map((v) => fmt(v, 6)), fmt(m.diameter),

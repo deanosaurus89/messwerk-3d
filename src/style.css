@@ -313,3 +313,5 @@ body.ctx-on #progress { bottom:80px; }
 #opts-dlg .od-box { background:#fff; border-radius:8px; padding:14px 18px; width:min(420px,94vw); box-shadow:0 8px 30px rgba(0,0,0,.3); font-size:13px; }
 #opts-dlg .row { display:flex; gap:8px; align-items:center; margin:6px 0; }
 @media (max-width:900px), (max-height:560px) { .splitter, .pane-x { display:none; } body.no-tree #tree-pane, body.no-dialog #dialog-pane, body.no-table #table-pane { display:flex; } }
+.tw.twb{cursor:pointer;display:inline-block;transition:transform .15s}
+.lbl .lx{font-size:10.5px;color:#3c4a58;padding:0 6px 2px;font-variant-numeric:tabular-nums}

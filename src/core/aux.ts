@@ -171,7 +171,8 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
   if (g.p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
   const r = autoFit(g.p, g.n);
   const base = { indices: use, fit: r.best, candidates: r.candidates.map((c) => ({ type: c.type, rms: c.rms })) };
-  if (['Ebene', 'Zylinder', 'Kreis', 'Langloch'].includes(r.best.type)) {
+  // Kugel/Torus/Kegel direkt neben einer Ebene sind meist Bohrungsränder: Kreis in Hilfsebene bevorzugen
+  if (['Ebene', 'Zylinder', 'Kreis', 'Langloch', 'Kugel', 'Torus', 'Kegel'].includes(r.best.type)) {
     const T = Math.min(3, Math.max(0.5, 0.015 * diag));
     const maxD = r.best.type === 'Langloch' ? diag : T;
     try {

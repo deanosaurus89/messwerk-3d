@@ -6,7 +6,7 @@ import type { Viewer } from './viewer';
 type V3 = [number, number, number];
 
 // ------------------------------------------------------------------ ViewCube
-const FACES: [string, V3][] = [['RECHTS', [1, 0, 0]], ['LINKS', [-1, 0, 0]], ['OBEN', [0, 0, 1]], ['UNTEN', [0, 0, -1]], ['VORNE', [0, -1, 0]], ['HINTEN', [0, 1, 0]]];
+const FACES: [string, V3][] = [['RIGHT', [1, 0, 0]], ['LEFT', [-1, 0, 0]], ['TOP', [0, 0, 1]], ['BOTTOM', [0, 0, -1]], ['FRONT', [0, -1, 0]], ['BACK', [0, 1, 0]]];
 
 /** Würfel 2×2×2 mit abgeschrägten Ecken (Fasen k): Achteck-Flächen mit Beschriftung (UV wie BoxGeometry), Dreiecke an den Ecken. */
 function chamferedCube(k: number): THREE.BufferGeometry {
@@ -76,7 +76,7 @@ export class ViewCube {
     }
     this.hl = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x1f5fa8, transparent: true, opacity: 0.45, depthTest: false }));
     this.hl.visible = false; this.scene.add(this.hl);
-    this.el = document.createElement('div'); this.el.id = 'navcube'; this.el.title = 'Navigationswürfel: Fläche, Kante oder Ecke anklicken';
+    this.el = document.createElement('div'); this.el.id = 'navcube'; this.el.title = 'Navigation cube: click a face, edge or corner';
     v.el.appendChild(this.el);
     const dirAt = (e: PointerEvent): V3 | null => {
       this.syncCam();

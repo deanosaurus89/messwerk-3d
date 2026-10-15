@@ -30,5 +30,11 @@ export function showWhatsNew() {
 }
 /** Show the changelog once per new revision (only for returning users). */
 export function maybeShowWhatsNew() {
-  try { const seen = localStorage.getItem(KEY); localStorage.setItem(KEY, BUILD.rev); if (seen && seen !== BUILD.rev && BUILD.rev !== 'dev') showWhatsNew(); } catch { /* ignore */ }
+  try {
+    const seen = localStorage.getItem(KEY);
+    // returning user = stored revision differs, or app data from an earlier version without the key
+    const returning = seen ? seen !== BUILD.rev : Object.keys(localStorage).some((k) => k.startsWith('mw-') && k !== KEY);
+    localStorage.setItem(KEY, BUILD.rev);
+    if (returning && BUILD.rev !== 'dev') showWhatsNew();
+  } catch { /* ignore */ }
 }

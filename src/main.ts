@@ -16,7 +16,8 @@ import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './
 import { evalBSpline } from './core/curves';
 import { initCad, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
-import { datumText } from './core/features';
+import { datumText, isZoneControl } from './core/features';
+import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
 import type { Vec3 } from './core/linalg';
@@ -203,10 +204,10 @@ $('#btn-sample').onclick = () => openSamples();
 $('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.controls, featMap(), ctx));
 $('#btn-report').onclick = () => makeReport();
 $('#btn-report2').onclick = () => makeReport();
-$('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); };
+$('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features));
 $('#btn-delete-feat').onclick = () => deleteSelected();
-$('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); };
+$('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-toggle-wire').onclick = () => toggleWire();
 $('#btn-toggle-curves').onclick = () => toggleCurves();
 $('#btn-view-center').onclick = () => centerOn();
@@ -301,9 +302,12 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerleave', () => { if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
 /** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
-const brushActive = () => pe.tool === 'erase' || (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel');
+const brushActive = () => pe.tool === 'erase' || state.mode?.kind === 'fit';
+const areaMode = () => state.mode?.kind === 'fit' && state.mode.method === 'Klick';
 function setBrushRadius(v: number) {
   v = +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 2).toFixed(v < 1 ? 2 : 1);
+  if (areaMode() && pe.tool !== 'erase') { state.opts.radius = v; const a = document.querySelector<HTMLInputElement>('#cp-area'); if (a) a.value = String(v); const d = document.querySelector<HTMLInputElement>('#d-rad'); if (d) d.value = String(v);
+    if (lastHit) viewer.showCursor(lastHit, v, true); status(tt('Analysis area r = {0} mm (mouse wheel; Ctrl+wheel = zoom).', v)); return; }
   if (pe.tool === 'erase') { pe.radius = v; for (const id of ['#pe-rad-n', '#pe-rad-r']) { const el = document.querySelector<HTMLInputElement>(id); if (el) el.value = String(v); } }
   else { state.opts.brush = v; const el = document.querySelector<HTMLInputElement>('#d-brush'); if (el) el.value = String(v); const mb = document.querySelector('#mb-brush-r'); if (mb) mb.textContent = String(v); }
   if (lastHit) viewer.showCursor(lastHit, v, true);
@@ -312,16 +316,16 @@ function setBrushRadius(v: number) {
 canvas.parentElement!.addEventListener('wheel', (e) => {
   if (!brushActive() || e.ctrlKey || e.metaKey) return; // Strg/⌘ + Rad: normal zoomen
   e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-  const cur = pe.tool === 'erase' ? pe.radius : state.opts.brush;
+  const cur = pe.tool === 'erase' ? pe.radius : areaMode() ? state.opts.radius || (state.data?.diag ?? 100) / 30 : state.opts.brush;
   setBrushRadius(cur * Math.pow(1.1, e.deltaY > 0 ? -1 : 1));
 }, { capture: true, passive: false });
 // Ctrl+Rad soll im Pinselmodus zoomen statt die Seite zu skalieren: OrbitControls übernimmt (preventDefault dort)
 // ---- Live-Vorschau Hilfsebene (Kreis/Langloch per Klick): Ebenenpunkte blau, Wandpunkte orange
-let auxT = 0, auxSeq = 0, auxBusy = false;
-function clearAuxHover() { clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); }
+let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
+function clearAuxHover() { clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); if (hoverType) { hoverType = null; renderModeBar(); } }
 function scheduleAuxHover(h: Hit | null) {
   clearTimeout(auxT); const m = state.mode as FitMode | null;
-  if (!h || !m || m.kind !== 'fit' || !usesAux(m.type) || state.preview) { if (!h) viewer.showHoverSets([]); return; }
+  if (!h || !m || m.kind !== 'fit' || m.type === 'Freiformfläche' || state.preview) { if (!h) viewer.showHoverSets([]); return; }
   const seq = ++auxSeq;
   auxT = window.setTimeout(async () => {
     if (seq !== auxSeq) return;
@@ -329,6 +333,13 @@ function scheduleAuxHover(h: Hit | null) {
     auxBusy = true;
     const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
     try {
+      if (!usesAux(m.type)) { // Live-Vorschau des erkannten Typs (Auto bzw. gewählter Typ)
+        const r = await engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type });
+        if (seq !== auxSeq || state.preview) return;
+        viewer.showHoverSets([...(r.aux ? [{ idx: r.aux.indices, color: 0x2f7de1 }] : []), { idx: r.indices, color: 0xff8c1a }]);
+        hoverType = r.fit.type; renderModeBar();
+        status(tt('Hover: {0} ({1} pts) – click to preview.', typeName(r.fit.type) + (r.aux ? ' + ' + tt('aux. plane') : ''), r.indices.length)); return;
+      }
       const r = await auxCall(h.tri, h.point, state.opts.maxAngleDeg, m.type as GeomType, ref);
       if (seq !== auxSeq || state.preview) return;
       viewer.showHoverSets([{ idx: r.aux.indices, color: 0x2f7de1 }, { idx: r.indices, color: 0xff8c1a }]);
@@ -346,11 +357,11 @@ window.addEventListener('pointerup', async (e) => {
   if (moved > 8 || dt > 700) return;
   if (!state.mode && await curveClick(e.clientX, e.clientY)) return;
   const h = viewer.pick(e.clientX, e.clientY);
-  if (!h) return;
+  if (!h) { if (!state.mode && !pe.tool) clearSelection(); return; }
   if (pe.tool === 'curve') curveAddPoint(h);
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h); }
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
-  else { const f = featureAtHit(h); if (f) selectFeature(f.id); }
+  else if (!pe.tool) { const f = featureAtHit(h); if (f) selectFeature(f.id); else selectModel(); }
 });
 
 /** Merkmal, dessen Punktmenge den getroffenen Dreiecksknoten enthält (Indizes sind sortiert). */
@@ -445,16 +456,18 @@ function ctxSpec(): CtxSpec | null {
   const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
+    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
     : `${seg}${type}<label>r <input id="cp-brush" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   return {
     title: p ? tt('Preview') : m.method === 'Klick' ? (m.type === 'auto' ? tt('Auto detection') : typeName(m.type)) : tt('Brush'), cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl, stats: p ? previewStats(p) : '',
+    controls: ctl, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); }));
+      el.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => (b.onclick = async () => { state.opts.lineSide = Number(b.dataset.side) as 0 | 1;
+        if (state.preview?.hit && state.preview.fit.type === 'Linie') { try { await previewWithAux(state.preview.hit, 'Linie'); } catch (e: any) { toast(e.message); } } renderAll(); }));
       el.querySelector<HTMLSelectElement>('#cp-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; (state.mode as FitMode).type = v; if (state.preview) refitPreview(v); else renderAll(); };
       const ar = el.querySelector<HTMLInputElement>('#cp-area'); if (ar) ar.onchange = () => { const x = Number(ar.value.replace(',', '.')); if (isFinite(x) && x >= 0) { state.opts.radius = x; renderDialog(); } };
       const br = el.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
@@ -546,7 +559,7 @@ function commitPreview() {
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
   const f: FeatureView = {
     id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, measured: p.fit, pointCount: p.indices.length,
-    method: p.method, color: PALETTE[(state.nextId - 2) % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
+    method: p.method, color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
     src: p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
   };
   if (p.aux) {
@@ -751,7 +764,7 @@ function selectFeature(id: number, additive = false) {
   if (state.mode?.kind === 'dist') { setDistanceSlot(id); return; }
   if (additive) state.sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id].slice(-2);
   else state.sel = [id];
-  state.selControl = null; state.addFeat = id;
+  state.selModel = false; state.selControl = null; state.addFeat = id;
   renderAll();
 }
 
@@ -914,11 +927,32 @@ function renderHint() {
   hint('');
 }
 
-function eyeBtn(visible: boolean, onToggle: () => void) {
-  const b = document.createElement('button'); b.className = 'eye' + (visible ? '' : ' off'); b.title = visible ? 'Ausblenden' : 'Einblenden';
-  b.innerHTML = visible ? ICON.eye : ICON.eyeOff;
+function eyeBtn(visible: boolean, onToggle: () => void, label = false) {
+  const b = document.createElement('button'); b.className = (label ? 'eye lab-eye' : 'eye') + (visible ? '' : ' off');
+  b.title = label ? (visible ? tt('Hide annotation') : tt('Show annotation')) : visible ? tt('Hide') : tt('Show');
+  b.innerHTML = label ? '🏷' : visible ? ICON.eye : ICON.eyeOff;
   b.onclick = (e) => { e.stopPropagation(); onToggle(); };
   return b;
+}
+// Baumgruppen: zusammenklappbar (Zustand in localStorage); jede Zeile mit ▾ klappt die tieferen Folgezeilen ein.
+const TREE_KEY = 'mw-tree-closed';
+const treeClosed = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(TREE_KEY) ?? '[]'); } catch { return []; } })());
+function toggleTreeGroup(k: string) { treeClosed.has(k) ? treeClosed.delete(k) : treeClosed.add(k); try { localStorage.setItem(TREE_KEY, JSON.stringify([...treeClosed])); } catch { /* */ } renderTree(); }
+const lvl = (el: HTMLElement) => { const m = el.className.match(/indent(\d)/); return m ? +m[1] : 0; };
+function applyTreeGroups(t: HTMLElement) {
+  let hideBelow = Infinity;
+  for (const el of [...t.children] as HTMLElement[]) {
+    const L = lvl(el);
+    if (L <= hideBelow) hideBelow = Infinity;
+    if (hideBelow !== Infinity) { el.style.display = 'none'; continue; }
+    const tw = el.querySelector<HTMLElement>('.tw'); const k = el.dataset.gk;
+    if (!tw || !k || tw.textContent !== '▾') continue;
+    const next = el.nextElementSibling as HTMLElement | null; if (!next || lvl(next) <= L) { tw.textContent = ''; continue; }
+    const closed = treeClosed.has(k); tw.textContent = '▾'; tw.classList.add('twb'); tw.style.transform = closed ? 'rotate(-90deg)' : '';
+    tw.title = closed ? tt('Expand') : tt('Collapse');
+    tw.onclick = (e) => { e.stopPropagation(); toggleTreeGroup(k); };
+    if (closed) hideBelow = L;
+  }
 }
 function renderTree() {
   const q = ($('#search') as HTMLInputElement).value.trim().toLowerCase();
@@ -926,38 +960,44 @@ function renderTree() {
   const node = (html: string, cls: string, onClick?: (e: MouseEvent) => void, sel = false, fid?: number, eye?: HTMLElement) => {
     const d = document.createElement('div'); d.className = `node ${cls}${sel ? ' sel' : ''}`; d.innerHTML = html;
     if (eye) d.prepend(eye);
-    if (fid != null) d.dataset.fid = String(fid);
+    if (fid != null) { d.dataset.fid = String(fid); d.dataset.gk = 'f' + fid; }
+    else if (/indent[01]/.test(cls) || cls === '') d.dataset.gk = 'g:' + (d.textContent ?? '').replace(/\(.*$/, '').trim();
     if (onClick) d.onclick = onClick; t.appendChild(d); return d;
   };
-  node(`<span class="tw">▾</span>${ICON.folder}<b>Objekte</b>`, '');
-  node(`<span class="tw">▾</span>${ICON.data}Daten`, 'indent1');
+  const feats = state.features;
+  node(`<span class="tw">▾</span>${ICON.folder}<b>${tt('Objects')}</b>`, '');
+  node(`<span class="tw">▾</span>${ICON.data}${tt('Data')}`, 'indent1', undefined, false, undefined, state.data ? eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderAll(); }) : undefined);
   if (state.data) {
-    const mn = node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(Polygonmodell)</span>`, 'indent2 model-node', () => { state.sel = []; renderAll(); }, false, undefined,
+    const mn = node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(${tt('polygon model')})</span>`, 'indent2 model-node', () => selectModel(), state.selModel, undefined,
       eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderTree(); renderScene(); }));
     mn.ondblclick = () => centerOn(null); attachContext(mn, null);
   }
-  node(`<span class="tw">▾</span>${ICON.folder}Merkmale (${state.features.length})`, 'indent1');
+  const anyVis = feats.some((f) => !state.hidden.has(f.id));
+  node(`<span class="tw">▾</span>${ICON.folder}${tt('Features')} (${feats.length})`, 'indent1', undefined, false, undefined, feats.length ? eyeBtn(anyVis, () => {
+    if (anyVis) feats.forEach((f) => state.hidden.add(f.id)); else state.hidden.clear(); renderAll(); }) : undefined);
   const distSlots = state.mode?.kind === 'dist' ? [state.mode.a, state.mode.b] : [];
-  for (const f of state.features) {
-    if (q && !f.name.toLowerCase().includes(q) && !f.type.toLowerCase().includes(q)) continue;
+  for (const f of feats) {
+    if (q && !f.name.toLowerCase().includes(q) && !typeName(f.type).toLowerCase().includes(q)) continue;
     const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
     const tag = distSlots.includes(f.id) ? ` <span class="sub">[${distSlots.indexOf(f.id) === 0 ? 'A' : 'B'}]</span>` : '';
-    const sel = state.sel.includes(f.id), vis = !state.hidden.has(f.id);
-    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="Bezug ${f.datum}">${f.datum}</span>` : ''}${tag}`,
+    const sel = state.sel.includes(f.id), vis = !state.hidden.has(f.id), lab = !state.hiddenLabels.has(f.id);
+    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="${tt('Datum {0}', f.datum)}">${f.datum}</span>` : ''}${tag}`,
       'indent2' + (vis ? '' : ' hidden-feat'), (e) => selectFeature(f.id, e.ctrlKey || e.metaKey || e.shiftKey), sel, f.id,
       eyeBtn(vis, () => { vis ? state.hidden.add(f.id) : state.hidden.delete(f.id); renderTree(); renderScene(); }));
+    fnode.appendChild(eyeBtn(lab, () => { lab ? state.hiddenLabels.add(f.id) : state.hiddenLabels.delete(f.id); renderTree(); renderScene(); }, true));
     fnode.ondblclick = () => centerOn(f.id);
     attachContext(fnode, f.id);
-    // nur Komponenten: Ist (gemessen), Hilfsebene, Soll (Nominal) – keine Prüfmerkmale
-    if (f.measured) node(`<span class="tw"></span>${ICON.ist}Ist${f.type === 'Abstand' ? ` <span class="sub">${fmt(f.measured.distance, 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
-    if (f.aux) node(`<span class="tw"></span>${ICON.aux}Hilfsebene <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
-    if (f.nominal) node(`<span class="tw"></span>${ICON.soll}Soll`, 'indent3', () => selectFeature(f.id));
+    if (f.measured) node(`<span class="tw"></span>${ICON.ist}${tt('Actual')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+    if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
+    if (f.nominal) node(`<span class="tw"></span>${ICON.soll}${tt('Nominal')}`, 'indent3', () => selectFeature(f.id));
   }
   if (state.curves.length) {
-    node(`<span class="tw">▾</span>${ICON.folder}Kurvennetz (${state.curves.length})${state.layout ? ` <span class="sub">${state.layout.regions.length} Patches · ${state.layout.foursided} 4-seitig · ${state.layout.tJunctions} T</span>` : ''}`, 'indent1 curve-folder');
+    const cv = state.curves.some((c) => c.visible);
+    node(`<span class="tw">▾</span>${ICON.folder}${tt('Curve network')} (${state.curves.length})${state.layout ? ` <span class="sub">${state.layout.regions.length} ${tt('patches')} · ${state.layout.foursided} ${tt('4-sided')} · ${state.layout.tJunctions} T</span>` : ''}`, 'indent1', undefined, false, undefined,
+      eyeBtn(cv, () => { state.curves.forEach((c) => (c.visible = !cv)); renderTree(); renderScene(); scheduleAutosave(); }));
     for (const c of state.curves) {
       if (q && !c.name.toLowerCase().includes(q)) continue;
-      const cn = node(`<span class="tw"></span><span style="color:${hex(CURVE_COLOR[c.kind])}">〰</span>${c.name} <span class="sub">${c.kind} · ${c.length.toFixed(1)} mm</span>`,
+      const cn = node(`<span class="tw"></span><span style="color:${hex(CURVE_COLOR[c.kind])}">〰</span>${c.name} <span class="sub">${CURVE_KIND_EN[c.kind]} · ${c.length.toFixed(1)} mm</span>`,
         'indent2 curve-node' + (c.visible ? '' : ' hidden-feat'), () => { state.curveSel = state.curveSel === c.id ? null : c.id; renderTree(); renderScene(); renderDialog(); }, state.curveSel === c.id, undefined,
         eyeBtn(c.visible, () => { c.visible = !c.visible; renderTree(); renderScene(); scheduleAutosave(); }));
       cn.dataset.cid = String(c.id);
@@ -965,11 +1005,15 @@ function renderTree() {
   }
   cadTree(node, q);
   if (state.reports.length) {
-    node(`<span class="tw">▾</span>${ICON.folder}Berichte (${state.reports.length})`, 'indent1');
+    node(`<span class="tw">▾</span>${ICON.folder}${tt('Reports')} (${state.reports.length})`, 'indent1');
     for (const r of state.reports) node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
       () => { state.openReport = r.id; renderReport(); renderTree(); if (isPhone()) togglePanel('tree', false); }, state.openReport === r.id);
   }
+  applyTreeGroups(t);
 }
+const CURVE_KIND_EN: Record<string, string> = { Kante: 'edge', Tangente: 'tangent', Übergang: 'transition', Benutzer: 'user', Vorschlag: 'seam' };
+function selectModel() { if (state.mode?.kind === 'dist') return; state.sel = []; state.selModel = true; state.selControl = null; state.curveSel = null; renderAll(); }
+function clearSelection() { if (!state.sel.length && !state.selModel && state.curveSel == null) return; state.sel = []; state.selModel = false; state.selControl = null; state.curveSel = null; renderAll(); }
 ($('#search') as HTMLInputElement).oninput = () => renderTree();
 
 function numInput(v: number | null, onChange: (x: number | null) => void) {
@@ -1186,16 +1230,14 @@ function renderTable() {
   const fm = featMap();
   document.querySelectorAll<HTMLButtonElement>('button[data-ctab]').forEach((b) => (b.classList.toggle('on', b.dataset.ctab === state.ctab), (b.onclick = () => { state.ctab = b.dataset.ctab as any; renderTable(); })));
   $('#table-pane').dataset.ctab = state.ctab;
-  // ---------- Katalog (Checkliste nach ISO 1101) für das gewählte Merkmal
+  // ---------- Control Properties: catalog (ISO 1101 checklist) of the feature selected in the tree / 3D view; empty otherwise
   const cat = $('#catalog'); cat.innerHTML = '';
-  const cur = state.addFeat ?? state.sel[0] ?? state.features[0]?.id ?? null;
-  const f = state.features.find((x) => x.id === cur);
+  const f = state.features.find((x) => x.id === state.sel[0]);
+  if (f) state.addFeat = f.id;
   const head = document.createElement('div'); head.className = 'cat-head';
-  head.innerHTML = `<select id="cat-feat">${state.features.length ? state.features.map((x) => `<option value="${x.id}" ${x.id === cur ? 'selected' : ''}>${x.name}</option>`).join('') : '<option>— kein Merkmal —</option>'}</select>
-    <span class="note">Haken = Prüfmerkmal (erscheint im Label)</span>`;
+  head.innerHTML = f ? `<b>${f.name}</b> <span class="note">${tt('Tick = control (shown in the annotation)')}</span>` : '';
   cat.appendChild(head);
-  ($('#cat-feat') as HTMLSelectElement).onchange = (e) => { state.addFeat = +(e.target as HTMLSelectElement).value; renderTable(); };
-  if (!f) { cat.insertAdjacentHTML('beforeend', '<p class="note" style="padding:6px 8px">Zuerst ein Merkmal erzeugen und auswählen.</p>'); }
+  if (!f) { cat.insertAdjacentHTML('beforeend', `<div class="dlg-empty">${tt('Select a feature in the tree or 3D view to edit its controls')}</div>`); }
   else for (const g of controlCatalog(f.type)) {
     const gd = document.createElement('div'); gd.className = 'cat-group'; gd.innerHTML = `<div class="cat-gt">${g.group}</div>`;
     for (const it of g.items) {
@@ -1223,10 +1265,13 @@ function renderTable() {
       } else if (c && r) {
         const ed = document.createElement('span'); ed.className = 'cat-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
-        lab('Soll', numInput(c.nominal, (x) => (c.nominal = x)));
-        lab('Tol+', numInput(c.tolUp, (x) => (c.tolUp = x ?? 0)));
-        lab('Tol−', numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))));
-        ed.insertAdjacentHTML('beforeend', `<span class="dev ${r.status}">${r.deviation == null ? '' : sgn(r.deviation)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${r.status}</span>`);
+        if (isZoneControl(c.kind)) lab(tt('Tol (0..t)'), numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0))));
+        else {
+          lab(tt('Nominal'), numInput(c.nominal, (x) => (c.nominal = x)));
+          lab(tt('Tol+'), numInput(c.tolUp, (x) => (c.tolUp = x ?? 0)));
+          lab(tt('Tol−'), numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))));
+        }
+        ed.insertAdjacentHTML('beforeend', `<span class="dev ${r.status}">${r.deviation == null || isZoneControl(c.kind) ? '' : sgn(r.deviation)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
         row.appendChild(ed);
       }
       gd.appendChild(row);
@@ -1234,45 +1279,53 @@ function renderTable() {
     cat.appendChild(gd);
   }
   if (f && !datumFeatures().some((d) => d.id !== f.id) && f.type !== 'Abstand') cat.insertAdjacentHTML('beforeend',
-    '<p class="note" style="padding:2px 8px 8px">Toleranzen mit Bezug (∥ ⟂ ∠ ⌖ ◎ ⌯ ↗) werden aktiv, sobald einem anderen Merkmal ein Bezug (A, B, C …) zugewiesen ist – Dialog › Bezug.</p>');
+    `<p class="note" style="padding:2px 8px 8px">${tt('Tolerances with datum (∥ ⟂ ∠ ⌖ ◎ ⌯ ↗) become available as soon as another feature has a datum (A, B, C …) – Dialog › Datum.')}</p>`);
 
   // ---------- Liste aller Prüfmerkmale
   $('#ctab-n').textContent = String(state.controls.length);
   const tb = $('#ctrl-table tbody'); tb.innerHTML = '';
   let io = 0, nio = 0;
-  for (const c of state.controls) {
-    const r = evaluate(c, fm, ctx); if (r.status === 'IO') io++; if (r.status === 'NIO') nio++;
+  const flt = $<HTMLInputElement>('#cl-filter'); if (flt) { flt.checked = state.ctrlFilter; flt.onchange = () => { state.ctrlFilter = flt.checked; renderTable(); }; }
+  const shown = state.ctrlFilter ? state.controls.filter((c) => c.featureIds.some((id) => state.sel.includes(id))) : state.controls;
+  for (const c of state.controls) { const r = evaluate(c, fm, ctx); if (r.status === 'IO') io++; if (r.status === 'NIO') nio++; }
+  if (!shown.length) tb.innerHTML = `<tr><td colspan="9" class="note">${state.controls.length ? tt('No controls for the features selected in the tree.') : tt('No controls yet. Tick controls in Control Properties.')}</td></tr>`;
+  for (const c of shown) {
+    const r = evaluate(c, fm, ctx);
     const fc = fm.get(c.featureIds[0]);
     const tr = document.createElement('tr');
     if (state.selControl === c.id) tr.className = 'sel';
     const td = (html: string | HTMLElement, cls = '') => { const e = document.createElement('td'); e.className = cls; if (typeof html === 'string') e.innerHTML = html; else e.appendChild(html); tr.appendChild(e); return e; };
     td(fc?.name ?? '?');
     td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag ? ` <span class="flag">⚠ ${r.flag}</span>` : ''}`);
-    td(isDatumControl(c.kind) ? '<span class="note">0</span>' : numInput(c.nominal, (x) => (c.nominal = x)), 'num');
+    const zone = isZoneControl(c.kind);
+    td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => (c.nominal = x)), 'num');
     td(fmt(r.measured), 'num');
-    td(fmt(r.deviation), `num dev ${r.status}`);
-    td(numInput(c.tolUp, (x) => (c.tolUp = x ?? 0)), 'num');
-    td(numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))), 'num');
-    td(`<span class="st ${r.status === '—' ? 'none' : r.status}">${r.status}</span>`);
-    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Löschen';
+    td(zone ? '' : fmt(r.deviation), `num dev ${r.status}`);
+    td(numInput(c.tolUp, (x) => (c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0)), 'num');
+    td(zone ? '<span class="note" title="' + tt('Form/orientation tolerance zone 0..t') + '">0</span>' : numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))), 'num');
+    td(`<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = tt('Delete');
     x.onclick = (e) => { e.stopPropagation(); state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); };
     td(x);
     tr.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT') return; state.sel = [...c.featureIds]; state.selControl = c.id; state.addFeat = c.featureIds[0]; renderTree(); renderDialog(); renderScene(); renderTable(); };
     tb.appendChild(tr);
   }
-  if (!state.controls.length) tb.innerHTML = `<tr><td colspan="9" class="note">Noch keine Prüfmerkmale. Im Katalog links Haken setzen.</td></tr>`;
   $('#mb-sum').textContent = state.controls.length ? `${io}/${nio}` : '';
-  $('#summary').innerHTML = state.controls.length ? `${state.controls.length} · <span style="color:var(--io)">${io} IO</span> · <span style="color:var(--nio)">${nio} NIO</span>` : '';
+  $('#summary').innerHTML = state.controls.length ? `${state.controls.length} · <span style="color:var(--io)">${io} OK</span> · <span style="color:var(--nio)">${nio} NOK</span>` : '';
 }
 
 /** 3D-Label: Kopf = Merkmalsname, Körper = gewählte Prüfmerkmale (Ist/Soll/Abw., IO/NIO-Farbe). */
 function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
   const cs = state.controls.filter((c) => c.featureIds[0] === f.id);
   const rows = cs.map((c) => {
-    const r = evaluate(c, fm, ctx);
-    return `<tr class="${r.status === '—' ? '' : r.status}"><td>${CTRL_SYMBOL(c, f)} ${controlLabel(c, f)}${c.datumIds?.length ? ` |${datumText(c, fm)}|` : ''}${r.flag ? ' ⚠' : ''}</td><td>${fmt(r.measured, 3)}</td><td>${c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`;
+    const r = evaluate(c, fm, ctx), z = isZoneControl(c.kind);
+    return `<tr class="${r.status === '—' ? '' : r.status}"><td>${CTRL_SYMBOL(c, f)} ${controlLabel(c, f)}${c.datumIds?.length ? ` |${datumText(c, fm)}|` : ''}${r.flag ? ' ⚠' : ''}</td><td>${fmt(r.measured, 3)}</td>`
+      + `<td>${z ? '≤ ' + fmt(c.tolUp, 3) : c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${z || r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`;
   }).join('');
-  return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${cs.length ? `<table><tr class="lt"><th></th><th>Ist</th><th>Soll</th><th>Abw.</th></tr>${rows}</table>` : ''}`;
+  const m = f.measured!, extra: string[] = [];
+  if (f.type !== 'Abstand') { if (state.annot.pts) extra.push(`${f.pointCount} ${tt('pts')}`); if (state.annot.std) extra.push(`σ ${fmt(m.nurbs?.std ?? m.rms, 4)}`); }
+  return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${extra.length ? `<div class="lx">${extra.join(' · ')}</div>` : ''}`
+    + `${cs.length ? `<table><tr class="lt"><th></th><th>${tt('Act.')}</th><th>${tt('Nom./Tol')}</th><th>${tt('Dev.')}</th></tr>${rows}</table>` : ''}`;
 }
 
 /** Farbskala symmetrisch: ±max(3σ, |max|) begrenzt auf 3σ, mind. 1 µm. */
@@ -1327,7 +1380,7 @@ function renderScene() {
   }
   // Labels
   const fm = featMap();
-  const specs: LabelSpec[] = state.showLabels ? state.features.filter(vis).map((f) => {
+  const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id)).map((f) => {
     const m = f.measured!;
     const anchor = (f.type === 'Abstand' ? m.p1!.map((v, i) => (v + m.p2![i]) / 2) : m.center) as V3;
     return { id: f.id, anchor, html: labelHTML(f, fm), color: hex(f.color), offset: state.labelOffsets.get(f.id) ?? null, selected: state.sel.includes(f.id) };
@@ -1354,12 +1407,26 @@ function featureRadius(f: FeatureView): number {
   return Math.max(m.radius ?? 0, (m.length ?? 0) / 2, 2);
 }
 /** Kamera auf Merkmal (id) bzw. gesamtes Modell (null) zentrieren; ohne Argument: Auswahl. */
+/** Blickrichtung zum Zentrieren: Kamera auf der Vorderseite (+Normale), Blick entlang −Normale. Achsen ohne Vorzeichen
+ *  (Zylinder, Kegel, Linie, Torus): Seite, die der aktuellen Ansicht am nächsten liegt. Abstand: senkrecht zur Maßlinie. */
+function viewDir(f: FeatureView): [number, number, number] | undefined {
+  const m = f.measured!; let n = (f.aux?.plane.normal ?? m.normal) as [number, number, number];
+  if (f.type === 'Abstand' || f.type === 'Punkt' || f.type === 'Kugel' || f.type === 'Freiformfläche') return undefined;
+  if (['Zylinder', 'Kegel', 'Linie', 'Torus'].includes(f.type) && !f.aux) {
+    const c = viewer.getCamera(); const v = [c.position[0] - c.target[0], c.position[1] - c.target[1], c.position[2] - c.target[2]];
+    if (n[0] * v[0] + n[1] * v[1] + n[2] * v[2] < 0) n = [-n[0], -n[1], -n[2]];
+    if (f.type === 'Linie') { // Linie: Blick senkrecht zur Linie
+      const d = m.direction!; const k = v[0] * d[0] + v[1] * d[1] + v[2] * d[2]; const w = [v[0] - k * d[0], v[1] - k * d[1], v[2] - k * d[2]];
+      return Math.hypot(...w) > 1e-6 ? (w as [number, number, number]) : undefined; }
+  }
+  return n;
+}
 function centerOn(id?: number | null) {
   const fid = id === undefined ? state.sel[0] ?? null : id;
   const f = state.features.find((x) => x.id === fid);
-  if (!f) { viewer.view('fit'); status('Modell zentriert.'); return; }
-  viewer.focus(f.measured!.center as [number, number, number], featureRadius(f));
-  status(`${f.name} zentriert.`);
+  if (!f) { viewer.view('fit'); status(tt('Model centered.')); return; }
+  viewer.focus(f.measured!.center as [number, number, number], featureRadius(f), viewDir(f));
+  status(tt('{0} centered (view along −normal).', f.name));
 }
 {
   const b = document.createElement('button'); b.id = 'btn-center'; b.title = 'Zentrieren: Ansicht auf Auswahl (oder Modell) ausrichten';
@@ -1375,46 +1442,99 @@ function syncViewToggles() {
   for (const el of document.querySelectorAll('[data-vt="wire"]')) el.classList.toggle('on', !!viewer.wire);
   for (const el of document.querySelectorAll('[data-vt="curves"]')) el.classList.toggle('on', showCurves && cadEdgesOn);
   $('#btn-toggle-wire').classList.toggle('on', !!viewer.wire);
+  for (const el of document.querySelectorAll('[data-vt="prims"]')) el.classList.toggle('on', state.showPrims);
+  for (const el of document.querySelectorAll('[data-vt="labels"]')) el.classList.toggle('on', state.showLabels);
 }
 {
   const g = document.createElement('div'); g.id = 'view-gear';
-  g.innerHTML = `<button class="vg-btn" title="Ansicht" aria-label="Ansichtsmenü">⚙</button><div class="vg-menu">
-    <button data-vg="center">⌖ Zentrieren</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ Einpassen</button>
-    <button data-vg="wire" data-vt="wire">▦ Dreieckskanten</button><button data-vg="curves" data-vt="curves" class="on">〰 Kurven/CAD-Kanten</button></div>`;
+  g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
+    <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ ${tt('Fit all')}</button>
+    <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button>
+    <button data-vg="wire" data-vt="wire">▦ ${tt('Mesh edges')}</button><button data-vg="curves" data-vt="curves" class="on">〰 ${tt('Curves/CAD edges')}</button>
+    <button data-vg="opts">⚙ ${tt('Options …')}</button></div>`;
   g.addEventListener('pointerdown', (e) => e.stopPropagation());
   g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => g.classList.toggle('open');
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
-    if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status('Eingepasst.'); } else if (a === 'wire') toggleWire(); else toggleCurves();
+    if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status(tt('Fitted to view.')); }
+    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'opts') openOptions(); else toggleCurves();
     g.classList.remove('open'); }));
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   viewer.el.appendChild(g);
   const info = document.createElement('div'); info.id = 'bbox-info'; info.className = 'hidden'; viewer.el.appendChild(info);
+  info.addEventListener('pointerdown', (e) => { e.stopPropagation(); info.classList.toggle('open'); });
 }
+/** Unten rechts nur die Einheit; Abmessungen der Bounding-Box beim Überfahren (Tippen auf Telefonen). */
 function showBBoxInfo(b: { min: number[]; max: number[] } | null) {
   const el = $('#bbox-info'); if (!b) { el.classList.add('hidden'); return; }
   const d = [0, 1, 2].map((k) => b.max[k] - b.min[k]); el.classList.remove('hidden');
-  el.innerHTML = `<b>mm</b> · ${d.map((x) => x.toFixed(1)).join(' × ')}`; el.title = `Einheit mm · Gesamt-Bounding-Box X × Y × Z`;
+  el.innerHTML = `<b>mm</b><span class="bb-d"> · ${d.map((x) => x.toFixed(1)).join(' × ')}</span>`; el.title = tt('Unit mm · overall bounding box X × Y × Z: {0}', d.map((x) => x.toFixed(2)).join(' × '));
 }
+/** Optionen: Farbmodus (einheitlich / fortlaufende Palette), Annotation-Inhalt. */
+function openOptions() {
+  document.getElementById('opts-dlg')?.remove();
+  const el = document.createElement('div'); el.id = 'opts-dlg';
+  el.innerHTML = `<div class="od-box"><h3>${tt('Options')}</h3>
+    <h4>${tt('Feature colors')}</h4>
+    <div class="row"><label><input type="radio" name="od-cm" value="sequential" ${state.colorMode === 'sequential' ? 'checked' : ''}> ${tt('Sequential (palette, one color per feature)')}</label></div>
+    <div class="row"><label><input type="radio" name="od-cm" value="uniform" ${state.colorMode === 'uniform' ? 'checked' : ''}> ${tt('Uniform')}</label> <input type="color" id="od-uc" value="${hex(state.uniformColor)}"></div>
+    <p class="note">${tt('Colors picked per feature (Properties) always take precedence.')}</p>
+    <h4>${tt('Annotation')}</h4>
+    <div class="row"><label><input type="checkbox" id="od-pts" ${state.annot.pts ? 'checked' : ''}> ${tt('Show point count')}</label></div>
+    <div class="row"><label><input type="checkbox" id="od-std" ${state.annot.std ? 'checked' : ''}> ${tt('Show standard deviation σ')}</label></div>
+    <div class="row"><button class="btn primary" data-ok>${tt('Close')}</button></div></div>`;
+  const apply = () => { applyColorMode(); renderAll(); saveViewPrefs(); };
+  el.querySelectorAll<HTMLInputElement>('input[name=od-cm]').forEach((r) => (r.onchange = () => { state.colorMode = r.value as any; apply(); }));
+  el.querySelector<HTMLInputElement>('#od-uc')!.oninput = (e) => { state.uniformColor = parseInt((e.target as HTMLInputElement).value.slice(1), 16); apply(); };
+  el.querySelector<HTMLInputElement>('#od-pts')!.onchange = (e) => { state.annot.pts = (e.target as HTMLInputElement).checked; apply(); };
+  el.querySelector<HTMLInputElement>('#od-std')!.onchange = (e) => { state.annot.std = (e.target as HTMLInputElement).checked; apply(); };
+  el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => el.remove();
+  el.addEventListener('pointerdown', (e) => { if (e.target === el) el.remove(); });
+  document.body.appendChild(el);
+}
+/** Farbmodus anwenden: einheitlich bzw. Palette in Erzeugungsreihenfolge; individuell gewählte Farben bleiben. */
+function applyColorMode() {
+  state.features.forEach((f, i) => { if (!f.colorSet) f.color = state.colorMode === 'uniform' ? state.uniformColor : PALETTE[i % PALETTE.length]; });
+}
+const PREF_KEY = 'mw-view-prefs';
+function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot })); } catch { /* */ } }
+try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; } } catch { /* */ }
+$('#btn-options').onclick = () => openOptions();
+$('#btn-whatsnew').onclick = () => showWhatsNew();
+$('#ver-box').textContent = versionText();
+setTimeout(() => maybeShowWhatsNew(), 1500);
 
 // ------------------------------------------------------------------ Kontextmenü (Rechtsklick / langes Tippen)
 const ctxMenu = document.createElement('div'); ctxMenu.id = 'ctx-menu'; ctxMenu.className = 'hidden'; document.body.appendChild(ctxMenu);
 function openContext(x: number, y: number, fid: number | null) {
   const f = state.features.find((g) => g.id === fid);
-  const items: [string, () => void][] = [['⌖ Zentrieren', () => centerOn(fid)]];
+  const items: ([string, () => void] | null)[] = [];
   if (f) {
-    state.sel = [f.id]; state.addFeat = f.id; renderAll();
+    state.sel = [f.id]; state.selModel = false; state.addFeat = f.id; renderAll();
+    items.push([`ⓘ ${tt('Properties')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-name')?.focus(), 30); }]);
+    items.push([`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
+    items.push([`⌖ ${tt('Center')}`, () => centerOn(fid)]);
+    if (f.type !== 'Abstand') items.push([`◐ ${tt('Analyze form deviation')}`, () => analyze('form')]);
+    items.push(null);
+    items.push([state.hidden.has(f.id) ? `👁 ${tt('Show geometry')}` : `👁 ${tt('Hide geometry')}`, () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
+    items.push([state.hiddenLabels.has(f.id) ? `🏷 ${tt('Show annotation')}` : `🏷 ${tt('Hide annotation')}`, () => { state.hiddenLabels.has(f.id) ? state.hiddenLabels.delete(f.id) : state.hiddenLabels.add(f.id); renderAll(); }]);
     if (datumKind(f.type)) {
-      items.push([f.datum ? `Bezug ${f.datum} umbenennen …` : 'Bezug zuweisen …', () => { togglePanel('dialog', true); setTimeout(() => ($('#dt-letter') as HTMLSelectElement)?.focus(), 50); }]);
-      if (!f.datum) items.push([`Als Bezug ${nextFreeLetter()} festlegen`, () => setDatum(f, nextFreeLetter())]);
-      else items.push([`Bezug ${f.datum} entfernen`, () => setDatum(f, null)]);
+      items.push(null);
+      items.push([f.datum ? tt('Rename datum {0} …', f.datum) : tt('Assign datum …'), () => { togglePanel('dialog', true); setTimeout(() => ($('#dt-letter') as HTMLSelectElement)?.focus(), 50); }]);
+      if (!f.datum) items.push([tt('Set as datum {0}', nextFreeLetter()), () => setDatum(f, nextFreeLetter())]);
+      else items.push([tt('Remove datum {0}', f.datum), () => setDatum(f, null)]);
     }
-    items.push([state.hidden.has(f.id) ? 'Einblenden' : 'Ausblenden', () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
-    items.push(['Prüfmerkmale (Katalog)', () => { state.ctab = 'katalog'; togglePanel('table', true); renderTable(); }]);
-    items.push(['Löschen', () => { state.selControl = null; deleteSelected(); }]);
+    items.push(null);
+    items.push([tt('Controls (catalog)'), () => { state.ctab = 'katalog'; setPaneOpen('table', true); togglePanel('table', true); renderTable(); }]);
+    items.push([`✕ ${tt('Delete')}`, () => { state.selControl = null; deleteSelected(); }]);
+  } else {
+    selectModel();
+    items.push([`ⓘ ${tt('Properties')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); }]);
+    items.push([`⌖ ${tt('Center')}`, () => centerOn(null)]);
+    items.push([`◐ ${tt('Deviation to original')}`, () => analyze('mesh')]);
   }
-  ctxMenu.innerHTML = items.map(([t], i) => `<button data-i="${i}">${t}</button>`).join('');
-  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!][1](); }));
-  ctxMenu.classList.remove('hidden');
+  ctxMenu.className = 'ctx-menu';
+  ctxMenu.innerHTML = items.map((it, i) => (it ? `<button data-i="${i}">${it[0]}</button>` : '<hr>')).join('');
+  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!]![1](); }));
   const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
   ctxMenu.style.left = Math.min(x, innerWidth - w - 4) + 'px'; ctxMenu.style.top = Math.min(y, innerHeight - h - 4) + 'px';
 }

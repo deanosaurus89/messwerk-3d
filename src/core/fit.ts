@@ -450,10 +450,14 @@ export function autoFit(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: Fi
     if (c.type === 'Langloch') return (c.length ?? 0) - (c.width ?? 0) > 0.2 * (c.width ?? 0) && (c.width ?? 0) < 3 * ext;
     return true;
   });
-  const order: GeomType[] = ['Ebene', 'Kugel', 'Zylinder', 'Langloch', 'Kegel', 'Torus'];
+  // Typpriorität: Regelgeometrien der Fertigung (Zylinder/Kreis, Langloch) vor Kugel/Torus; Kugel und Torus erhalten
+  // einen RMS-Malus, damit z. B. eine kurze Bohrungswand mit Fase nicht als Kugel/Torus erkannt wird.
+  const order: GeomType[] = ['Ebene', 'Zylinder', 'Langloch', 'Kugel', 'Kegel', 'Torus'];
+  const PEN: Partial<Record<GeomType, number>> = { Kugel: 1.4, Torus: 1.6 };
+  const eff = (c: FitResult) => c.rms * (PEN[c.type] ?? 1);
   valid.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
-  const minRms = Math.min(...valid.map((c) => c.rms));
-  let best = valid.find((c) => c.rms <= 1.3 * minRms + 1e-4 * ext) ?? valid[0];
+  const minRms = Math.min(...valid.map(eff));
+  let best = valid.find((c) => eff(c) <= 1.3 * minRms + 1e-4 * ext) ?? valid[0];
   // kurzer Zylinder (Kante/Bohrungsrand) -> Kreis
   if (best.type === 'Zylinder' && (best.length ?? 0) < 0.25 * (best.diameter ?? 0)) {
     try { best = fitType('Kreis', p, n); } catch { /* bleibt Zylinder */ }
