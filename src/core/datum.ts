@@ -78,7 +78,7 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
   Symmetrie: [1, 1], Rundlauf: [1, 1], Gesamtrundlauf: [1, 1], 'Profil (Bezug)': [1, 3],
 };
 
-export interface EvalCtx { points?: (featureId: number) => Vec3[] | null; }
+export interface EvalCtx { points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
 export interface DatumEval { value: number | null; flag?: string; detail?: string; }
 
 function range(p: Vec3[], n: Vec3) { let mn = Infinity, mx = -Infinity; for (const q of p) { const t = dot(q, n); if (t < mn) mn = t; if (t > mx) mx = t; } return mx - mn; }

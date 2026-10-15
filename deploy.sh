@@ -3,6 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 npm test
+# bump the deploy number (YEAR.MAJOR.N → N+1), commit and push it to main
+v=$(node -e "const f='package.json',p=require('./'+f);const a=p.version.split('.');a[2]=String(+a[2]+1);p.version=a.join('.');require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\\n');console.log(p.version)")
+git commit -qm "Release $v" package.json && git push -q origin main || true
+echo "Version $v"
 PAGES_BASE=/messwerk-3d/ npx vite build
 touch dist/.nojekyll
 tmp=$(mktemp -d)

@@ -383,6 +383,22 @@ export class Viewer {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
     s.scale.set(0.032, 0.032, 1); s.position.set(p[0], p[1], p[2]); s.renderOrder = 10; s.raycast = () => {}; this.prims.add(s);
   }
+  /** Coordinate system triad: X red, Y green, Z blue arrows with letters; active one larger. */
+  addTriad(o: number[], R: number[][], name: string, active: boolean, preview = false) {
+    const L = this.radius * (active || preview ? 0.22 : 0.15), O = new THREE.Vector3(o[0], o[1], o[2]);
+    const cols = [0xd32f2f, 0x2e9d3a, 0x1f5fa8];
+    R.forEach((r, k) => {
+      const d = new THREE.Vector3(r[0], r[1], r[2]).normalize();
+      const a = new THREE.ArrowHelper(d, O, L, cols[k], L * 0.18, L * 0.08);
+      a.traverse((c: any) => { if (c.material) { c.material.depthTest = false; c.material.transparent = true; c.material.opacity = preview ? 0.8 : 1; } c.renderOrder = 9; c.raycast = () => {}; });
+      this.prims.add(a);
+      const tip = O.clone().addScaledVector(d, L * 1.12); this.addLabel([tip.x, tip.y, tip.z], 'XYZ'[k], ['#ffd6d6', '#d6f5d6', '#d6e4ff'][k]);
+    });
+    const c = document.createElement('canvas'); c.width = 256; c.height = 48; const x = c.getContext('2d')!;
+    x.font = `${active ? 'bold ' : ''}28px sans-serif`; x.fillStyle = preview ? '#c25e00' : '#22303f'; x.textBaseline = 'middle'; x.fillText(name, 4, 26);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
+    sp.scale.set(0.12, 0.0225, 1); sp.center.set(-0.05, 1.2); sp.position.copy(O); sp.renderOrder = 10; sp.raycast = () => {}; this.prims.add(sp);
+  }
   /** Kurve oder Kontrollpunkt unter dem Zeiger (Kontrollpunkte haben Vorrang). */
   pickCurve(clientX: number, clientY: number): { curveId?: number; ctrl?: number; point: number[] } | null {
     const r = this.renderer.domElement.getBoundingClientRect();

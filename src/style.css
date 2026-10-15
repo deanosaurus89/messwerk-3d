@@ -315,3 +315,14 @@ body.ctx-on #progress { bottom:80px; }
 @media (max-width:900px), (max-height:560px) { .splitter, .pane-x { display:none; } body.no-tree #tree-pane, body.no-dialog #dialog-pane, body.no-table #table-pane { display:flex; } }
 .tw.twb{cursor:pointer;display:inline-block;transition:transform .15s}
 .lbl .lx{font-size:10.5px;color:#3c4a58;padding:0 6px 2px;font-variant-numeric:tabular-nums}
+/* ---------- Coordinate systems ---------- */
+#cs-ind { position:absolute; right:8px; bottom:34px; z-index:6; display:flex; gap:4px; align-items:center; background:rgba(255,255,255,.88); border:1px solid #b8c4d2; border-radius:4px; padding:2px 8px; font:12px system-ui; color:#22303f; cursor:pointer; }
+#cs-ind svg { width:14px; height:14px; } #cs-ind.local { border-color:#1d64c8; color:#1d64c8; } #cs-ind.hidden { display:none; }
+@media (max-width:700px){ #cs-ind { bottom:86px; right:6px; font-size:11px; } }
+body.thumb #cs-ind { display:none !important; }
+.cs-row { display:flex; gap:4px; align-items:center; margin:3px 0; padding:2px 3px; border-radius:4px; }
+.cs-row.act { background:#e6f0ff; outline:1px solid #1d64c8; }
+.cs-row label { min-width:52px; font-weight:600; } .cs-row select { flex:1; min-width:0; } .cs-row select.cs-ax { flex:0 0 auto; }
+.cs-row .cs-off { width:56px; } .cs-row .cs-pick { padding:3px 8px; } .cs-row .cs-pick.on { background:#1d64c8; color:#fff; }
+.cs-dof { margin:6px 0; padding:4px 6px; border-radius:4px; background:#f3f6fa; } .cs-dof.ok { background:#e5f6e8; color:#1a7a32; } .cs-dof.err { background:#fdeaea; color:#b23; }
+.cs-dot { cursor:pointer; margin-right:3px; color:#1d64c8; }

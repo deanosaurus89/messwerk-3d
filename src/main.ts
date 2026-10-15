@@ -23,6 +23,7 @@ import { Tour, TourStep } from './training';
 import type { Vec3 } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
+import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin } from './core/csys';
 import { NurbsParams, evalSurface, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
@@ -68,6 +69,9 @@ const state = {
   /** filter of the All Controls list */
   ctrlFilter: false,
   labelOffsets: new Map<number, V3>(),
+  /** local coordinate systems (3-2-1 alignments); activeCs null = global WCS */
+  csys: [] as CSys[], activeCs: null as number | null, nextCs: 1, csSel: null as number | null, showCs: true,
+  csEdit: null as null | { draft: CSys; orig: CSys | null; field: CsField | null; activate: boolean },
   reports: [] as Report[], nextReport: 1, openReport: null as number | null,
   ctab: 'katalog' as 'katalog' | 'liste',
   brushMask: null as Uint8Array | null,
@@ -103,7 +107,7 @@ function featPoints(fid: number): Vec3[] | null {
   for (let i = 0; i < f.indices.length; i += step) { const v = f.indices[i]; out.push([pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]]); }
   ptsCache.set(fid, out); return out;
 }
-const ctx = { points: featPoints };
+const ctx = { points: featPoints, get frame() { return activeFrame(); } };
 let showCurves = true;
 const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
 const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
@@ -205,7 +209,7 @@ $('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.co
 $('#btn-report').onclick = () => makeReport();
 $('#btn-report2').onclick = () => makeReport();
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
-$('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features));
+$('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
 $('#btn-delete-feat').onclick = () => deleteSelected();
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-toggle-wire').onclick = () => toggleWire();
@@ -361,6 +365,7 @@ window.addEventListener('pointerup', async (e) => {
   if (pe.tool === 'curve') curveAddPoint(h);
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h); }
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
+  else if (state.csEdit) { const f = featureAtHit(h); if (f) selectFeature(f.id); else status(tt('No feature at this location.')); }
   else if (!pe.tool) { const f = featureAtHit(h); if (f) selectFeature(f.id); else selectModel(); }
 });
 
@@ -451,6 +456,7 @@ function ctxSpec(): CtxSpec | null {
   if (pe.tool && pe.tool !== 'curveopts') return { title: PE_NAME[pe.tool], stats: pe.live ? `<span class="cp-live">${pe.live}</span>` : '',
     ok: pe.running ? null : { run: () => peRun(), title: tt('Apply') }, undo: pe.running ? null : { run: () => peUndo(), disabled: !pe.undo.length, title: tt('Undo mesh edit') },
     cancel: { run: () => (pe.running ? polyEngine.cancel() : peExit()), title: pe.running ? tt('Abort') : tt('Close') } };
+  if (state.csEdit) return csSpec();
   const m = state.mode; if (!m) return null;
   const p = state.preview;
   if (m.kind === 'dist') return distSpec(m);
@@ -653,7 +659,7 @@ const COMP_VEC: Record<Exclude<DimComp, '3D'>, Vec3> = { X: [1, 0, 0], Y: [0, 1,
 /** Messrichtung u und vorzeichenbehafteter Betrag entlang u (3D: Verbindungsrichtung). */
 function dimDir(fit: FitResult, comp: DimComp): { u: Vec3; L: number } {
   const d = fit.delta!; if (comp === '3D') { const L = Math.hypot(...d) || 1e-12; return { u: [d[0] / L, d[1] / L, d[2] / L], L }; }
-  const u = COMP_VEC[comp]; return { u, L: d[0] * u[0] + d[1] * u[1] + d[2] * u[2] };
+  const fr = activeFrame(); const u = fr ? fr.R['XYZ'.indexOf(comp)] : COMP_VEC[comp]; return { u, L: d[0] * u[0] + d[1] * u[1] + d[2] * u[2] };
 }
 const distValue = (fit: FitResult, comp: DimComp) => Math.abs(dimDir(fit, comp).L);
 /** Bemaßung wie im CAD: Maßlinie parallel zu u, verschoben um den zu u senkrechten Anteil des Annotation-Versatzes. */
@@ -763,9 +769,10 @@ document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!st
 // ------------------------------------------------------------------ Auswahl, Prüfmerkmale
 function selectFeature(id: number, additive = false) {
   if (state.mode?.kind === 'dist') { setDistanceSlot(id); return; }
+  if (state.csEdit?.field) { csPick(id); return; }
   if (additive) state.sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id].slice(-2);
   else state.sel = [id];
-  state.selModel = false; state.selControl = null; state.addFeat = id;
+  state.selModel = false; state.selControl = null; state.addFeat = id; state.csSel = null;
   renderAll();
 }
 
@@ -879,6 +886,8 @@ window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'INPUT') return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { e.preventDefault(); undoBrush(); return; }
   if (e.key === 'Escape' && pe.tool) { peExit(); return; }
+  if (state.csEdit && (e.key === 'Escape' || e.key === 'Enter')) { e.key === 'Escape' ? csCancel() : csOk(); return; }
+  if (e.key === 'Delete' && state.csSel) { csDelete(state.csSel); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !pe.tool && !state.mode && cv.undo.length) { e.preventDefault(); curveUndo(); return; }
   if (e.key === 'Escape' && state.curveSel != null) { if (cv.edit) { cv.edit = null; renderDialog(); } else curveSelect(null); return; }
   if (e.key === 'Delete' && state.curveSel != null && !pe.tool) { curveDelete(); return; }
@@ -908,7 +917,7 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 }
 
 // ------------------------------------------------------------------ Darstellung
-function renderAll() { renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
+function renderAll() { if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
@@ -920,6 +929,7 @@ function renderRibbon() {
 
 function renderHint() {
   if (!state.data) return hint('');
+  if (state.csEdit) return hint(state.csEdit.field ? tt('Coordinate system: pick the feature for “{0}” in the 3D view or the tree.', csFieldName(state.csEdit.field)) : tt('Coordinate system: check the triad, then ✓ create or ✕ cancel.'));
   const m = state.mode;
   if (!m) return hint('');
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
@@ -1004,6 +1014,7 @@ function renderTree() {
       cn.dataset.cid = String(c.id);
     }
   }
+  csTree(node);
   cadTree(node, q);
   if (state.reports.length) {
     node(`<span class="tw">▾</span>${ICON.folder}${tt('Reports')} (${state.reports.length})`, 'indent1');
@@ -1014,7 +1025,7 @@ function renderTree() {
 }
 const CURVE_KIND_EN: Record<string, string> = { Kante: 'edge', Tangente: 'tangent', Übergang: 'transition', Benutzer: 'user', Vorschlag: 'seam' };
 function selectModel() { if (state.mode?.kind === 'dist') return; state.sel = []; state.selModel = true; state.selControl = null; state.curveSel = null; renderAll(); }
-function clearSelection() { if (!state.sel.length && !state.selModel && state.curveSel == null) return; state.sel = []; state.selModel = false; state.selControl = null; state.curveSel = null; renderAll(); }
+function clearSelection() { if (!state.sel.length && !state.selModel && state.curveSel == null && state.csSel == null) return; state.sel = []; state.selModel = false; state.csSel = null; state.selControl = null; state.curveSel = null; renderAll(); }
 ($('#search') as HTMLInputElement).oninput = () => renderTree();
 
 function numInput(v: number | null, onChange: (x: number | null) => void) {
@@ -1044,7 +1055,9 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
     rows.push([tt('Patch'), nb.kind === 'vierseitig' ? tt('four-sided (4 boundary curves)') : tt('trimmed (1 boundary curve)')], [tt('Control points'), `${nb.surface.nu} × ${nb.surface.nv}`], [tt('Degree'), `${nb.surface.degU} / ${nb.surface.degV}`], [tt('Smoothing λ'), String(nb.params.smooth)]); }
   if (full && m.type === 'Freiformfläche') return rows;
   if (full) {
-    rows.push(['X', fmt(m.center[0])], ['Y', fmt(m.center[1])], ['Z', fmt(m.center[2])], ['I', fmt(m.normal[0], 6)], ['J', fmt(m.normal[1], 6)], ['K', fmt(m.normal[2], 6)]);
+    const fr = activeFrame(), C = fr ? csLocal(fr, m.center) : m.center, N = fr ? csDir(fr, m.normal) : m.normal;
+    if (fr) rows.push([tt('Coordinate system'), activeCsName()]);
+    rows.push(['X', fmt(C[0])], ['Y', fmt(C[1])], ['Z', fmt(C[2])], ['I', fmt(N[0], 6)], ['J', fmt(N[1], 6)], ['K', fmt(N[2], 6)]);
     if (m.type === 'Zylinder' || m.type === 'Kegel') rows.push([tt('Height'), fmt(m.length)]);
     if (m.type === 'Langloch') rows.push([tt('Direction'), m.direction!.map((v) => v.toFixed(4)).join(' ')]);
     if (m.type === 'Kegel') rows.push(['Spitze', m.apex!.map((v) => v.toFixed(3)).join(' ')]);
@@ -1070,9 +1083,11 @@ const DIALOGS: DialogProvider[] = [
   { id: 'curve-draw', when: () => pe.tool === 'curve', render: (d) => renderCurveDialog(d) },
   { id: 'curve-opts', when: () => pe.tool === 'curveopts', render: (d) => renderCurveOpts(d) },
   { id: 'mesh-tool', when: () => !!pe.tool, render: (d) => renderPolyDialog(d) },
+  { id: 'csys-edit', when: () => !!state.csEdit, render: (d) => renderCsEdit(d) },
   { id: 'distance-mode', when: () => state.mode?.kind === 'dist', render: (d) => renderDistDialog(d) },
   { id: 'fit-mode', when: () => state.mode?.kind === 'fit', render: (d) => renderFitDialog(d) },
   { id: 'curve', when: () => curveById(state.curveSel) != null, render: (d) => renderCurveSel(d, curveById(state.curveSel)!) },
+  { id: 'csys', when: () => state.csSel != null && (state.csSel === 0 || state.csys.some((c) => c.id === state.csSel)), render: (d) => renderCsDialog(d) },
   { id: 'feature', when: () => state.features.some((x) => x.id === state.sel[0]), render: (d) => renderFeatureDialog(d, state.features.find((x) => x.id === state.sel[0])!) },
   { id: 'model', when: () => state.selModel && !!state.data, render: (d) => renderModelDialog(d) },
   { id: 'empty', when: () => true, render: (d) => { d.innerHTML = `<div class="dlg-empty">${state.data ? tt('Select an object in the tree or 3D view to show details') : tt('Import a polygon model (STL, PLY, OBJ) or point cloud (XYZ), or load a sample.')}</div>`; } },
@@ -1379,6 +1394,7 @@ function renderScene() {
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
   }
+  renderCsTriads();
   // Labels
   const fm = featMap();
   const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id)).map((f) => {
@@ -1560,6 +1576,7 @@ function projectJSON() {
       reports: state.reports, hidden: [...state.hidden], modelVisible: state.modelVisible, labelOffsets: [...state.labelOffsets.entries()],
       showLabels: state.showLabels, showPrims: state.showPrims, colorPts: state.colorPts, opts: state.opts, camera: viewer.getCamera(),
       curves: state.curves, nextCurve: state.nextCurve, showLayout: state.showLayout,
+      csys: state.csys, activeCs: state.activeCs, nextCs: state.nextCs, showCs: state.showCs,
     },
   };
 }
@@ -1597,6 +1614,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
     if (st.opts) Object.assign(state.opts, st.opts);
+    state.csys = st.csys ?? []; state.activeCs = st.activeCs ?? null; state.nextCs = st.nextCs ?? state.csys.length + 1; state.showCs = st.showCs ?? true; state.csSel = null; state.csEdit = null;
     curvesReset(); state.curves = st.curves ?? []; state.nextCurve = st.nextCurve ?? state.curves.length + 1; state.showLayout = !!st.showLayout;
     if (state.curves.length) updateLayout();
     state.sel = []; state.mode = null; state.preview = null; state.openReport = null; ptsCache.clear();
@@ -2263,3 +2281,224 @@ function renderCurveDialog(d: HTMLElement) {
 (window as any).__app.roundtrip = async () => { const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob()); const p = readProject(bin); await applyProject(p.json, p.mesh, p.idx); return bin.length; };
 
 initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data });
+
+
+// ------------------------------------------------------------------ Coordinate systems (3-2-1 alignments)
+// Definitions reference features; the frame is recomputed from the current features on every use (dependency recompute).
+// Only one system is active; all coordinate outputs (feature X/Y/Z/IJK, position, angle and distance components,
+// annotations, report) are expressed in it. Data are never transformed.
+type CsField = 'p' | 's' | 'X' | 'Y' | 'Z';
+function csFieldName(k: CsField) { return k === 'p' ? tt('Primary') : k === 's' ? tt('Secondary') : tt('Origin {0}', k); }
+function csById(id: number | null) { return id == null ? undefined : state.csys.find((c) => c.id === id); }
+function csResult(cs: CSys) { return computeCSys(cs, featMap()); }
+function activeFrame(): Frame | null {
+  if (state.csEdit) { /* while editing outputs stay in the active system */ }
+  const cs = csById(state.activeCs); if (!cs) return null;
+  return csResult(cs).frame;
+}
+function activeCsName() { const cs = csById(state.activeCs); return cs ? cs.name : tt('Global (WCS)'); }
+function csActivate(id: number | null) {
+  state.activeCs = id; const cs = csById(id);
+  const r = cs ? csResult(cs) : null;
+  if (r?.error) toast(tt('{0}: {1} – global coordinates are used.', cs!.name, tt(r.error)));
+  status(tt('Active coordinate system: {0}', activeCsName())); renderAll(); renderCsIndicator();
+}
+function csNew() {
+  if (!state.data) { toast(tt('Import a model and create features first.')); return; }
+  stopMode();
+  const cs = newCSys(state.nextCs, tt('Alignment {0}', state.nextCs));
+  // prefill: selected features (first = primary, second = secondary)
+  const fm = featMap(); const sel = state.sel.map((i) => fm.get(i)!).filter(Boolean);
+  if (sel[0] && usableAs(sel[0].type, 'primary')) cs.primary.fid = sel[0].id;
+  if (sel[1] && usableAs(sel[1].type, 'secondary')) cs.secondary.fid = sel[1].id;
+  suggestOrigin(cs, fm);
+  state.csEdit = { draft: cs, orig: null, field: cs.primary.fid == null ? 'p' : cs.secondary.fid == null ? 's' : null, activate: true };
+  state.sel = []; state.csSel = null; setPaneOpen('dialog', true); togglePanel('dialog', !isPhone());
+  renderAll();
+}
+function csEditStart(id: number) {
+  const cs = csById(id); if (!cs) return; stopMode();
+  state.csEdit = { draft: JSON.parse(JSON.stringify(cs)), orig: cs, field: null, activate: state.activeCs === id };
+  setPaneOpen('dialog', true); togglePanel('dialog', !isPhone()); renderAll();
+}
+function csPick(fid: number) {
+  const e = state.csEdit!, f = state.features.find((x) => x.id === fid); if (!f || !e.field) return;
+  const step = e.field === 'p' ? 'primary' : e.field === 's' ? 'secondary' : 'origin';
+  if (!usableAs(f.type, step)) { toast(tt('{0} cannot be used as {1}.', typeName(f.type), csFieldName(e.field))); return; }
+  const d = e.draft;
+  if (e.field === 'p') d.primary.fid = fid; else if (e.field === 's') d.secondary.fid = fid; else d.origin[e.field].fid = fid;
+  suggestOrigin(d, featMap());
+  const order: CsField[] = ['p', 's', 'X', 'Y', 'Z'];
+  const next = order.slice(order.indexOf(e.field) + 1).find((k) => (k === 'p' ? d.primary.fid : k === 's' ? d.secondary.fid : d.origin[k].fid) == null);
+  e.field = next ?? null;
+  renderAll();
+}
+function csOk() {
+  const e = state.csEdit; if (!e) return;
+  const r = csResult(e.draft); if (r.error) { toast(tt(r.error)); return; }
+  if (e.orig) Object.assign(e.orig, e.draft); else { state.csys.push(e.draft); state.nextCs++; }
+  const id = e.draft.id; state.csEdit = null; state.csSel = id;
+  if (e.activate) state.activeCs = id;
+  status(tt('{0} saved ({1}/6 degrees of freedom locked).', e.draft.name, r.dof)); renderAll(); renderCsIndicator();
+}
+function csCancel() { state.csEdit = null; renderAll(); }
+function csDelete(id: number) {
+  const cs = csById(id); if (!cs) return;
+  state.csys = state.csys.filter((c) => c.id !== id); if (state.activeCs === id) state.activeCs = null; if (state.csSel === id) state.csSel = null;
+  status(tt('{0} deleted.', cs.name)); renderAll(); renderCsIndicator();
+}
+function csViewZ(id: number | null) {
+  const cs = csById(id), fr = cs ? csResult(cs).frame : null; const z: [number, number, number] = fr ? (fr.R[2] as [number, number, number]) : [0, 0, 1];
+  const o = (fr?.o ?? [0, 0, 0]) as [number, number, number];
+  viewer.focus(o, Math.max(state.data?.diag ?? 100, 1) / 2, z);
+}
+function csSelect(id: number) { state.csSel = id; state.sel = []; state.selModel = false; state.curveSel = null; renderAll(); }
+
+function featOptions(step: 'primary' | 'secondary' | 'origin', cur: number | null) {
+  return `<option value="">—</option>` + state.features.filter((f) => f.type !== 'Abstand' && usableAs(f.type, step))
+    .map((f) => `<option value="${f.id}" ${f.id === cur ? 'selected' : ''}>${f.name} (${typeName(f.type)})</option>`).join('');
+}
+const axisSel = (id: string, cur: Axis, flip: boolean) => `<select id="${id}" class="cs-ax">${(['X', 'Y', 'Z'] as Axis[]).flatMap((a) => [[a, false], [a, true]] as [Axis, boolean][])
+  .map(([a, fl]) => `<option value="${fl ? '-' : '+'}${a}" ${a === cur && fl === flip ? 'selected' : ''}>${fl ? '−' : '+'}${a}</option>`).join('')}</select>`;
+function renderCsEdit(d: HTMLElement) {
+  const e = state.csEdit!, cs = e.draft, r = csResult(cs);
+  const pickBtn = (k: CsField) => `<button class="btn cs-pick ${e.field === k ? 'on' : ''}" data-pick="${k}" title="${tt('Pick in 3D view or tree')}">⌖</button>`;
+  const row = (k: CsField, label: string, inner: string) => `<div class="cs-row ${e.field === k ? 'act' : ''}"><label>${label}</label>${inner}${pickBtn(k)}</div>`;
+  d.innerHTML = `<h3>${ICON.csys} ${e.orig ? tt('Edit coordinate system') : tt('New coordinate system (3-2-1)')}</h3>
+    <div class="row"><label>${tt('Name')}</label><input id="cs-name" value="${cs.name.replace(/"/g, '&quot;')}"></div>
+    <div class="cs-dof ${r.error ? 'err' : r.dof === 6 ? 'ok' : ''}">${tt('DOF locked')} <b>${r.error ? '—' : r.dof}/6</b>${r.error ? ` · ⚠ ${tt(r.error)}` : ''}${r.warnings.map((w) => `<div class="note">⚠ ${tt(w)}</div>`).join('')}</div>
+    <h4>1 · ${tt('Primary – orientation')}</h4>
+    ${row('p', tt('Feature'), `<select id="cs-p">${featOptions('primary', cs.primary.fid)}</select>${axisSel('cs-pa', cs.primary.axis, cs.primary.flip)}`)}
+    <p class="note">${tt('Plane: normal · cylinder, cone, line: axis. Locks 2 rotations.')}</p>
+    <h4>2 · ${tt('Secondary – rotation')}</h4>
+    ${row('s', tt('Feature'), `<select id="cs-s">${featOptions('secondary', cs.secondary.fid)}</select>${axisSel('cs-sa', cs.secondary.axis, cs.secondary.flip)}`)}
+    <p class="note">${tt('Projected into the primary plane. Circle/sphere/point: direction from the origin feature to its center. Locks 1 rotation.')}</p>
+    <h4>3 · ${tt('Origin')}</h4>
+    ${(['X', 'Y', 'Z'] as Axis[]).map((a) => row(a, a, `<select id="cs-o${a}">${featOptions('origin', cs.origin[a].fid)}</select><input id="cs-off${a}" class="cs-off" type="text" inputmode="decimal" value="${cs.origin[a].off}" title="${tt('Offset [mm]')}">`)).join('')}
+    <p class="note">${tt('Each axis from one feature (+ offset in mm). Plane: along its normal · circle/cylinder: the two other axes.')}</p>
+    <div class="row"><label><input type="checkbox" id="cs-act" ${e.activate ? 'checked' : ''}> ${tt('Activate after creation')}</label></div>
+    <div class="row"><button class="btn primary" id="cs-ok" ${r.error ? 'disabled' : ''}>✓ ${e.orig ? tt('Apply') : tt('Create')}</button><button class="btn" id="cs-cancel">✕ ${tt('Cancel')}</button></div>`;
+  const q = <T extends HTMLElement>(sel: string) => d.querySelector<T>(sel)!;
+  const fid = (v: string) => (v === '' ? null : Number(v));
+  q<HTMLInputElement>('#cs-name').onchange = (ev) => { cs.name = (ev.target as HTMLInputElement).value.trim() || cs.name; renderModeBar(); renderScene(); };
+  q<HTMLSelectElement>('#cs-p').onchange = (ev) => { cs.primary.fid = fid((ev.target as HTMLSelectElement).value); suggestOrigin(cs, featMap()); renderAll(); };
+  q<HTMLSelectElement>('#cs-s').onchange = (ev) => { cs.secondary.fid = fid((ev.target as HTMLSelectElement).value); suggestOrigin(cs, featMap()); renderAll(); };
+  const ax = (v: string): [Axis, boolean] => [v.slice(1) as Axis, v[0] === '-'];
+  q<HTMLSelectElement>('#cs-pa').onchange = (ev) => { [cs.primary.axis, cs.primary.flip] = ax((ev.target as HTMLSelectElement).value); renderAll(); };
+  q<HTMLSelectElement>('#cs-sa').onchange = (ev) => { [cs.secondary.axis, cs.secondary.flip] = ax((ev.target as HTMLSelectElement).value); renderAll(); };
+  for (const a of ['X', 'Y', 'Z'] as Axis[]) {
+    q<HTMLSelectElement>('#cs-o' + a).onchange = (ev) => { cs.origin[a].fid = fid((ev.target as HTMLSelectElement).value); renderAll(); };
+    q<HTMLInputElement>('#cs-off' + a).onchange = (ev) => { const v = Number((ev.target as HTMLInputElement).value.replace(',', '.')); if (isFinite(v)) cs.origin[a].off = v; renderAll(); };
+  }
+  d.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => (b.onclick = () => { e.field = e.field === b.dataset.pick ? null : (b.dataset.pick as CsField); renderAll(); if (isPhone() && e.field) togglePanel('dialog', false); }));
+  q<HTMLInputElement>('#cs-act').onchange = (ev) => { e.activate = (ev.target as HTMLInputElement).checked; };
+  q('#cs-ok').onclick = () => csOk(); q('#cs-cancel').onclick = () => csCancel();
+}
+function csSpec(): CtxSpec {
+  const e = state.csEdit!, r = csResult(e.draft);
+  const chips = (['p', 's', 'X', 'Y', 'Z'] as CsField[]).map((k) => {
+    const id = k === 'p' ? e.draft.primary.fid : k === 's' ? e.draft.secondary.fid : e.draft.origin[k].fid;
+    return `<button data-csf="${k}" class="cp-chip ${e.field === k ? 'on' : ''}" title="${csFieldName(k)}">${k === 'p' ? '1' : k === 's' ? '2' : k}: ${id != null ? nameOf(id) : '…'}</button>`; }).join('');
+  return {
+    title: `${ICON.csys} ${e.draft.name}`,
+    controls: chips,
+    stats: `<span class="cp-kv"><small>${tt('DOF')}</small><b>${r.error ? '—' : r.dof}/6</b></span>${r.error ? `<span class="cp-hint">⚠ ${tt(r.error)}</span>` : e.field ? `<span class="cp-hint">${tt('Pick: {0}', csFieldName(e.field))}</span>` : ''}`,
+    bind: (el) => el.querySelectorAll<HTMLButtonElement>('[data-csf]').forEach((b) => (b.onclick = () => { e.field = e.field === b.dataset.csf ? null : (b.dataset.csf as CsField); renderAll(); })),
+    ok: { run: csOk, disabled: !!r.error, title: tt('Create coordinate system (Enter)') },
+    cancel: { run: csCancel, title: tt('Cancel (Esc)') },
+  };
+}
+function renderCsDialog(d: HTMLElement) {
+  const id = state.csSel!, cs = csById(id), r = cs ? csResult(cs) : null, fr = cs ? r!.frame : null;
+  const v3 = (v: number[]) => v.map((x) => x.toFixed(4)).join('  ');
+  const def: [string, string][] = cs ? [
+    [tt('Primary'), `${nameOf(cs.primary.fid)} → ${cs.primary.flip ? '−' : '+'}${cs.primary.axis}`],
+    [tt('Secondary'), `${nameOf(cs.secondary.fid)} → ${cs.secondary.flip ? '−' : '+'}${cs.secondary.axis}`],
+    ...(['X', 'Y', 'Z'] as Axis[]).map((a) => [tt('Origin {0}', a), `${nameOf(cs.origin[a].fid)}${cs.origin[a].off ? ` ${sgn(cs.origin[a].off, 3)} mm` : ''}`] as [string, string]),
+    [tt('DOF locked'), r!.error ? '—' : `${r!.dof}/6`]] : [[tt('Definition'), tt('global machine/data coordinates')]];
+  const geo: [string, string][] = fr ? [[tt('Origin'), v3(fr.o)], ['X', v3(fr.R[0])], ['Y', v3(fr.R[1])], ['Z', v3(fr.R[2])]] : cs ? [] : [[tt('Origin'), '0  0  0']];
+  d.innerHTML = `<h3>${ICON.csys} ${cs ? cs.name : tt('Global (WCS)')} ${state.activeCs === (cs ? id : null) ? `<span class="sub">● ${tt('active')}</span>` : ''}</h3>
+    ${cs ? `<div class="row"><label>${tt('Name')}</label><input id="csd-name" value="${cs.name.replace(/"/g, '&quot;')}"></div>` : ''}
+    ${r?.error ? `<div class="cs-dof err">⚠ ${tt(r.error)}</div>` : ''}${r?.warnings.map((w) => `<div class="note">⚠ ${tt(w)}</div>`).join('') ?? ''}
+    ${kv(def)}${geo.length ? `<h4>${tt('In global coordinates')}</h4>${kv(geo)}` : ''}
+    <div class="row">${state.activeCs === (cs ? id : null) ? '' : `<button class="btn primary" id="csd-act">● ${tt('Activate')}</button>`}${cs ? `<button class="btn" id="csd-edit">✎ ${tt('Edit …')}</button>` : ''}
+      <button class="btn" id="csd-view">⬇ ${tt('View along Z')}</button>${cs ? `<button class="btn warn" id="csd-del">✕ ${tt('Delete')}</button>` : ''}</div>`;
+  d.querySelector<HTMLInputElement>('#csd-name')?.addEventListener('change', (ev) => { cs!.name = (ev.target as HTMLInputElement).value.trim() || cs!.name; renderAll(); renderCsIndicator(); });
+  d.querySelector('#csd-act')?.addEventListener('click', () => csActivate(cs ? id : null));
+  d.querySelector('#csd-edit')?.addEventListener('click', () => csEditStart(id));
+  d.querySelector('#csd-view')?.addEventListener('click', () => csViewZ(cs ? id : null));
+  d.querySelector('#csd-del')?.addEventListener('click', () => csDelete(id));
+}
+function csTree(node: (html: string, cls: string, onClick?: (e: MouseEvent) => void, sel?: boolean, fid?: number, eye?: HTMLElement) => HTMLElement) {
+  if (!state.data) return;
+  node(`<span class="tw">▾</span>${ICON.folder}${tt('Coordinate Systems')} (${state.csys.length + 1})`, 'indent1', undefined, false, undefined,
+    eyeBtn(state.showCs, () => { state.showCs = !state.showCs; renderAll(); }));
+  const item = (id: number, name: string, extra: string, cs?: CSys) => {
+    const act = state.activeCs === (cs ? id : null);
+    const n = node(`<span class="tw"></span><span class="cs-dot" title="${act ? tt('active') : tt('Activate')}">${act ? '●' : '○'}</span>${ICON.csys}${act ? `<b>${name}</b>` : name}${extra}`, 'indent2 cs-node', () => csSelect(id), state.csSel === id, undefined,
+      cs ? eyeBtn(cs.visible, () => { cs.visible = !cs.visible; renderTree(); renderScene(); scheduleAutosave(); }) : undefined);
+    n.dataset.csid = String(id); n.dataset.gk = 'cs' + id;
+    n.querySelector<HTMLElement>('.cs-dot')!.onclick = (e) => { e.stopPropagation(); csActivate(cs ? id : null); };
+    n.ondblclick = () => (cs ? csEditStart(id) : csActivate(null));
+    n.oncontextmenu = (e) => { e.preventDefault(); openCsContext(e.clientX, e.clientY, id); };
+    let t = 0; n.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const x = e.clientX, y = e.clientY; t = window.setTimeout(() => openCsContext(x, y, id), 550); });
+    n.addEventListener('pointerup', () => clearTimeout(t)); n.addEventListener('pointermove', () => clearTimeout(t));
+  };
+  item(0, tt('Global (WCS)'), '');
+  for (const cs of state.csys) {
+    const r = csResult(cs);
+    item(cs.id, cs.name, ` <span class="sub">${r.error ? '⚠ ' + tt(r.error) : `🔗 ${r.dof}/6`}</span>`, cs);
+  }
+}
+function openCsContext(x: number, y: number, id: number) {
+  const cs = csById(id); csSelect(id);
+  const items: ([string, () => void] | null)[] = [[`● ${tt('Activate')}`, () => csActivate(cs ? id : null)]];
+  if (cs) items.push([`✎ ${tt('Edit …')}`, () => csEditStart(id)], [`ⓘ ${tt('Properties')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); }],
+    [cs.visible ? `👁 ${tt('Hide triad')}` : `👁 ${tt('Show triad')}`, () => { cs.visible = !cs.visible; renderAll(); }],
+    [`✎ ${tt('Rename …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#csd-name')?.select(), 30); }]);
+  items.push([`⬇ ${tt('View along Z')}`, () => csViewZ(cs ? id : null)]);
+  if (cs) items.push(null, [`✕ ${tt('Delete')}`, () => csDelete(id)]);
+  ctxMenu.className = 'ctx-menu';
+  ctxMenu.innerHTML = items.map((it, i) => (it ? `<button data-i="${i}">${it[0]}</button>` : '<hr>')).join('');
+  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!]![1](); }));
+  ctxMenu.style.left = Math.min(x, innerWidth - ctxMenu.offsetWidth - 4) + 'px'; ctxMenu.style.top = Math.min(y, innerHeight - ctxMenu.offsetHeight - 4) + 'px';
+}
+function renderCsTriads() {
+  if (state.csEdit) { const r = csResult(state.csEdit.draft); if (r.frame) viewer.addTriad(r.frame.o, r.frame.R, state.csEdit.draft.name, true, true); }
+  if (!state.showCs) return;
+  for (const cs of state.csys) {
+    if (!cs.visible || state.csEdit?.orig === cs) continue;
+    const r = csResult(cs); if (r.frame) viewer.addTriad(r.frame.o, r.frame.R, cs.name, state.activeCs === cs.id);
+  }
+}
+/** Lower-right indicator "CS: name" – click for a quick switch. */
+function renderCsIndicator() {
+  let el = document.getElementById('cs-ind');
+  if (!el) {
+    el = document.createElement('button'); el.id = 'cs-ind'; viewer.el.appendChild(el);
+    el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    el.onclick = (e) => {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const items: [string, () => void][] = [[`${state.activeCs == null ? '● ' : '○ '}${tt('Global (WCS)')}`, () => csActivate(null)],
+        ...state.csys.map((c) => [`${state.activeCs === c.id ? '● ' : '○ '}${c.name}`, () => csActivate(c.id)] as [string, () => void]), [`＋ ${tt('New 3-2-1 …')}`, () => csNew()]];
+      ctxMenu.className = 'ctx-menu';
+      ctxMenu.innerHTML = items.map((it, i) => `<button data-i="${i}">${it[0]}</button>`).join('');
+      ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!][1](); }));
+      ctxMenu.style.left = Math.max(4, Math.min(r.right - ctxMenu.offsetWidth, innerWidth - ctxMenu.offsetWidth - 4)) + 'px'; ctxMenu.style.top = Math.max(4, r.top - ctxMenu.offsetHeight - 4) + 'px';
+    };
+  }
+  const cs = csById(state.activeCs), err = cs ? csResult(cs).error : undefined;
+  el.classList.toggle('hidden', !state.data); el.classList.toggle('local', !!cs);
+  el.innerHTML = `${ICON.csys}<span>${tt('CS')}: <b>${activeCsName()}</b>${err ? ' ⚠' : ''}</span>`;
+  el.title = err ? tt('{0}: {1} – global coordinates are used.', cs!.name, tt(err)) : tt('Active coordinate system – click to switch');
+}
+$('#ico-cs').innerHTML = ICON.csys;
+$('#btn-cs-new').onclick = () => csNew();
+$('#btn-cs-activate').onclick = () => { if (state.csSel != null) csActivate(state.csSel || null); else toast(tt('Select a coordinate system in the tree first.')); };
+$('#btn-cs-global').onclick = () => csActivate(null);
+$('#btn-cs-edit').onclick = () => { if (state.csSel) csEditStart(state.csSel); else toast(tt('Select a coordinate system in the tree first.')); };
+$('#btn-cs-del').onclick = () => { if (state.csSel) csDelete(state.csSel); else toast(tt('Select a coordinate system in the tree first.')); };
+$('#btn-cs-show').onclick = () => { state.showCs = !state.showCs; renderAll(); };
+$('#btn-cs-view').onclick = () => csViewZ(state.activeCs);
+renderCsIndicator();
+Object.assign((window as any).__app, { csNew, csActivate, csOk, csEditStart, csResult });

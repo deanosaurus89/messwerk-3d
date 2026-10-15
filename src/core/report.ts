@@ -1,4 +1,5 @@
 // Bericht ("Tabelle erzeugen"): eingefrorene Momentaufnahme aller Merkmale und Prüfmerkmale.
+import { dirLocal, toLocal } from './csys';
 import { Control, Feature, FORM_NAME, DEG, controlLabel, evaluate, datumText, EvalCtx } from './features';
 
 export interface ReportFeatureRow { name: string; type: string; x: number; y: number; z: number; i: number; j: number; k: number;
@@ -29,7 +30,8 @@ export function buildReport(id: number, features: Feature[], controls: Control[]
   const frows: ReportFeatureRow[] = features.map((f) => {
     const m = f.measured!;
     const isD = f.type === 'Abstand';
-    return { name: f.name + (f.datum ? ` [${f.datum}]` : ''), type: TYPE_EN[f.type] ?? f.type, x: m.center[0], y: m.center[1], z: m.center[2], i: m.normal[0], j: m.normal[1], k: m.normal[2],
+    const fr = ctx.frame, C = fr ? toLocal(fr, m.center) : m.center, N = fr ? dirLocal(fr, m.normal) : m.normal;
+    return { name: f.name + (f.datum ? ` [${f.datum}]` : ''), type: TYPE_EN[f.type] ?? f.type, x: C[0], y: C[1], z: C[2], i: N[0], j: N[1], k: N[2],
       size: sizeText(f), form: isD ? null : m.form, formName: isD ? '' : FORM_NAME[f.type], rms: isD ? null : m.rms, points: f.pointCount,
       aux: f.aux ? `Aux. plane (${f.aux.source}, flatness ${f4(f.aux.plane.form)})` : '' };
   });

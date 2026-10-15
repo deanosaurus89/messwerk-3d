@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="start">Home</button>
     <button class="tab" data-tab="merkmale">Features</button>
     <button class="tab" data-tab="pruef">Controls</button>
+    <button class="tab" data-tab="csys">Coordinate Systems</button>
     <button class="tab" data-tab="analyze">Analyze</button>
     <button class="tab" data-tab="poly">Mesh</button>
     <button class="tab" data-tab="re">Reverse Engineering</button>
@@ -54,6 +55,22 @@
         <button class="big" id="btn-report2"><span class="ico">▤</span>Create report</button>
         <button class="big" id="btn-csv2" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>List CSV</button>
       </div><div class="glabel">Report · tick controls in the catalog below the 3D view</div></div>
+    </div>
+    <div class="panel hidden" data-tab="csys">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cs-new" title="New coordinate system from features (primary – secondary – origin)"><span class="ico" id="ico-cs"></span>New 3-2-1</button>
+        <button class="big" id="btn-cs-datum" disabled title="From datum system A|B|C (planned)"><span class="ico">⌖</span>From datums</button>
+      </div><div class="glabel">Create</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cs-activate" title="Make the selected coordinate system active"><span class="ico">●</span>Activate</button>
+        <button class="big" id="btn-cs-global" title="Use the global coordinate system (WCS)"><span class="ico">⊕</span>Global</button>
+        <button class="big" id="btn-cs-edit" title="Edit the selected coordinate system"><span class="ico">✎</span>Edit</button>
+        <button class="big" id="btn-cs-del" title="Delete the selected coordinate system"><span class="ico">✕</span>Delete</button>
+      </div><div class="glabel">Active system</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cs-show" title="Show or hide all coordinate system triads"><span class="ico">👁</span>Show all</button>
+        <button class="big" id="btn-cs-view" title="View along the Z axis of the active system"><span class="ico">⬇</span>View along Z</button>
+      </div><div class="glabel">Display</div></div>
     </div>
     <div class="panel hidden" data-tab="analyze">
       <div class="group"><div class="btns">

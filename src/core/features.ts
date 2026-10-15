@@ -1,6 +1,7 @@
 // Merkmale (Features) und Prüfmerkmale (Controls). Erweiterbar um Soll-Komponente (CAD).
 import { FitResult, GeomType } from './fit';
 import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
+import { toLocal, dirLocal } from './csys';
 import { DATUM_CONTROLS, DatumKindCtl, EvalCtx, datumKind, evalDatumControl, isDatumControl } from './datum';
 export type { EvalCtx } from './datum';
 
@@ -148,26 +149,28 @@ export function measuredValue(c: Control, feats: Map<number, Feature>, ctx: Eval
   const f = feats.get(c.featureIds[0])?.measured;
   if (!f) return null;
   if (isDatumControl(c.kind)) return evalDatumControl(c, feats, ctx).value;
+  const fr = ctx.frame;
+  const C = fr ? toLocal(fr, f.center) : f.center, N = fr ? dirLocal(fr, f.normal) : f.normal, D = f.delta ? (fr ? dirLocal(fr, f.delta) : f.delta) : null;
   switch (c.kind) {
     case 'Durchmesser': return f.diameter ?? null;
     case 'Radius': return f.radius ?? null;
-    case 'X': return f.center[0];
-    case 'Y': return f.center[1];
-    case 'Z': return f.center[2];
+    case 'X': return C[0];
+    case 'Y': return C[1];
+    case 'Z': return C[2];
     case 'Länge': return f.length ?? null;
     case 'Breite': return f.width ?? null;
     case 'Kegelwinkel': return f.halfAngle != null ? 2 * f.halfAngle * DEG : null;
     case 'Form': return f.form;
     case 'Std.-Abw.': return f.rms;
-    case 'Winkel X': return axisAngle(f.normal, 0);
-    case 'Winkel Y': return axisAngle(f.normal, 1);
-    case 'Winkel Z': return axisAngle(f.normal, 2);
+    case 'Winkel X': return axisAngle(N, 0);
+    case 'Winkel Y': return axisAngle(N, 1);
+    case 'Winkel Z': return axisAngle(N, 2);
     case 'Rohrdurchmesser': return f.minorRadius != null ? 2 * f.minorRadius : null;
     case 'Rohrradius': return f.minorRadius ?? null;
     case 'Abstand 3D': return f.distance ?? null;
-    case 'Abstand X': return f.delta ? Math.abs(f.delta[0]) : null;
-    case 'Abstand Y': return f.delta ? Math.abs(f.delta[1]) : null;
-    case 'Abstand Z': return f.delta ? Math.abs(f.delta[2]) : null;
+    case 'Abstand X': return D ? Math.abs(D[0]) : null;
+    case 'Abstand Y': return D ? Math.abs(D[1]) : null;
+    case 'Abstand Z': return D ? Math.abs(D[2]) : null;
   }
 }
 
@@ -211,11 +214,12 @@ export function controlsCSV(controls: Control[], feats: Map<number, Feature>, ct
   return '\ufeff' + [head, ...rows].map((r) => r.join(';')).join('\r\n') + '\r\n';
 }
 
-export function featureCSV(feats: Feature[]): string {
+export function featureCSV(feats: Feature[], ctx: EvalCtx = {}): string {
   const head = ['Name', 'Type', 'Datum', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Diameter', 'Length', 'Width', 'Cone angle', 'Tube Ø', 'Distance 3D', 'Form', 'RMS', 'Points'];
   const rows = feats.map((f) => {
     const m = f.measured!;
-    return [f.name, f.type, f.datum ?? '', ...m.center.map((v) => fmt(v)), ...m.normal.map((v) => fmt(v, 6)), fmt(m.diameter),
+    const fr = ctx.frame, C = fr ? toLocal(fr, m.center) : m.center, N = fr ? dirLocal(fr, m.normal) : m.normal;
+    return [f.name, f.type, f.datum ?? '', ...C.map((v) => fmt(v)), ...N.map((v) => fmt(v, 6)), fmt(m.diameter),
       fmt(m.length), fmt(m.width), fmt(m.halfAngle != null ? 2 * m.halfAngle * DEG : null), fmt(m.minorRadius != null ? 2 * m.minorRadius : null), fmt(m.distance), fmt(m.form), fmt(m.rms), String(f.pointCount)]
       .map((s) => String(s).replace('.', ','));
   });
