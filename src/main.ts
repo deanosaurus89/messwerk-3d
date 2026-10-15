@@ -5,10 +5,17 @@ import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from 
 import { docsHtml } from './docs';
 import { provenanceOf, hardParentsOf, dependentsOf } from './core/provenance';
 import { AxisAnalysis, analyzeAxis } from './core/axisan';
-import { TRIM_TYPES, trimmedSurface } from './core/trim';
+import { TRIM_TYPES, trimmedSurface, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
 import { REEX_DEFAULT, ReexParams, SearchRegion, buildRegion, reextract } from './core/reextract';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
+const curveCache = new Map<number, { key: string; seg: Float32Array | null }>();
+/** covered arc / segment of a circle, slot or line (null = whole closed curve → normal display) */
+function curveTrimFor(f: FeatureView) {
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
+  const c = curveCache.get(f.id); if (c && c.key === key) return c.seg;
+  const pts = featPoints(f.id); const seg = pts ? trimmedCurve(f.measured!, pts) : null; curveCache.set(f.id, { key, seg }); return seg;
+}
 function trimFor(f: FeatureView) {
   const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
   const c = trimCache.get(f.id); if (c && c.key === key) return c;
@@ -1560,6 +1567,9 @@ function renderScene() {
     if (f.type === 'Winkel') viewer.addAngle(f.measured!, f.color, sel);
     else if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
     else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
+    else if (state.trimGeo && CURVE_TRIM_TYPES.includes(f.type) && f.indices.length >= 2 && viewer.model) {
+      const seg = curveTrimFor(f); if (seg) { viewer.addTrimmed(new Float32Array(0), seg, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+    }
     else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
       const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
