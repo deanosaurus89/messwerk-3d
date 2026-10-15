@@ -33,3 +33,19 @@ describe('coordinate systems 3-2-1', () => {
     cs.secondary.fid = 99; expect(computeCSys(cs, feats).error).toMatch(/missing/);
   });
 });
+
+import { nextEmptyField, suggestOrigin } from '../src/core/csys';
+describe('free step order', () => {
+  const feats = new Map([[1, F(1, 'Ebene', [0, 0, 10], [0, 0, 1])], [3, F(3, 'Kreis', [20, 30, 10], [0, 0, 1], { radius: 2 })], [5, F(5, 'Zylinder', [1, 2, 0], [0, 0, 1], { radius: 2 })]]);
+  it('origin first, then primary: manual origin kept, autos follow the current primary', () => {
+    const cs = newCSys(1, 'A'); cs.origin.X = { fid: 3, off: 0 }; cs.origin.Y = { fid: 3, off: 0 };
+    expect(nextEmptyField(cs, 'Y')).toBe('Z'); expect(nextEmptyField(cs, 'Z')).toBe('p');
+    cs.primary.fid = 5; suggestOrigin(cs, feats as any); expect(cs.origin.X.fid).toBe(3); expect(cs.origin.Z.fid).toBe(null);
+    cs.primary.fid = 1; suggestOrigin(cs, feats as any); expect(cs.origin.Z.fid).toBe(1); expect(cs.origin.Z.auto).toBeTruthy();
+    cs.primary.fid = 5; suggestOrigin(cs, feats as any); expect(cs.origin.Z.fid).toBe(null); // stale auto from the plane dropped
+    const r = computeCSys(cs, feats as any); expect(r.error).toBeUndefined(); expect(r.frame!.o[0]).toBeCloseTo(20, 9); expect(r.frame!.o[1]).toBeCloseTo(30, 9);
+  });
+  it('secondary before primary works', () => {
+    const cs = newCSys(2, 'B'); cs.secondary.fid = 3; expect(computeCSys(cs, feats as any).error).toBeUndefined(); expect(nextEmptyField(cs, 's')).toBe('X');
+  });
+});

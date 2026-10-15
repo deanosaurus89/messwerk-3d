@@ -45,7 +45,7 @@ import { type Vec3, sub, scale, dot, norm, add, basis, cross, unit } from './cor
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
 import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
-import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin } from './core/csys';
+import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin, nextEmptyField } from './core/csys';
 import { NurbsParams, evalSurface, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
@@ -2530,9 +2530,7 @@ function csPick(fid: number) {
   const d = e.draft;
   if (e.field === 'p') d.primary.fid = fid; else if (e.field === 's') d.secondary.fid = fid; else d.origin[e.field] = { ...d.origin[e.field], fid, auto: undefined };
   if (e.field === 'p' || e.field === 's') suggestOrigin(d, featMap()); // auto-fill only after primary/secondary, never after an origin pick
-  const order: CsField[] = ['p', 's', 'X', 'Y', 'Z'];
-  const next = order.slice(order.indexOf(e.field) + 1).find((k) => (k === 'p' ? d.primary.fid : k === 's' ? d.secondary.fid : d.origin[k].fid) == null);
-  e.field = next ?? null;
+  e.field = nextEmptyField(d, e.field); // any order: continue with the next empty step, wrapping around
   renderAll();
 }
 function csOk() {
@@ -2586,6 +2584,7 @@ function renderCsEdit(d: HTMLElement) {
   d.innerHTML = `<h3>${ICON.csys} ${e.orig ? tt('Edit coordinate system') : tt('New coordinate system (3-2-1)')}</h3>
     <div class="row"><label>${tt('Name')}</label><input id="cs-name" value="${cs.name.replace(/"/g, '&quot;')}"></div>
     <div class="cs-dof ${r.error ? 'err' : r.dof === 6 ? 'ok' : ''}">${tt('DOF locked')} <b>${r.error ? '—' : r.dof}/6</b>${r.error ? ` · ⚠ ${tt(r.error)}` : ''}${r.warnings.map((w) => `<div class="note">⚠ ${tt(w)}</div>`).join('')}</div>
+    <p class="note">${tt('Steps can be filled in any order (e.g. origin first); automatic origin entries follow the current primary/secondary.')}</p>
     <h4>1 · ${tt('Primary – orientation')}</h4>
     ${row('p', tt('Feature'), `<select id="cs-p">${featOptions('primary', cs.primary.fid)}</select>${axisSel('cs-pa', cs.primary.axis, cs.primary.flip)}`)}
     <p class="note">${tt('Plane: normal · cylinder, cone, line: axis. Locks 2 rotations.')}</p>${dofSection(cs, 'p')}

@@ -92,6 +92,8 @@ export const toLocal = (fr: Frame, p: Vec3): Vec3 => { const d = sub(p, fr.o); r
 export const dirLocal = (fr: Frame, v: Vec3): Vec3 => [dot(fr.R[0], v), dot(fr.R[1], v), dot(fr.R[2], v)];
 /** Suggest origin features after primary/secondary were picked (plane → its axis; circle/cylinder → the two others). */
 export function suggestOrigin(cs: CSys, feats: Map<number, Feature>) {
+  // free step order: drop earlier automatic entries (they may stem from a previous primary/secondary); manual picks stay
+  for (const a of AX) if (cs.origin[a].auto) cs.origin[a] = { ...cs.origin[a], fid: null, auto: undefined };
   const p = cs.primary.fid != null ? feats.get(cs.primary.fid) : undefined, s = cs.secondary.fid != null ? feats.get(cs.secondary.fid) : undefined;
   const ip = cs.primary.axis, is = cs.secondary.axis, it = AX.find((a) => a !== ip && a !== is)!;
   const set = (a: Axis, f: Feature, why: string) => { if (cs.origin[a].fid == null) cs.origin[a] = { ...cs.origin[a], fid: f.id, auto: why }; };
@@ -103,4 +105,11 @@ export function suggestOrigin(cs: CSys, feats: Map<number, Feature>) {
   if (s && s.type === 'Ebene') set(is, s, 'secondary plane fixes the ' + is + ' translation');
   // secondary axis (line/cylinder …) lying in the primary plane: it passes through the origin → fixes the third translation
   if (s && AXIS_TYPES.includes(s.type)) set(it, s, 'secondary axis passes through the origin');
+}
+/** Next empty step after `cur` (wrapping around) – steps can be filled in any order. */
+export function nextEmptyField(cs: CSys, cur: 'p' | 's' | Axis | null): 'p' | 's' | Axis | null {
+  const order = ['p', 's', 'X', 'Y', 'Z'] as const, i = cur ? order.indexOf(cur) : -1;
+  const empty = (k: typeof order[number]) => (k === 'p' ? cs.primary.fid : k === 's' ? cs.secondary.fid : cs.origin[k].fid) == null;
+  for (let j = 1; j <= order.length; j++) { const k = order[(i + j + order.length) % order.length]; if (k !== cur && empty(k)) return k; }
+  return null;
 }
