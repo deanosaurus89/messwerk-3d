@@ -16,7 +16,7 @@ function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3
   let idx = req.indices;
   if (req.seed) {
     if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell. Für Punktwolken den Pinsel verwenden.');
-    idx = topo.regionVertices(topo.growRegion(req.seed.tri, req.seed.point, { maxAngleDeg: req.seed.maxAngleDeg, radius: req.seed.radius })).all;
+    idx = topo.regionVertices(topo.growRegion(req.seed.tri, req.seed.point, { maxAngleDeg: req.seed.maxAngleDeg, radius: req.seed.radius, type: 'Freiformfläche' })).all;
   }
   if (!idx || idx.length < 16) throw new Error('Zu wenige Punkte für eine Freiformfläche');
   const { p, n } = gather(mesh!, idx, Infinity);

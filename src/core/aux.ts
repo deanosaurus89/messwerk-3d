@@ -86,16 +86,21 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     const cand = new Map<number, number>();
     for (const t of r.tris) for (const u of topo.neighbors(t)) if (!visited[u] && !topo.sliver[u] && !cand.has(u)) cand.set(u, triDist(u));
     const order = [...cand.entries()].sort((a, b) => a[1] - b[1]);
-    let tried = 0;
+    let tried = 0; let budget = 0.6; let backup: Region | undefined; let work = 0; const NT = mesh.indices.length / 3;
     for (const [u, du] of order) {
       if (du > maxD) break;
       if (visited[u]) continue;
-      const gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.3, ...go }); if (!gt.length) { visited[u] = 1; if (++tried > 400) break; continue; }
+      let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: budget, ...go });
+      // ausgelaufen (Scan mit Verrundungen): lokales fit-geführtes Wachstum statt des Kantenwachstums
+      let viaFit = false; if (!gt.length) { budget = Math.max(0.02, budget / 3); gt = topo.growFit(u, seedPoint, { ...o, radius: 0, ...go }); viaFit = true; }
+      work += gt.length + 0.01 * NT; if (work > 3 * NT) break; // Rechenbudget (deterministisch, nach Dreiecken)
+      if (!gt.length) { visited[u] = 1; if (++tried > 400) break; continue; }
       const g = mk(gt);
-      if (g.verts.length >= 8 && ok(g)) return g;
+      // fit-geführte Ersatzregion nur nehmen, wenn kein sauberes Kantenwachstum passt
+      if (g.verts.length >= 8 && ok(g)) { if (!viaFit) return g; backup ??= g; }
       if (++tried > 400) break;
     }
-    return undefined;
+    return backup;
   };
   const prismatic = (r: Region, axis: Vec3) => { const a = axisFromNormals(r.n); return a.ratio < 0.05 && Math.abs(dot(a.axis, axis)) > 0.95; };
 
@@ -110,10 +115,10 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   let wall: Region | undefined, planeReg: Region | undefined;
   if (p1.ok && !givenPlane) {
     planeReg = r1;
-    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist);
+    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
     if (!wall) { if (isFinite(maxDist)) return null; throw new Error('Keine Wand (Bohrung/Langloch) neben der angeklickten Ebene gefunden'); }
   } else if (p1.ok && givenPlane) {
-    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist);
+    wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist, { prismAxis: givenPlane.normal });
     if (!wall) { if (isFinite(maxDist)) return null; } if (!wall) throw new Error('Keine passende Wand neben der angeklickten Fläche gefunden');
   } else {
     wall = r1;

@@ -32,7 +32,7 @@ describe('Freiformfläche (B-Spline)', () => {
     const topo = new MeshTopology(mesh);
     const pt: Vec3 = [35, 40, Z(35, 40)]; const P = mesh.positions, F = mesh.indices; let best = 0, bd = Infinity;
     for (let t = 0; t < F.length / 3; t++) { const a = 3 * F[3 * t]; const d = (P[a] - pt[0]) ** 2 + (P[a + 1] - pt[1]) ** 2 + (P[a + 2] - pt[2]) ** 2; if (d < bd) { bd = d; best = t; } }
-    const tris = topo.growRegion(best, pt, { maxAngleDeg: 20, radius: 0 });
+    const tris = topo.growRegion(best, pt, { maxAngleDeg: 20, radius: 0, type: 'Freiformfläche' });
     const idx = topo.regionVertices(tris).all;
     const { p, n } = gather(mesh, idx);
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const q of p) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }

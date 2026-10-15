@@ -140,13 +140,14 @@ export class MeshTopology {
    *     Modell wird bei jedem Wachstum um 60 % neu gefittet; Obergrenze 60 % der Gesamtfläche.
    */
   growRegion(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
-    if (o.legacy) return this.growLegacy(seedTri, seedPoint, o, Math.floor((o.legacyCap ?? 0.6) * this.mesh.indices.length / 3)) ?? new Uint32Array(0);
+    // Freiform: kein Regelgeometrie-Modell -> reines Kanten-/Krümmungswachstum (mit Flächendeckel)
+    if (o.legacy || o.type === 'Freiformfläche') return this.growLegacy(seedTri, seedPoint, o, Math.floor((o.legacyCap ?? 0.6) * this.mesh.indices.length / 3)) ?? new Uint32Array(0);
     // 1) Kanten-/Krümmungswachstum (exakt wie bisher, rotationsinvariant), mit Flächenobergrenze;
     // 2) Gütekontrolle: Region muss sich mit RMS < 0,3·h (h = lokale Kantenlänge) durch eine Regelgeometrie
     //    beschreiben lassen – sonst ist sie über Verrundungen/Kanten ausgelaufen -> fit-geführtes Wachstum.
     const nt = this.mesh.indices.length / 3;
     const F = this.growFit(seedTri, seedPoint, o); const fitInfo = this.lastGrow;
-    const L = this.growLegacy(seedTri, seedPoint, o, Math.floor(Math.min(0.6 * nt, Math.max(20 * F.length, 0.02 * nt))));
+    const L = this.growLegacy(seedTri, seedPoint, o, Math.floor(Math.min(0.6 * nt, Math.max(50 * F.length, 0.15 * nt))));
     if (L && L.length >= 3) {
       const h = this.localEdge(seedTri);
       let a = 0; const fa = this.mesh.faceAreas!; for (const t of L) a += fa[t];
