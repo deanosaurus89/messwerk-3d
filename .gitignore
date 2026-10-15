@@ -7,3 +7,4 @@ test-results/
 playwright-report/
 tests/fixtures/cad/
 docs/cad-*
+tests/fixtures/real/

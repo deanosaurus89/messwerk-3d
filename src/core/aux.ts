@@ -38,6 +38,7 @@ export interface AuxResult {
 interface Region { tris: Uint32Array; verts: Uint32Array; p: Vec3[]; n: Vec3[] }
 
 /** Planar, wenn die Ausgleichsebene die Punkte eng beschreibt (RMS klein im Verhältnis zur Ausdehnung). */
+let H = 0; // mittlere Kantenlänge des Netzes (Rausch-/Auflösungsmaßstab)
 function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
   let x = 0, y = 0, z = 0; for (const q of r.n) { x += q[0]; y += q[1]; z += q[2]; }
   const l = Math.hypot(x, y, z) || 1; const m: Vec3 = [x / l, y / l, z / l];
@@ -45,7 +46,7 @@ function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
   const f = fitPlane(r.p);
   let ext = 0; for (const q of r.p) ext = Math.max(ext, Math.hypot(q[0] - f.center[0], q[1] - f.center[1], q[2] - f.center[2]));
   const nn = dot(f.normal, m) < 0 ? scale(f.normal, -1) : f.normal;
-  return { ok: f.rms < Math.max(0.03, 0.002 * ext) && l / r.n.length > 0.9, normal: nn };
+  return { ok: f.rms < Math.max(0.03, 0.002 * ext, 0.12 * H) && l / r.n.length > 0.9, normal: nn };
 }
 
 export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
@@ -59,7 +60,7 @@ export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri:
  *  type 'auto': Kreis oder Langloch anhand der Konturfits in der Ebene. */
 export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
   type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult | null {
-  const nt = mesh.indices.length / 3;
+  H = topo.localEdge(seedTri) * 0.4; const nt = mesh.indices.length / 3;
   const visited = new Uint8Array(nt);
   const mk = (tris: Uint32Array): Region => {
     for (const t of tris) visited[t] = 1;
@@ -81,7 +82,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   const triDist = (t: number) => { let d = Infinity; for (let k = 0; k < 3; k++) { const v = F[3 * t + k];
     d = Math.min(d, Math.hypot(P[3 * v] - seedPoint[0], P[3 * v + 1] - seedPoint[1], P[3 * v + 2] - seedPoint[2])); } return d; };
   /** Erste Nachbarregion (über die Regionsgrenze, nach Abstand zum Klickpunkt sortiert), die das Kriterium erfüllt. */
-  const findAround = (r: Region, ok: (g: Region) => boolean, maxD = Infinity): Region | undefined => {
+  const findAround = (r: Region, ok: (g: Region) => boolean, maxD = Infinity, go: Partial<GrowOptions> = {}): Region | undefined => {
     const cand = new Map<number, number>();
     for (const t of r.tris) for (const u of topo.neighbors(t)) if (!visited[u] && !topo.sliver[u] && !cand.has(u)) cand.set(u, triDist(u));
     const order = [...cand.entries()].sort((a, b) => a[1] - b[1]);
@@ -89,7 +90,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     for (const [u, du] of order) {
       if (du > maxD) break;
       if (visited[u]) continue;
-      const g = mk(topo.growRegion(u, seedPoint, { ...o, radius: 0 }));
+      const gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.3, ...go }); if (!gt.length) { visited[u] = 1; if (++tried > 400) break; continue; }
+      const g = mk(gt);
       if (g.verts.length >= 8 && ok(g)) return g;
       if (++tried > 400) break;
     }
