@@ -1,0 +1,71 @@
+import { describe, expect, it } from 'vitest';
+import { CONSTRUCTIONS, runConstruction, recomputeOrder, accepts, slotFor, conByKey } from '../src/core/construct';
+const R = { rms: 0, form: 0, maxPos: 0, maxNeg: 0, n: 0 };
+const pl = (c: number[], n: number[]) => ({ type: 'Ebene', center: c, normal: n, ...R }) as any;
+const ln = (c: number[], d: number[]) => ({ type: 'Linie', center: c, normal: d, direction: d, length: 10, ...R }) as any;
+const pt = (c: number[]) => ({ type: 'Punkt', center: c, normal: [0, 0, 1], ...R }) as any;
+const ci = (c: number[], r = 2, n = [0, 0, 1]) => ({ type: 'Kreis', center: c, normal: n, radius: r, diameter: 2 * r, ...R }) as any;
+const cy = (c: number[], a: number[], r = 3) => ({ type: 'Zylinder', center: c, normal: a, radius: r, diameter: 2 * r, length: 20, ...R }) as any;
+const sp = (c: number[], r = 4) => ({ type: 'Kugel', center: c, normal: [0, 0, 1], radius: r, diameter: 2 * r, ...R }) as any;
+const cone = { type: 'Kegel', center: [0, 0, 5], normal: [0, 0, 1], apex: [0, 0, 0], halfAngle: Math.PI / 4, ...R } as any;
+const slot = { type: 'Langloch', center: [1, 2, 3], normal: [0, 0, 1], direction: [1, 0, 0], length: 20, width: 6, ...R } as any;
+const close = (a: number[], b: number[], d = 6) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], d));
+const run = (k: string, f: any[], p: any = {}) => runConstruction(k, f, p);
+describe('constructions', () => {
+  it('points', () => {
+    close(run('pt-plane-line', [pl([0, 0, 5], [0, 0, 1]), ln([1, 2, 0], [0, 0, 1])]).center, [1, 2, 5]);
+    close(run('pt-3planes', [pl([3, 0, 0], [1, 0, 0]), pl([0, 4, 0], [0, 1, 0]), pl([0, 0, 5], [0, 0, 1])]).center, [3, 4, 5]);
+    const m = run('pt-2lines', [ln([0, 0, 0], [1, 0, 0]), ln([0, 0, 2], [0, 1, 0])]); close(m.center, [0, 0, 1]); expect(m.form).toBeCloseTo(2);
+    close(run('pt-center', [sp([1, 1, 1])]).center, [1, 1, 1]);
+    close(run('pt-apex', [cone]).center, [0, 0, 0]);
+    close(run('pt-proj-plane', [pt([1, 2, 9]), pl([0, 0, 1], [0, 0, 1])]).center, [1, 2, 1]);
+    close(run('pt-proj-line', [pt([3, 4, 0]), ln([0, 0, 0], [1, 0, 0])]).center, [3, 0, 0]);
+    close(run('pt-mid', [pt([0, 0, 0]), ci([2, 4, 6])]).center, [1, 2, 3]);
+    close(run('pt-centroid', [pt([0, 0, 0]), pt([3, 0, 0]), pt([0, 3, 0])]).center, [1, 1, 0]);
+    expect(() => run('pt-3planes', [pl([0, 0, 0], [1, 0, 0]), pl([1, 0, 0], [1, 0, 0]), pl([0, 0, 0], [0, 0, 1])])).toThrow();
+  });
+  it('lines', () => {
+    const l = run('ln-planes', [pl([0, 0, 5], [0, 0, 1]), pl([2, 0, 0], [1, 0, 0])]); close(l.direction!, [0, 1, 0]); expect(l.center[0]).toBeCloseTo(2); expect(l.center[2]).toBeCloseTo(5);
+    close(run('ln-axis', [cy([1, 1, 0], [0, 0, 1])]).direction!, [0, 0, 1]);
+    const s = run('ln-slot', [slot]); close(s.direction!, [1, 0, 0]); expect(s.length).toBeCloseTo(14);
+    close(run('ln-normal', [ci([0, 0, 0])]).direction!, [0, 0, 1]);
+    const t = run('ln-2pts', [pt([0, 0, 0]), pt([0, 0, 10])]); expect(t.length).toBeCloseTo(10);
+    const f = run('ln-fit', [pt([0, 0, 0]), pt([1, 0.1, 0]), pt([2, 0, 0]), pt([3, 0.1, 0])]); expect(Math.abs(f.direction![0])).toBeGreaterThan(0.99); expect(f.form).toBeGreaterThan(0);
+    const p = run('ln-proj', [ln([0, 0, 5], [1, 0, 1]), pl([0, 0, 0], [0, 0, 1])]); close(p.direction!, [1, 0, 0]); expect(p.center[2]).toBeCloseTo(0);
+    const md = run('ln-mid', [ln([0, 0, 0], [1, 0, 0]), ln([0, 4, 0], [-1, 0, 0])]); expect(md.center[1]).toBeCloseTo(2);
+    const pp = run('ln-perp', [pt([0, 5, 0]), ln([0, 0, 0], [1, 0, 0])]); close(pp.direction!, [0, 1, 0]); expect(pp.length).toBeCloseTo(5);
+  });
+  it('planes', () => {
+    const f = run('pl-fit', [pt([0, 0, 0]), pt([1, 0, 0]), pt([0, 1, 0]), pt([1, 1, 0.2])]); expect(Math.abs(f.normal[2])).toBeGreaterThan(0.98); expect(f.form).toBeGreaterThan(0);
+    close(run('pl-3pts', [pt([0, 0, 1]), pt([1, 0, 1]), pt([0, 1, 1])]).normal, [0, 0, 1]);
+    close(run('pl-linept', [ln([0, 0, 0], [1, 0, 0]), pt([0, 1, 0])]).normal, [0, 0, 1]);
+    close(run('pl-2lines', [ln([0, 0, 0], [1, 0, 0]), ln([0, 3, 0], [1, 0, 0])]).normal, [0, 0, 1]);
+    const mp = run('pl-mid', [pl([0, 0, 0], [0, 0, 1]), pl([0, 0, 10], [0, 0, -1])]); expect(mp.center[2]).toBeCloseTo(5);
+    expect(run('pl-offset', [pl([0, 0, 0], [0, 0, 1])], { d: 3 }).center[2]).toBeCloseTo(3);
+    close(run('pl-perp', [ln([0, 0, 0], [0, 1, 0]), pt([1, 2, 3])]).center, [1, 2, 3]);
+    expect(run('pl-tangent', [sp([0, 0, 0], 4), pl([0, 0, 10], [0, 0, 1])]).center[2]).toBeCloseTo(4);
+    expect(run('pl-tangent', [cy([0, 0, 0], [1, 0, 0], 3), pl([0, 0, 10], [0, 0, 1])], { side: 1 }).center[2]).toBeCloseTo(-3);
+  });
+  it('circles, cylinder, sphere, pattern, angle', () => {
+    expect(run('ci-plane-cyl', [pl([0, 0, 4], [0, 0, 1]), cy([0, 0, 0], [0, 0, 1], 3)]).radius).toBeCloseTo(3);
+    expect(run('ci-plane-cyl', [pl([0, 0, 2], [0, 0, 1]), cone]).radius).toBeCloseTo(2);
+    expect(run('ci-plane-cyl', [pl([0, 0, 3], [0, 0, 1]), sp([0, 0, 0], 5)]).radius).toBeCloseTo(4);
+    const holes = [0, 90, 180, 270].map((a) => ci([10 + 20 * Math.cos(a * Math.PI / 180), 20 * Math.sin(a * Math.PI / 180), 0], 2));
+    expect(run('ci-fit', holes).radius).toBeCloseTo(20);
+    close(run('ci-proj', [ci([1, 2, 9], 2), pl([0, 0, 0], [0, 0, 1])]).center, [1, 2, 0]);
+    expect(run('cy-axis', [ln([0, 0, 0], [0, 0, 1])], { r: 7 }).diameter).toBe(14);
+    const s = run('sp-fit', [pt([5, 0, 0]), pt([-5, 0, 0]), pt([0, 5, 0]), pt([0, 0, 5]), pt([0, -5, 0])]); expect(s.radius).toBeCloseTo(5, 4);
+    const bad = [0, 92, 180, 270].map((a) => ci([20 * Math.cos(a * Math.PI / 180), 20 * Math.sin(a * Math.PI / 180), 0]));
+    const bc = run('bc-pattern', bad); expect(bc.pattern!.n).toBe(4); expect(bc.pattern!.pitch).toBe(90); expect(bc.pattern!.pitchDev).toBeCloseTo(1.5, 1);
+    expect(run('bc-pattern', holes).pattern!.pitchDev).toBeCloseTo(0, 6);
+    expect(run('an-2', [pl([0, 0, 0], [0, 0, 1]), pl([0, 0, 0], [0, 1, 1])]).angle).toBeCloseTo(45);
+    expect(run('an-2', [ln([0, 0, 0], [1, 0, 0]), ln([0, 0, 0], [1, 1, 0])]).angle).toBeCloseTo(45);
+    expect(run('an-2', [pl([0, 0, 0], [0, 0, 1]), ln([0, 0, 0], [0, 0, 1])]).angle).toBeCloseTo(90);
+  });
+  it('registry, slots, order', () => {
+    expect(CONSTRUCTIONS.length).toBeGreaterThanOrEqual(30);
+    const c = conByKey('pt-plane-line')!; expect(accepts(slotFor(c, 0)!, 'Ebene')).toBe(true); expect(accepts(slotFor(c, 1)!, 'Zylinder')).toBe(true); expect(accepts(slotFor(c, 1)!, 'Ebene')).toBe(false);
+    expect(recomputeOrder([{ id: 3, refs: [2] }, { id: 2, refs: [1] }, { id: 4, refs: [3, 2] }])).toEqual([2, 3, 4]);
+    expect(() => run('pt-centroid', [pt([0, 0, 0])])).toThrow(/Needs/);
+  });
+});

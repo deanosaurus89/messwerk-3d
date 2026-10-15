@@ -30,7 +30,7 @@ export type ControlKind =
   | 'Durchmesser' | 'Radius' | 'X' | 'Y' | 'Z' | 'Länge' | 'Breite' | 'Kegelwinkel'
   | 'Form' | 'Winkel X' | 'Winkel Y' | 'Winkel Z' | 'Std.-Abw.'
   | 'Rohrdurchmesser' | 'Rohrradius'
-  | 'Abstand 3D' | 'Abstand X' | 'Abstand Y' | 'Abstand Z' | DatumKindCtl;
+  | 'Abstand 3D' | 'Abstand X' | 'Abstand Y' | 'Abstand Z' | 'Winkelwert' | 'Teilung' | DatumKindCtl;
 
 export interface Control {
   id: number;
@@ -47,13 +47,13 @@ export interface ControlResult { measured: number | null; deviation: number | nu
 
 export const FORM_NAME: Record<GeomType, string> = {
   Ebene: 'Flatness', Kreis: 'Roundness', Zylinder: 'Cylindricity', Langloch: 'Profile',
-  Kegel: 'Cone form', Kugel: 'Sphere form', Torus: 'Torus form', Punkt: 'Form', Linie: 'Straightness', Freiformfläche: 'Surface profile', Abstand: 'Form',
+  Kegel: 'Cone form', Kugel: 'Sphere form', Torus: 'Torus form', Punkt: 'Form', Linie: 'Straightness', Freiformfläche: 'Surface profile', Abstand: 'Form', Winkel: 'Form',
 };
 
 /** ISO-1101-Symbol der Formtoleranz je Merkmalstyp. */
 export const FORM_SYMBOL: Record<GeomType, string> = {
   Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Linie: '⏤', Abstand: '',
- Freiformfläche: '⌓',
+ Freiformfläche: '⌓', Winkel: '',
 };
 
 export interface CatalogItem { kind: ControlKind; label: string; symbol: string; note?: string; }
@@ -73,7 +73,7 @@ export function controlCatalog(t: GeomType): CatalogGroup[] {
   const D = (kinds: DatumKindCtl[]): CatalogGroup => ({ group: 'With datum (ISO 1101 / ISO 5459)', items: kinds.map((k) => DATUM_ITEM[k]) });
   switch (t) {
     case 'Ebene': return [form('two parallel planes'), pos, dir('normal'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position', 'Symmetrie', 'Profil (Bezug)'])];
-    case 'Kreis': return [form('two concentric circles'), { group: 'Size', items: dia }, pos, dir('normal'), D(['Position', 'Konzentrizität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit'])];
+    case 'Kreis': return [form('two concentric circles'), { group: 'Size', items: dia }, { group: 'Bolt-circle pattern', items: [{ kind: 'Teilung', label: 'Pitch deviation [°]', symbol: '✲', note: 'largest angular deviation from equal division (bolt-circle patterns only)' }] }, pos, dir('normal'), D(['Position', 'Konzentrizität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit'])];
     case 'Zylinder': return [form('two coaxial cylinders'), { group: 'Size', items: dia }, pos, dir('axis'), D(['Position', 'Koaxialität', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Rundlauf', 'Gesamtrundlauf'])];
     case 'Kugel': return [form('surface profile (two spherical shells)'), { group: 'Size', items: dia }, pos, D(['Position', 'Konzentrizität', 'Profil (Bezug)'])];
     case 'Kegel': return [form('surface profile'), { group: 'Size', items: [{ kind: 'Kegelwinkel', label: 'Cone angle', symbol: '∢' }, ...dia] }, pos, dir('axis'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Profil (Bezug)'])];
@@ -85,6 +85,7 @@ export function controlCatalog(t: GeomType): CatalogGroup[] {
     case 'Punkt': return [pos, D(['Position'])];
     case 'Linie': return [form('two parallel lines in the auxiliary plane'), { group: 'Size', items: [{ kind: 'Länge', label: 'Length', symbol: '↔' }] }, pos, dir('direction'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position'])];
     case 'Freiformfläche': return [form('Surface profile without datum: deviation to the fitted B-spline surface (max − min)')];
+    case 'Winkel': return [{ group: 'Angle', items: [{ kind: 'Winkelwert', label: 'Angle [°]', symbol: '∠' }] }];
     case 'Abstand': return [{ group: 'Distance', items: (['3D', 'X', 'Y', 'Z'] as const).map((k) => ({ kind: `Abstand ${k}` as ControlKind, label: `Distance ${k}`, symbol: '↔' })) }];
   }
 }
@@ -105,7 +106,7 @@ export { DATUM_CONTROLS, isDatumControl, datumKind };
 /** Bezugsbuchstaben eines Prüfmerkmals als Rahmen-Text, z. B. "A|B|C". */
 export const datumText = (c: Control, feats: Map<number, Feature>) => (c.datumIds ?? []).map((id) => feats.get(id)?.datum ?? '?').join('|');
 
-const KIND_EN: Partial<Record<ControlKind, string>> = { Durchmesser: 'Diameter', Länge: 'Length', Breite: 'Width', Kegelwinkel: 'Cone angle', 'Std.-Abw.': 'Std. dev.', Rohrdurchmesser: 'Tube Ø', Rohrradius: 'Tube radius' };
+const KIND_EN: Partial<Record<ControlKind, string>> = { Winkelwert: 'Angle', Teilung: 'Pitch deviation', Durchmesser: 'Diameter', Länge: 'Length', Breite: 'Width', Kegelwinkel: 'Cone angle', 'Std.-Abw.': 'Std. dev.', Rohrdurchmesser: 'Tube Ø', Rohrradius: 'Tube radius' };
 export function controlLabel(c: Control, f?: Feature): string {
   if (isDatumControl(c.kind)) return DATUM_ITEM[c.kind].label;
   if (f?.type === 'Torus' && c.kind === 'Durchmesser') return 'Center circle Ø';
@@ -171,6 +172,8 @@ export function measuredValue(c: Control, feats: Map<number, Feature>, ctx: Eval
     case 'Abstand X': return D ? Math.abs(D[0]) : null;
     case 'Abstand Y': return D ? Math.abs(D[1]) : null;
     case 'Abstand Z': return D ? Math.abs(D[2]) : null;
+    case 'Winkelwert': return f.angle ?? null;
+    case 'Teilung': return f.pattern ? f.pattern.pitchDev : null;
   }
 }
 
@@ -191,11 +194,12 @@ export function evaluate(c: Control, feats: Map<number, Feature>, ctx: EvalCtx =
 }
 
 /** Form-/Lage-Prüfmerkmale (Toleranzzone 0..t, nur ein Toleranzwert) – im Gegensatz zu Maßen mit Soll + oberem/unterem Abmaß. */
-export const isZoneControl = (k: ControlKind) => k === 'Form' || k === 'Std.-Abw.' || isDatumControl(k);
+export const isZoneControl = (k: ControlKind) => k === 'Teilung' || k === 'Form' || k === 'Std.-Abw.' || isDatumControl(k);
 export function defaultTolerance(kind: ControlKind): { nominal: number | null; up: number; lo: number } {
   if (kind === 'Position' || kind === 'Profil (Bezug)') return { nominal: 0, up: 0.1, lo: 0 };
   if (isDatumControl(kind)) return { nominal: 0, up: 0.05, lo: 0 };
   if (kind === 'Form' || kind === 'Std.-Abw.') return { nominal: 0, up: 0.05, lo: 0 };
+  if (kind === 'Teilung') return { nominal: 0, up: 0.1, lo: 0 };
   if (kind.startsWith('Winkel')) return { nominal: null, up: 0.5, lo: -0.5 };
   if (kind === 'Kegelwinkel') return { nominal: null, up: 0.5, lo: -0.5 };
   return { nominal: null, up: 0.1, lo: -0.1 };

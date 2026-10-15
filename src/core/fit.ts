@@ -1,7 +1,7 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Linie' | 'Freiformfläche' | 'Abstand';
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Linie' | 'Freiformfläche' | 'Abstand' | 'Winkel';
 export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
@@ -30,6 +30,9 @@ export interface FitResult {
   p1?: Vec3; p2?: Vec3;
   rule?: string;
   residuals?: Float64Array;
+  // Konstruktion: Lochkreis-Teilung, Winkel
+  pattern?: { n: number; angles: number[]; pitch: number; pitchDev: number; radialDev: number };
+  angle?: number;
   // nur Freiformfläche
   nurbs?: import('./nurbs').NurbsInfo;
 }
@@ -125,7 +128,7 @@ function solveSmall(A: number[][], b: number[]) {
 
 /** Kreis im Raum: Punkte in Ebene ⟂ normal projizieren, 2D-Kreis fitten. */
 export function fitCircle3D(p: Vec3[], normal?: Vec3): FitResult {
-  if (p.length < 3) throw new Error('Kreis: mindestens 3 Punkte');
+  if (p.length < 3) throw new Error('Circle: at least 3 points');
   const n = normal ? unit(normal) : fitPlane(p).normal;
   const c = centroid(p);
   const [u, v] = basis(n);
@@ -139,7 +142,7 @@ export function fitCircle3D(p: Vec3[], normal?: Vec3): FitResult {
 
 // ---------------------------------------------------------------- Kugel
 export function fitSphere(p: Vec3[]): FitResult {
-  if (p.length < 4) throw new Error('Kugel: mindestens 4 Punkte');
+  if (p.length < 4) throw new Error('Sphere: at least 4 points');
   const A = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], b = [0, 0, 0, 0];
   for (const q of p) {
     const row = [2 * q[0], 2 * q[1], 2 * q[2], 1], z = dot(q, q);
