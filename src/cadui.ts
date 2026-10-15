@@ -35,10 +35,14 @@ const group = new THREE.Group(); const overlay = new THREE.Group(); let meshes: 
 const ray = new THREE.Raycaster();
 
 function geo(t: Tess) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(t.positions, 3)); g.setAttribute('normal', new THREE.BufferAttribute(t.normals, 3)); g.setIndex(new THREE.BufferAttribute(t.indices, 1)); g.computeBoundingSphere(); g.computeBoundingBox(); return g; }
+/** CAD-Kanten (Flächenränder/Knicke) ein/aus. */
+export let cadEdgesOn = true;
+export function setCadEdges(on: boolean) { cadEdgesOn = on; for (const m of meshes) if (m) for (const c of m.children) if (c.userData.cadEdge) c.visible = on; }
 function buildFace(f: CadFace) {
   const old = meshes[f.id]; if (old) { group.remove(old); old.geometry.dispose(); } const og = ghosts[f.id]; if (og) { group.remove(og); og.geometry.dispose(); ghosts[f.id] = null; }
   const m = new THREE.Mesh(geo(f.res ? f.res.tess : f.tess), new THREE.MeshStandardMaterial({ color: TYPE_COLOR[f.type], roughness: 0.5, metalness: 0.08, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   m.userData.face = f.id; meshes[f.id] = m; group.add(m);
+  { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), new THREE.LineBasicMaterial({ color: 0x23303d })); e.raycast = () => {}; e.userData.cadEdge = true; e.visible = cadEdgesOn; m.add(e); }
   if (f.res) { const g = new THREE.Mesh(geo(f.tess), new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 })); g.raycast = () => {}; g.renderOrder = 1; ghosts[f.id] = g; group.add(g); }
 }
 /** Farben/Sichtbarkeit aktualisieren (Typfarbe, Hover, Auswahl, Beschnitt-Rest rot). */
@@ -191,7 +195,7 @@ export function cadDialog(d: HTMLElement): boolean {
     <div class="row"><b>${cad.draft.length}</b>&nbsp;Punkte</div><div class="row"><button class="btn primary" id="cad-cut-ok" ${cad.draft.length > 1 && cutStage === 'draw' ? '' : 'disabled'}>Fertig → Seite wählen</button><button class="btn" id="cad-cut-back" ${cad.draft.length ? '' : 'disabled'}>↶ Punkt</button></div>`;
   else if (t === 'circle' || t === 'rect') h += `<h4>Insel ${t === 'circle' ? 'Kreis' : 'Rechteck'}</h4><p class="note">${t === 'circle' ? 'Mittelpunkt, dann Randpunkt' : 'Erste Ecke, dann Gegenecke'} antippen – das Loch wird in Blickrichtung ausgeschnitten.</p><div class="row"><b>${cad.draft.length}</b>/2 Punkte</div>`;
   else if (t === 'export') h += `<h4>Export</h4><div class="row"><label><input type="radio" name="cad-ex" value="sel" ${cad.exportAll ? '' : 'checked'} ${cad.sel.size ? '' : 'disabled'}> gewählte (${cad.sel.size})</label><label><input type="radio" name="cad-ex" value="all" ${cad.exportAll || !cad.sel.size ? 'checked' : ''}> alle sichtbaren</label></div>
-    <div class="row"><button class="btn primary" id="cad-ex-step" ${b}>STEP (AP214)</button><button class="btn primary" id="cad-ex-iges" ${b}>IGES (144)</button></div>
+    <div class="row"><label>Format</label><div class="seg" role="radiogroup"><button role="radio" aria-checked="${cad.exportFmt === 'step'}" class="${cad.exportFmt === 'step' ? 'on' : ''}" data-exfmt="step">STEP (AP214)</button><button role="radio" aria-checked="${cad.exportFmt === 'iges'}" class="${cad.exportFmt === 'iges' ? 'on' : ''}" data-exfmt="iges">IGES (144)</button></div></div><div class="row"><button class="btn primary" id="cad-ex-go" ${b}>⤓ Als ${cad.exportFmt === 'iges' ? 'IGES' : 'STEP'} exportieren</button></div>
     ${cad.lastExport ? `<p class="note">Letzter Export: ${cad.lastExport.name} · ${cad.lastExport.n} Flächen · ${(cad.lastExport.bytes / 1024).toFixed(0)} kB<br>Prüfung (wieder eingelesen): ${cad.lastExport.faces} Flächen, ${cad.lastExport.area.toFixed(1)} mm² (erwartet ${cad.lastExport.expected.toFixed(1)}), ${cad.lastExport.valid ? '✔ gültig (BRepCheck)' : '✖ ungültig'}</p>` : ''}`;
   if (sel.length) {
     const a0 = sel.reduce((s, f) => s + f.area, 0), a1 = sel.reduce((s, f) => s + (f.res ? f.res.area : f.area), 0);
@@ -206,7 +210,7 @@ export function cadDialog(d: HTMLElement): boolean {
   on('#cad-off-ok', () => pushOp({ kind: 'offset', faces: [...cad.sel], d: cad.offsetD }));
   on('#cad-off-upd', async () => { snapshot(); const o = cad.ops[cad.opSel] as any; o.d = cad.offsetD; await apply(); });
   on('#cad-cut-ok', finishLine); on('#cad-cut-back', () => { cad.draft.pop(); drawOverlay(); X.renderDialog(); });
-  on('#cad-ex-step', () => cadExport('step')); on('#cad-ex-iges', () => cadExport('iges'));
+  on('#cad-ex-go', () => cadExport(cad.exportFmt)); d.querySelectorAll<HTMLButtonElement>('[data-exfmt]').forEach((x) => (x.onclick = () => { cad.exportFmt = x.dataset.exfmt as 'step' | 'iges'; X.renderDialog(); }));
   d.querySelectorAll<HTMLInputElement>('[name="cad-ex"]').forEach((r) => (r.onchange = () => (cad.exportAll = r.value === 'all')));
   on('#cad-undo', () => cadUndo()); on('#cad-redo', () => cadRedo()); on('#cad-close', () => setTool(null));
   return true;
