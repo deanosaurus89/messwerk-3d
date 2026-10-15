@@ -1252,7 +1252,7 @@ function syncViewToggles() {
   g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => g.classList.toggle('open');
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
     if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status('Eingepasst.'); } else if (a === 'wire') toggleWire(); else toggleCurves();
-    if (a !== 'wire' && a !== 'curves') g.classList.remove('open'); }));
+    g.classList.remove('open'); }));
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   viewer.el.appendChild(g);
   const info = document.createElement('div'); info.id = 'bbox-info'; info.className = 'hidden'; viewer.el.appendChild(info);

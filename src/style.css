@@ -278,5 +278,5 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 #view-gear .vg-menu button:hover { background:#e6eef8; } #view-gear .vg-menu button.on { background:#dbe8f6; border-color:#9fb2c8; }
 #bbox-info { position:absolute; right:8px; bottom:8px; z-index:6; background:rgba(255,255,255,.85); border:1px solid #b8c4d2; border-radius:4px; padding:3px 8px; font:12px system-ui; color:#22303f; pointer-events:none; }
 #bbox-info.hidden { display:none; }
-@media (max-width:700px){ #view-gear { left:6px; bottom:96px; } #bbox-info { bottom:auto; top:44px; right:6px; font-size:11px; } }
+@media (max-width:700px){ #view-gear { left:6px; bottom:96px; } #bbox-info { bottom:60px; right:6px; font-size:11px; } }
 body.thumb #view-gear, body.thumb #bbox-info, body.thumb #action-bar { display:none !important; }
