@@ -52,7 +52,7 @@ function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
 export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
   type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult {
   const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, o, type, givenPlane, maxDist);
-  if (!r) throw new Error('Kein Übergang Ebene/Bohrung in der Nähe des Klickpunkts');
+  if (!r) throw new Error('No plane/hole transition near the click point');
   return r;
 }
 
@@ -129,20 +129,20 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   if (p1.ok && !givenPlane) {
     planeReg = r1;
     wall = wallByWalk(p1.normal) ?? findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
-    if (!wall) { if (isFinite(maxDist)) return null; throw new Error('Keine Wand (Bohrung/Langloch) neben der angeklickten Ebene gefunden'); }
+    if (!wall) { if (isFinite(maxDist)) return null; throw new Error('No wall (hole/slot) found next to the clicked plane'); }
   } else if (p1.ok && givenPlane) {
     wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist, { prismAxis: givenPlane.normal });
-    if (!wall) { if (isFinite(maxDist)) return null; } if (!wall) throw new Error('Keine passende Wand neben der angeklickten Fläche gefunden');
+    if (!wall) { if (isFinite(maxDist)) return null; } if (!wall) throw new Error('No matching wall found next to the clicked face');
   } else {
     wall = r1;
     if (!givenPlane) {
       const ax = axisFromNormals(r1.n).axis;
       // ausreichend große Planfläche verlangen (kleine Splitter-Fragmente am Kantenübergang überspringen)
       const minV = Math.max(60, Math.min(2000, 0.1 * r1.verts.length));
-      if (!(axisFromNormals(r1.n).ratio < 0.05)) { if (isFinite(maxDist)) return null; throw new Error('Angeklickte Fläche ist weder Ebene noch prismatische Wand'); }
+      if (!(axisFromNormals(r1.n).ratio < 0.05)) { if (isFinite(maxDist)) return null; throw new Error('Clicked face is neither a plane nor a prismatic wall'); }
       planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
       if (!planeReg && isFinite(maxDist)) return null;
-      if (!planeReg) throw new Error('Keine angrenzende Ebene für die Hilfsebene gefunden – vorhandene Ebene wählen');
+      if (!planeReg) throw new Error('No adjacent plane found for the auxiliary plane – choose an existing plane');
     }
   }
   let plane = givenPlane ?? fitType('Ebene', planeReg!.p, planeReg!.n);
@@ -156,7 +156,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   } else fit = fitInPlane(type, wall.p, plane);
   fit.n = wall.verts.length;
   // Plausibilität (relativ zur Netzauflösung): Wand passt nicht zu Kreis/Langloch -> keine Hilfsebenen-Lösung
-  if (!(fit.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)))) { if (isFinite(maxDist)) return null; throw new Error(`Wand passt nicht zu ${type === 'auto' ? 'Kreis/Langloch' : type} (RMS ${fit.rms.toFixed(2)} mm)`); }
+  if (!(fit.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)))) { if (isFinite(maxDist)) return null; throw new Error(`Wall does not match ${type === 'auto' ? 'circle/slot' : type === 'Kreis' ? 'circle' : 'slot'} (RMS ${fit.rms.toFixed(2)} mm)`); }
   delete fit.residuals; delete plane.residuals;
   return { fit, plane, wallIdx: wall.verts, planeIdx: planeReg ? planeReg.verts : new Uint32Array(0) };
 }
@@ -168,7 +168,7 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
   const v = topo.regionVertices(tris);
   const use = v.interior.length >= 20 ? v.interior : v.all;
   const g = gather(mesh, use);
-  if (g.p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  if (g.p.length < 3) throw new Error('Too few points selected');
   const r = autoFit(g.p, g.n);
   const base = { indices: use, fit: r.best, candidates: r.candidates.map((c) => ({ type: c.type, rms: c.rms })) };
   // Kugel/Torus/Kegel direkt neben einer Ebene sind meist Bohrungsränder: Kreis in Hilfsebene bevorzugen

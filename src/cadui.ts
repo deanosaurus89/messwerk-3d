@@ -12,7 +12,7 @@ class CadEngine {
   private make() {
     this.w = new Worker(new URL('./cadworker.ts', import.meta.url), { type: 'module' });
     this.w.onmessage = (e) => { const p = this.pending.get(e.data.id); if (!p) return; if (e.data.progress) { const g = e.data.progress; progressUpdate({ label: g.text, frac: g.frac, step: g.step, steps: g.steps }); p.prog?.(g.text); return; } this.pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result); };
-    this.w.onerror = (e) => { for (const p of this.pending.values()) p.rej(new Error('CAD-Rechenkern abgestürzt: ' + (e.message || 'WASM-Fehler'))); this.pending.clear(); this.w?.terminate(); this.w = null; };
+    this.w.onerror = (e) => { for (const p of this.pending.values()) p.rej(new Error('CAD kernel crashed: ' + (e.message || 'WASM error'))); this.pending.clear(); this.w?.terminate(); this.w = null; };
   }
   get loaded() { return !!this.w; }
   call<T = any>(req: CadReq, prog?: (t: string) => void, tr: Transferable[] = []): Promise<T> { if (!this.w) this.make(); const id = ++this.seq;
@@ -28,7 +28,7 @@ export interface CadCtx {
 }
 const TYPE_COLOR: Record<FaceType, number> = { Ebene: 0x9fb4cc, Zylinder: 0x9cc79a, Kegel: 0xd1bb8a, Kugel: 0xc4a0d6, Torus: 0x8ccccc, NURBS: 0xd6a3a3 };
 const TYPE_ICON: Record<FaceType, string> = { Ebene: '▱', Zylinder: '⌭', Kegel: '△', Kugel: '◯', Torus: '◎', NURBS: '∿' };
-const OP_NAME = (o: TrimOp) => o.kind === 'offset' ? `Rand-Offset ${o.d.toFixed(2)} mm` : o.kind === 'cut' ? (o.pts.length > 2 ? `Schnitt-Polylinie (${o.pts.length - 1} Segmente)` : 'Schnittlinie') : o.shape === 'circle' ? 'Insel Kreis' : 'Insel Rechteck';
+const OP_NAME = (o: TrimOp) => o.kind === 'offset' ? `Boundary offset ${o.d.toFixed(2)} mm` : o.kind === 'cut' ? (o.pts.length > 2 ? `Cut polyline (${o.pts.length - 1} segments)` : 'Cut line') : o.shape === 'circle' ? 'Island circle' : 'Island rectangle';
 
 export const cad = {
   name: '', faces: [] as CadFace[], sel: new Set<number>(), hover: -1, ops: [] as TrimOp[], errors: [] as (string | null)[], undo: [] as TrimOp[][], redo: [] as TrimOp[][],
@@ -94,13 +94,13 @@ async function apply() {
     const t0 = performance.now(); const r = await eng.call<any>({ op: 'apply', ops: cad.ops }, (t) => X.status(t));
     for (const c of r.changed) { const f = cad.faces[c.id]; f.res = c.reset ? null : { tess: c.tess, area: c.area, pieces: c.pieces }; buildFace(f); }
     cad.errors = r.errors; const bad = r.errors.filter(Boolean).length;
-    X.status(`Beschnitt berechnet (${r.changed.length} Flächen, ${((performance.now() - t0) / 1000).toFixed(1)} s)${bad ? ` – ${bad} Operation(en) fehlgeschlagen` : ''}`);
+    X.status(`Trim computed (${r.changed.length} faces, ${((performance.now() - t0) / 1000).toFixed(1)} s)${bad ? ` – ${bad} operation(s) failed` : ''}`);
     if (bad) X.toast('⚠ ' + r.errors.filter(Boolean).join(' · '));
-  } catch (e: any) { X.toast('Fehler: ' + e.message); }
+  } catch (e: any) { X.toast('Error: ' + e.message); }
   cad.busy = false; cadPaint(); X.renderTree(); X.renderDialog();
 }
 async function pushOp(op: TrimOp) { snapshot(); cad.ops.push(op); cad.opSel = cad.ops.length - 1; await apply(); }
-export async function cadUndo() { const s = cad.undo.pop(); if (!s) { X.toast('Nichts rückgängig zu machen.'); return; } cad.redo.push(cad.ops); cad.ops = s; cad.opSel = -1; await apply(); }
+export async function cadUndo() { const s = cad.undo.pop(); if (!s) { X.toast('Nothing to undo.'); return; } cad.redo.push(cad.ops); cad.ops = s; cad.opSel = -1; await apply(); }
 export async function cadRedo() { const s = cad.redo.pop(); if (!s) return; cad.undo.push(cad.ops); cad.ops = s; await apply(); }
 async function removeOp(k: number) { snapshot(); cad.ops.splice(k, 1); cad.opSel = -1; await apply(); }
 
@@ -115,16 +115,16 @@ export async function cadOpen(file: File) {
     if (!X.hasMesh()) { const bs = new THREE.Box3().setFromObject(group).getBoundingSphere(new THREE.Sphere()); X.viewer.center.copy(bs.center); X.viewer.radius = bs.radius; X.viewer.view('iso'); }
     const types: Record<string, number> = {}; for (const f of cad.faces) types[f.type] = (types[f.type] ?? 0) + 1;
     cad.lastLoad = { name: file.name, faces: cad.faces.length, types, ms: r.ms, total: performance.now() - t0, firstLoad: first, tris: cad.faces.reduce((s, f) => s + f.tess.indices.length / 3, 0) };
-    X.toast(`✔ ${file.name}: ${cad.faces.length} Flächen (${Object.entries(types).map(([k, v]) => `${v} ${k}`).join(', ')}) · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-    X.status(`CAD geladen: ${cad.faces.length} Flächen – Flächen antippen zum Wählen (Mehrfachwahl: Umschalt/Strg oder erneut antippen).`);
-  } catch (e: any) { X.toast('CAD-Import fehlgeschlagen: ' + e.message); }
+    X.toast(`✔ ${file.name}: ${cad.faces.length} faces (${Object.entries(types).map(([k, v]) => `${v} ${k}`).join(', ')}) · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    X.status(`CAD loaded: ${cad.faces.length} faces – tap faces to select (multi-select: Shift/Ctrl or tap again).`);
+  } catch (e: any) { X.toast('CAD import failed: ' + e.message); }
   cad.busy = false; document.body.classList.remove('busy'); X.renderTree(); X.renderDialog();
 }
 function setTool(t: Tool) {
   cad.tool = cad.tool === t ? null : t; cad.draft = []; drawOverlay(); renderCadRibbon();
-  if (cad.tool && cad.tool !== 'export' && !cad.sel.size) X.toast('Zuerst Fläche(n) wählen – dann ' + (cad.tool === 'offset' ? 'Abstand eingeben' : 'im Bild zeichnen') + '.');
-  else if (cad.tool === 'cut') X.toast('Schnittlinie: Punkte antippen, „Fertig" (oder Doppelklick), dann die zu entfernende Seite antippen.');
-  else if (cad.tool === 'circle') X.toast('Insel Kreis: Mittelpunkt und Randpunkt antippen.');
+  if (cad.tool && cad.tool !== 'export' && !cad.sel.size) X.toast('Select face(s) first – then ' + (cad.tool === 'offset' ? 'enter the distance' : 'draw in the view') + '.');
+  else if (cad.tool === 'cut') X.toast('Cut line: tap points, “Done” (or double-click), then tap the side to remove.');
+  else if (cad.tool === 'circle') X.toast('Island circle: tap center and boundary point.');
   else if (cad.tool === 'rect') X.toast('Insel Rechteck: zwei Ecken antippen.');
   if (X.isPhone()) X.togglePanel('dialog', cad.tool === 'offset' || cad.tool === 'export');
   X.renderDialog();
@@ -133,7 +133,7 @@ let cutStage: 'draw' | 'side' = 'draw';
 async function cadTap(x: number, y: number, add: boolean) {
   const t = cad.tool;
   if (t === 'cut') {
-    if (cutStage === 'side') { const h = pickFace(x, y); if (!h) { X.toast('Seite auf der Fläche antippen.'); return; } const { D } = viewBasis();
+    if (cutStage === 'side') { const h = pickFace(x, y); if (!h) { X.toast('Tap the side on the face.'); return; } const { D } = viewBasis();
       cutStage = 'draw'; const pts = cad.draft; cad.draft = []; drawOverlay(); await pushOp({ kind: 'cut', faces: [...cad.sel], pts, dir: D.toArray() as V3, remove: h.p }); return; }
     cad.draft.push(worldAt(x, y)); drawOverlay(); X.renderDialog(); return;
   }
@@ -148,21 +148,21 @@ async function cadTap(x: number, y: number, add: boolean) {
   else { const only = cad.sel.size === 1 && cad.sel.has(h.id); cad.sel.clear(); if (!only) cad.sel.add(h.id); }
   cadPaint(); X.renderTree(); X.renderDialog(); document.querySelector(`[data-cadf="${h?.id}"]`)?.scrollIntoView({ block: 'nearest' });
 }
-function finishLine() { if (cad.draft.length < 2) { X.toast('Mindestens zwei Punkte.'); return; } cutStage = 'side'; X.toast('Jetzt die Seite antippen, die entfernt werden soll.'); X.renderDialog(); }
+function finishLine() { if (cad.draft.length < 2) { X.toast('At least two points.'); return; } cutStage = 'side'; X.toast('Now tap the side to remove.'); X.renderDialog(); }
 export const cadActive = () => cad.faces.length > 0 && (!!cad.tool || !!document.querySelector('.tab.active[data-tab="nuetz"]') || !X.hasMesh());
 
 function download(bytes: Uint8Array, name: string) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes as any], { type: 'application/octet-stream' })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
 export async function cadExport(fmt: 'step' | 'iges', all = cad.exportAll) {
   const ids = all || !cad.sel.size ? cad.faces.filter((f) => f.visible).map((f) => f.id) : [...cad.sel];
-  if (!ids.length) { X.toast('Keine Flächen zum Exportieren.'); return; }
+  if (!ids.length) { X.toast('No faces to export.'); return; }
   cad.busy = true; X.renderDialog();
   try {
     const r = await eng.call<any>({ op: 'export', fmt, faces: ids }, (t) => X.status(t)); const base = cad.name.replace(/\.[^.]+$/, '');
     const name = `${base}_beschnitten.${fmt === 'step' ? 'stp' : 'igs'}`; download(r.bytes, name);
     cad.lastExport = { name, fmt, n: ids.length, bytes: r.bytes.length, ...r.check };
     const dev = Math.abs(r.check.area - r.check.expected) / Math.max(1e-9, r.check.expected);
-    X.toast(`✔ ${name}: ${ids.length} Flächen exportiert · Prüfung: ${r.check.faces} Flächen, ${r.check.area.toFixed(1)} mm² (${(dev * 100).toFixed(2)} % Abw.), ${r.check.valid ? 'gültig' : 'UNGÜLTIG'}`);
-  } catch (e: any) { X.toast('Export fehlgeschlagen: ' + e.message); }
+    X.toast(`✔ ${name}: ${ids.length} faces exported · check: ${r.check.faces} faces, ${r.check.area.toFixed(1)} mm² (${(dev * 100).toFixed(2)} % dev.), ${r.check.valid ? 'valid' : 'INVALID'}`);
+  } catch (e: any) { X.toast('Export failed: ' + e.message); }
   cad.busy = false; X.renderDialog();
 }
 function renderCadRibbon() {
@@ -176,7 +176,7 @@ const fmtA = (a: number) => a >= 1e4 ? `${(a / 100).toFixed(0)} cm²` : `${a.toF
 export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEvent) => void, sel?: boolean, fid?: number, eye?: HTMLElement) => HTMLElement, q: string) {
   if (!cad.faces.length) return;
   const trimmed = cad.faces.filter((f) => f.res).length;
-  node(`<span class="tw">▾</span>📐 CAD: ${cad.name} <span class="sub">${cad.faces.length} Flächen${trimmed ? ` · ${trimmed} beschnitten` : ''}</span>`, 'indent1 cad-folder', undefined, false, undefined,
+  node(`<span class="tw">▾</span>📐 CAD: ${cad.name} <span class="sub">${cad.faces.length} faces${trimmed ? ` · ${trimmed} trimmed` : ''}</span>`, 'indent1 cad-folder', undefined, false, undefined,
     X.eyeBtn(cad.faces.some((f) => f.visible), () => { const v = !cad.faces.some((f) => f.visible); cad.faces.forEach((f) => (f.visible = v)); cadPaint(); X.renderTree(); }));
   if (cad.ops.length) {
     node(`<span class="tw">▾</span>✂ Beschnitte (${cad.ops.length})`, 'indent2');
@@ -184,7 +184,7 @@ export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEve
       if ((e.target as HTMLElement).classList.contains('cad-op-del')) { removeOp(k); return; } cad.opSel = cad.opSel === k ? -1 : k; cad.sel = new Set(o.faces); cadPaint(); X.renderTree(); X.renderDialog(); }, cad.opSel === k); n.title = cad.errors[k] ?? ''; });
   }
   for (const f of cad.faces) {
-    const label = `Fläche ${f.id + 1}`; if (q && !(`${label} ${f.type} ${f.detail}`.toLowerCase().includes(q))) continue;
+    const label = `Face ${f.id + 1}`; if (q && !(`${label} ${f.type} ${f.detail}`.toLowerCase().includes(q))) continue;
     const d = node(`<span class="tw"></span><span style="color:#${TYPE_COLOR[f.type].toString(16)}">${TYPE_ICON[f.type]}</span>${label} <span class="sub">${f.type}${f.detail ? ' · ' + f.detail : ''} · ${fmtA(f.res ? f.res.area : f.area)}${f.res ? ' ✂' : ''}</span>`, 'indent2 cad-face' + (f.visible ? '' : ' hidden-feat'),
       (e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) { cad.sel.has(f.id) ? cad.sel.delete(f.id) : cad.sel.add(f.id); } else { const only = cad.sel.size === 1 && cad.sel.has(f.id); cad.sel.clear(); if (!only) cad.sel.add(f.id); } cadPaint(); X.renderTree(); X.renderDialog(); },
       cad.sel.has(f.id), undefined, X.eyeBtn(f.visible, () => { f.visible = !f.visible; cadPaint(); X.renderTree(); }));
@@ -194,28 +194,28 @@ export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEve
 /** Dialogbereich für das Register; true, wenn gerendert. */
 export function cadDialog(d: HTMLElement): boolean {
   setActions('cad', null);
-  if (!cad.faces.length && !cad.busy) { if (!document.querySelector('.tab.active[data-tab="nuetz"]')) return false; d.innerHTML = `<h3>📐 CAD-Flächen beschneiden</h3><p class="note">STEP- oder IGES-Datei öffnen (z. B. aus PolyWorks exportierte Flächen). Flächen wählen, mit Rand-Offset, Schnittlinie oder Inseln beschneiden und als STEP/IGES exportieren – das Original bleibt erhalten.</p>`; return true; }
+  if (!cad.faces.length && !cad.busy) { if (!document.querySelector('.tab.active[data-tab="nuetz"]')) return false; d.innerHTML = `<h3>📐 Trim CAD faces</h3><p class="note">Open a STEP or IGES file (e.g. faces exported from PolyWorks). Select faces, trim them with boundary offset, cut line or islands and export as STEP/IGES – the original is kept.</p>`; return true; }
   if (!cadActive() && !cad.sel.size) return false;
   const sel = [...cad.sel].map((i) => cad.faces[i]); const t = cad.tool; const b = cad.busy ? 'disabled' : '';
-  let h = `<h3>📐 ${cad.name}</h3><p class="note">Vorderseite (Flächennormale) in Typfarbe, <b style="color:#9e5c14">Rückseite ocker</b>.</p>`;
-  if (t === 'offset') h += `<h4>Rand-Offset</h4><p class="note">Rand der gewählten Fläche(n) um den Abstand nach innen versetzen (Abstand im Raum zur Randkante, auf der Fläche). Gemeinsame Kanten mehrerer gewählter Flächen bleiben.</p>
+  let h = `<h3>📐 ${cad.name}</h3><p class="note">Front side (face normal) in type color, <b style="color:#9e5c14">back side ochre</b>.</p>`;
+  if (t === 'offset') h += `<h4>Boundary offset</h4><p class="note">Offset the boundary of the selected face(s) inwards by the distance (spatial distance to the boundary edge, on the face). Shared edges of several selected faces are kept.</p>
     <div class="row"><input type="range" id="cad-d-r" min="0.1" max="10" step="0.1" value="${cad.offsetD}" style="flex:1"><input type="number" id="cad-d" min="0.01" max="100" step="0.1" value="${cad.offsetD}" style="width:5em"> mm</div>
-    <div class="row"><button class="btn primary" id="cad-off-ok" ${sel.length ? '' : 'disabled'} ${b}>✔ Anwenden auf ${sel.length} Fläche(n)</button>${cad.opSel >= 0 && cad.ops[cad.opSel]?.kind === 'offset' ? `<button class="btn" id="cad-off-upd" ${b}>Gewählte Operation ändern</button>` : ''}</div>`;
-  else if (t === 'cut') h += `<h4>Schnittlinie</h4><p class="note">${cutStage === 'side' ? '<b>Seite antippen</b>, die entfernt werden soll.' : 'Punkte im Bild antippen (2 = Gerade, mehr = Polylinie). Die Linie wird entlang der Blickrichtung auf die Fläche projiziert.'}</p>
-    <div class="row"><b>${cad.draft.length}</b>&nbsp;Punkte</div><div class="row"><button class="btn primary" id="cad-cut-ok" ${cad.draft.length > 1 && cutStage === 'draw' ? '' : 'disabled'}>Fertig → Seite wählen</button><button class="btn" id="cad-cut-back" ${cad.draft.length ? '' : 'disabled'}>↶ Punkt</button></div>`;
-  else if (t === 'circle' || t === 'rect') h += `<h4>Insel ${t === 'circle' ? 'Kreis' : 'Rechteck'}</h4><p class="note">${t === 'circle' ? 'Mittelpunkt, dann Randpunkt' : 'Erste Ecke, dann Gegenecke'} antippen – das Loch wird in Blickrichtung ausgeschnitten.</p><div class="row"><b>${cad.draft.length}</b>/2 Punkte</div>`;
-  else if (t === 'export') h += `<h4>Export</h4><div class="row"><label><input type="radio" name="cad-ex" value="sel" ${cad.exportAll ? '' : 'checked'} ${cad.sel.size ? '' : 'disabled'}> gewählte (${cad.sel.size})</label><label><input type="radio" name="cad-ex" value="all" ${cad.exportAll || !cad.sel.size ? 'checked' : ''}> alle sichtbaren</label></div>
-    <div class="row"><label>Format</label><div class="seg" role="radiogroup"><button role="radio" aria-checked="${cad.exportFmt === 'step'}" class="${cad.exportFmt === 'step' ? 'on' : ''}" data-exfmt="step">STEP (AP214)</button><button role="radio" aria-checked="${cad.exportFmt === 'iges'}" class="${cad.exportFmt === 'iges' ? 'on' : ''}" data-exfmt="iges">IGES (144)</button></div></div><div class="row"><button class="btn primary" id="cad-ex-go" ${b}>⤓ Als ${cad.exportFmt === 'iges' ? 'IGES' : 'STEP'} exportieren</button></div>
-    ${cad.lastExport ? `<p class="note">Letzter Export: ${cad.lastExport.name} · ${cad.lastExport.n} Flächen · ${(cad.lastExport.bytes / 1024).toFixed(0)} kB<br>Prüfung (wieder eingelesen): ${cad.lastExport.faces} Flächen, ${cad.lastExport.area.toFixed(1)} mm² (erwartet ${cad.lastExport.expected.toFixed(1)}), ${cad.lastExport.valid ? '✔ gültig (BRepCheck)' : '✖ ungültig'}</p>` : ''}`;
+    <div class="row"><button class="btn primary" id="cad-off-ok" ${sel.length ? '' : 'disabled'} ${b}>✔ Apply to ${sel.length} face(s)</button>${cad.opSel >= 0 && cad.ops[cad.opSel]?.kind === 'offset' ? `<button class="btn" id="cad-off-upd" ${b}>Change selected operation</button>` : ''}</div>`;
+  else if (t === 'cut') h += `<h4>Cut line</h4><p class="note">${cutStage === 'side' ? '<b>Tap the side</b> to remove.' : 'Tap points in the view (2 = straight line, more = polyline). The line is projected onto the face along the view direction.'}</p>
+    <div class="row"><b>${cad.draft.length}</b>&nbsp;points</div><div class="row"><button class="btn primary" id="cad-cut-ok" ${cad.draft.length > 1 && cutStage === 'draw' ? '' : 'disabled'}>Done → choose side</button><button class="btn" id="cad-cut-back" ${cad.draft.length ? '' : 'disabled'}>↶ Point</button></div>`;
+  else if (t === 'circle' || t === 'rect') h += `<h4>Island ${t === 'circle' ? 'circle' : 'rectangle'}</h4><p class="note">Tap ${t === 'circle' ? 'the center, then a boundary point' : 'the first corner, then the opposite corner'} – the hole is cut along the view direction.</p><div class="row"><b>${cad.draft.length}</b>/2 points</div>`;
+  else if (t === 'export') h += `<h4>Export</h4><div class="row"><label><input type="radio" name="cad-ex" value="sel" ${cad.exportAll ? '' : 'checked'} ${cad.sel.size ? '' : 'disabled'}> selected (${cad.sel.size})</label><label><input type="radio" name="cad-ex" value="all" ${cad.exportAll || !cad.sel.size ? 'checked' : ''}> all visible</label></div>
+    <div class="row"><label>Format</label><div class="seg" role="radiogroup"><button role="radio" aria-checked="${cad.exportFmt === 'step'}" class="${cad.exportFmt === 'step' ? 'on' : ''}" data-exfmt="step">STEP (AP214)</button><button role="radio" aria-checked="${cad.exportFmt === 'iges'}" class="${cad.exportFmt === 'iges' ? 'on' : ''}" data-exfmt="iges">IGES (144)</button></div></div><div class="row"><button class="btn primary" id="cad-ex-go" ${b}>⤓ Export as ${cad.exportFmt === 'iges' ? 'IGES' : 'STEP'}</button></div>
+    ${cad.lastExport ? `<p class="note">Last export: ${cad.lastExport.name} · ${cad.lastExport.n} faces · ${(cad.lastExport.bytes / 1024).toFixed(0)} kB<br>Check (re-imported): ${cad.lastExport.faces} faces, ${cad.lastExport.area.toFixed(1)} mm² (expected ${cad.lastExport.expected.toFixed(1)}), ${cad.lastExport.valid ? '✔ valid (BRepCheck)' : '✖ invalid'}</p>` : ''}`;
   if (sel.length) {
     const a0 = sel.reduce((s, f) => s + f.area, 0), a1 = sel.reduce((s, f) => s + (f.res ? f.res.area : f.area), 0);
-    h += `<h4>Auswahl: ${sel.length} Fläche(n)</h4><table class="kv">${sel.length === 1 ? `<tr><td>Typ</td><td>${sel[0].type}${sel[0].detail ? ' (' + sel[0].detail + ')' : ''}</td></tr>` : ''}<tr><td>Fläche original</td><td>${fmtA(a0)}</td></tr><tr><td>nach Beschnitt</td><td>${fmtA(a1)} (${((1 - a1 / a0) * 100).toFixed(1)} % entfernt)</td></tr></table>`;
+    h += `<h4>Selection: ${sel.length} face(s)</h4><table class="kv">${sel.length === 1 ? `<tr><td>Type</td><td>${sel[0].type}${sel[0].detail ? ' (' + sel[0].detail + ')' : ''}</td></tr>` : ''}<tr><td>Area original</td><td>${fmtA(a0)}</td></tr><tr><td>after trim</td><td>${fmtA(a1)} (${((1 - a1 / a0) * 100).toFixed(1)} % removed)</td></tr></table>`;
   }
-  h += `<div class="row"><button class="btn" id="cad-undo" ${cad.undo.length ? '' : 'disabled'} ${b}>↶ Rückgängig</button><button class="btn" id="cad-redo" ${cad.redo.length ? '' : 'disabled'} ${b}>↷</button>${t ? '<button class="btn" id="cad-close">Schließen</button>' : ''}</div>`;
+  h += `<div class="row"><button class="btn" id="cad-undo" ${cad.undo.length ? '' : 'disabled'} ${b}>↶ Undo</button><button class="btn" id="cad-redo" ${cad.redo.length ? '' : 'disabled'} ${b}>↷</button>${t ? '<button class="btn" id="cad-close">Close</button>' : ''}</div>`;
   if (cad.busy) h += `<p class="note">⏳ Rechne … (${$('#status')?.textContent ?? ''})</p>`;
   d.innerHTML = h;
   { const q = (id: string) => d.querySelector<HTMLButtonElement>(id); const drawing = t === 'cut' || t === 'circle' || t === 'rect';
-    setActions('cad', t && t !== 'export' ? { label: t === 'cut' ? (cutStage === 'side' ? 'Seite wählen' : 'Schnittlinie') : t === 'offset' ? 'Rand-Offset' : 'Insel', undo: drawing && cad.draft.length ? (q('#cad-cut-back') ?? q('#cad-undo')) : q('#cad-undo'), redo: q('#cad-redo'), ok: t === 'cut' ? q('#cad-cut-ok') : t === 'offset' ? q('#cad-off-ok') : null, cancel: q('#cad-close') } : null); }
+    setActions('cad', t && t !== 'export' ? { label: t === 'cut' ? (cutStage === 'side' ? 'Choose side' : 'Cut line') : t === 'offset' ? 'Boundary offset' : 'Island', undo: drawing && cad.draft.length ? (q('#cad-cut-back') ?? q('#cad-undo')) : q('#cad-undo'), redo: q('#cad-redo'), ok: t === 'cut' ? q('#cad-cut-ok') : t === 'offset' ? q('#cad-off-ok') : null, cancel: q('#cad-close') } : null); }
   const on = (id: string, f: () => void) => d.querySelector(id)?.addEventListener('click', f);
   const di = d.querySelector<HTMLInputElement>('#cad-d'), dr = d.querySelector<HTMLInputElement>('#cad-d-r');
   if (di && dr) { di.oninput = () => { const v = parseFloat(di.value); if (v > 0) { cad.offsetD = v; dr.value = String(Math.min(10, v)); } }; dr.oninput = () => { cad.offsetD = parseFloat(dr.value); di.value = dr.value; }; }
@@ -251,7 +251,7 @@ export function initCad(ctx: CadCtx) {
     else if (e.key === 'Enter' && cad.tool === 'cut') finishLine();
   }, true);
   const inp = $('#cad-file') as HTMLInputElement; inp.onchange = () => { const f = inp.files?.[0]; if (f) cadOpen(f); inp.value = ''; };
-  document.querySelectorAll<HTMLButtonElement>('[data-cadtool]').forEach((b) => (b.onclick = () => { if (!cad.faces.length) { X.toast('Zuerst eine STEP- oder IGES-Datei öffnen.'); return; } cutStage = 'draw'; setTool(b.dataset.cadtool as Tool); }));
+  document.querySelectorAll<HTMLButtonElement>('[data-cadtool]').forEach((b) => (b.onclick = () => { if (!cad.faces.length) { X.toast('Open a STEP or IGES file first.'); return; } cutStage = 'draw'; setTool(b.dataset.cadtool as Tool); }));
   $('#btn-cad-undo').onclick = () => cadUndo();
   $('#btn-cad-reset').onclick = async () => { if (!cad.ops.length) return; snapshot(); cad.ops = []; await apply(); };
   $('#btn-cad-all').onclick = () => { const all = cad.sel.size < cad.faces.filter((f) => f.visible).length; cad.sel = new Set(all ? cad.faces.filter((f) => f.visible).map((f) => f.id) : []); cadPaint(); X.renderTree(); X.renderDialog(); };

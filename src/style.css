@@ -257,7 +257,7 @@ body.thumb #view-gear, body.thumb #bbox-info, body.thumb #ctx-panel { display:no
 body.thumb #progress { display:none !important; }
 
 /* ---------- UI round: layout (closable/resizable panes), context panel, dialogs ---------- */
-#tree-pane, #dialog-pane, #table-pane { position:relative; }
+@media (min-width:901px) and (min-height:561px) { #tree-pane, #dialog-pane, #table-pane { position:relative; } }
 body.no-tree #tree-pane, body.no-dialog #dialog-pane, body.no-table #table-pane { display:none; }
 .splitter { position:absolute; z-index:9; background:transparent; touch-action:none; }
 .splitter:hover, body.resizing .splitter { background:rgba(31,111,209,.25); }

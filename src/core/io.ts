@@ -25,7 +25,7 @@ export function parseSTL(buf: ArrayBuffer, name = 'STL'): MeshData {
     const out: number[] = [];
     let m: RegExpExecArray | null;
     while ((m = re.exec(txt))) out.push(+m[1], +m[2], +m[3]);
-    if (out.length === 0) throw new Error('STL enthält keine Dreiecke');
+    if (out.length === 0) throw new Error('STL contains no triangles');
     tri = new Float32Array(out);
   }
   const w = weld(tri);
@@ -72,7 +72,7 @@ export function parsePLY(buf: ArrayBuffer, name = 'PLY'): MeshData {
   const bytes = new Uint8Array(buf);
   const head = dec.decode(bytes.subarray(0, Math.min(bytes.length, 65536)));
   const he = head.indexOf('end_header');
-  if (he < 0) throw new Error('Ungültige PLY-Datei');
+  if (he < 0) throw new Error('Invalid PLY file');
   let off = he + 'end_header'.length;
   while (bytes[off] === 13 || bytes[off] === 10) off++;
   let format = 'ascii';
@@ -111,7 +111,7 @@ export function parsePLY(buf: ArrayBuffer, name = 'PLY'): MeshData {
       if (e.name === 'vertex') pos.push(row.x, row.y, row.z);
       else if (e.name === 'face') pushFace(list);
     }
-  } else throw new Error('PLY-Format nicht unterstützt: ' + format);
+  } else throw new Error('PLY format not supported: ' + format);
   const mesh: MeshData = { name, positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   if (idx.length) computeNormals(mesh);
   return mesh;

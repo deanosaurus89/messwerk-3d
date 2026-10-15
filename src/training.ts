@@ -52,7 +52,7 @@ export class Tour {
       ${s.check ? `<div class="tc-state ${ok ? 'ok' : ''}">${ok ? '✔ Erledigt' : '… warte auf deine Aktion'}</div>` : ''}
       <div class="tc-btns"><button class="btn" id="tc-back" ${this.idx === 0 ? 'disabled' : ''}>◀ Zurück</button>
       <button class="btn" id="tc-list" title="Schrittliste">☰ Schritte</button>
-      ${!ok && !last ? `<button class="btn" id="tc-skip" title="Schritt überspringen – das Ergebnis wird automatisch erzeugt">Überspringen ⏭</button>` : ''}
+      ${!ok && !last ? `<button class="btn" id="tc-skip" title="Skip step – the result is created automatically">Skip ⏭</button>` : ''}
       <button class="btn primary" id="tc-next" ${ok ? '' : 'disabled'}>${last ? 'Fertig' : 'Weiter ▶'}</button></div>
       ${this.showList ? `<ol class="tc-list">${this.steps.map((x, i) => `<li><button data-i="${i}" class="${i === this.idx ? 'cur' : ''} ${x.check && x.check() ? 'done' : ''}">${i + 1}. ${x.title}</button></li>`).join('')}</ol>` : ''}`;
     this.card.dataset.step = String(this.idx);

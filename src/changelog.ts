@@ -15,6 +15,7 @@ export const CHANGELOG: { date: string; items: string[] }[] = [
     'New feature: Line (edge between two faces, choose the auxiliary plane).',
     'Form and orientation controls use a single tolerance zone 0…t.',
     'Reverse-engineering tools moved to their own ribbon (work in progress / paused).',
+    'Right-click menu (properties, color, center view, analyze, visibility); view options for feature colors and annotations.',
   ] },
   { date: '2026-10-15', items: ['CAD export keeps the face orientation (STEP and IGES).', 'Progress indicator for all long operations.', 'Much faster, parallel triangle reduction; max. edge length and min. angle.'] },
 ];

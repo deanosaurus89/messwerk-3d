@@ -15,10 +15,10 @@ import { EdgeGraph, detectCurves, layout as curveLayout, makeCurve, pathThrough,
 function doNurbs(req: { indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }) {
   let idx = req.indices;
   if (req.seed) {
-    if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell. Für Punktwolken den Pinsel verwenden.');
+    if (!topo) throw new Error('Region growing needs a polygon model. Use the brush for point clouds.');
     idx = topo.regionVertices(topo.growRegion(req.seed.tri, req.seed.point, { maxAngleDeg: req.seed.maxAngleDeg, radius: req.seed.radius, type: 'Freiformfläche' })).all;
   }
-  if (!idx || idx.length < 16) throw new Error('Zu wenige Punkte für eine Freiformfläche');
+  if (!idx || idx.length < 16) throw new Error('Too few points for a freeform surface');
   const { p, n } = gather(mesh!, idx, Infinity);
   const P = mesh!.positions;
   const loop: Vec3[] | null = mesh!.indices.length ? boundaryLoop(mesh!.indices, idx, P.length / 3).map((v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3) : null;
@@ -84,7 +84,7 @@ export type Req =
 export interface FitParams { k: number; nf?: NormalFilter | null; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   let { p, n } = gather(mesh!, idx);
-  if (p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  if (p.length < 3) throw new Error('Too few points selected');
   let fit = fitType(type, p, n, prm.k), use = idx, removed = 0;
   if (prm.nf && n.length === p.length) {
     const keep = normalFilter(fit, p, n, prm.nf);
@@ -99,7 +99,7 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
 }
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
-  if (p.length < 3) throw new Error('Zu wenige Punkte ausgewählt');
+  if (p.length < 3) throw new Error('Too few points selected');
   let fit: FitResult, cands: FitResult[] = [];
   if (type === 'auto') { const r = autoFit(p, n); fit = r.best; cands = r.candidates; }
   else fit = fitType(type, p, n);
@@ -128,7 +128,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { curves: cs, layout: layoutOut(cs.map((c) => c.chain), req.layout) };
     } else if (req.op === 'curvePath') {
       const { g, bvh } = curveCtx(); const chain = pathThrough(g, req.verts);
-      if (chain.length < 2) throw new Error('Kein Weg zwischen den Punkten gefunden');
+      if (chain.length < 2) throw new Error('No path found between the points');
       result = { curve: slim(makeCurve(g, bvh, chain, 'Benutzer', req.closed ?? false)) };
     } else if (req.op === 'curveFromCtrl') {
       const { g, bvh } = curveCtx(); result = { curve: slim(curveFromCtrl(g, bvh, req.ctrl as any, req.kind, req.closed ?? false)) };
@@ -155,15 +155,15 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { remap, curves, normals, bounds: bounds(mesh!), vertexCount: mesh!.positions.length / 3, triCount: mesh!.indices.length / 3 };
       transfer = [normals.buffer];
     } else if (req.op === 'compare') {
-      if (!orig || !mesh) throw new Error('Kein Netz');
+      if (!orig || !mesh) throw new Error('No mesh');
       origBVH ??= buildBVH(orig);
       const c = compareToOriginal({ positions: mesh.positions, indices: mesh.indices }, orig, origBVH);
       result = c; transfer = [c.dev.buffer];
     } else if (req.op === 'getOriginal') {
-      if (!orig) throw new Error('Kein Original');
+      if (!orig) throw new Error('No original');
       result = { positions: orig.positions.slice(), indices: orig.indices.slice() };
     } else if (req.op === 'grow') {
-      if (!topo) throw new Error('Regionenwachstum benötigt ein Polygonmodell (Dreiecke). Für Punktwolken den Pinsel verwenden.');
+      if (!topo) throw new Error('Region growing needs a polygon model (triangles). Use the brush for point clouds.');
       if (req.type === 'auto') {
         const r = autoExtract(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius }, bounds(mesh!).diag);
         delete r.fit.residuals; r.fit.n = r.indices.length; if (r.aux) delete r.aux.plane.residuals;
@@ -175,7 +175,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
         result = { indices: use, ...doFit(use, req.type) };
       }
     } else if (req.op === 'aux') {
-      if (!topo) throw new Error('Hilfsebene benötigt ein Polygonmodell (Dreiecke).');
+      if (!topo) throw new Error('The auxiliary plane needs a polygon model (triangles).');
       const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane);
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
     } else if (req.op === 'dev') {

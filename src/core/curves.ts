@@ -342,7 +342,7 @@ export function layout(g: EdgeGraph, curves: { chain: number[] }[], o: LayoutOpt
     if (Ls.length === 2) { // Naht zwischen den Schleifen (bevorzugt von Ecken aus)
       const ok = inRegion(r); const A = Ls[0], B = new Set(Ls[1]); const src = A.filter((v) => corner.has(v)); const seeds = src.length ? src : A;
       const pth = multiPath(g, seeds, B, (u, v) => ok[u] && ok[v] && !cut.has(g.key(u, v)) || (B.has(v)));
-      if (pth.length > 1) suggestions.push({ chain: pth, reason: 'Naht (ringförmiger Patch)', region: r });
+      if (pth.length > 1) suggestions.push({ chain: pth, reason: 'seam (ring-shaped patch)', region: r });
     } else if (Ls.length === 1 && sides > 4) {
       const L = Ls[0]; const cs = L.filter((v) => corner.has(v)); const a = cs[0], b = cs[Math.floor(cs.length / 2)];
       const ok = inRegion(r); const pth = multiPath(g, [a], new Set([b]), (u, v) => !!(ok[u] && ok[v]) && (!cut.has(g.key(u, v))));

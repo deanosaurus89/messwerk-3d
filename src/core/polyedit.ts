@@ -293,7 +293,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     vf[u] = []; tris -= 2; collapses++;
     for (let i = 0; i < 10; i++) Q[10 * v + i] += Q[10 * u + i];
     pushV(v); { const [b, k] = neighInto(v, NB); NB = b; const cp = b.slice(0, k); for (let j = 0; j < k; j++) pushV(cp[j]); }
-    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses, { frac: Math.min(0.99, (nt - tris) / (0.9 * nt)), label: `Reduktion: ${tris.toLocaleString('de-DE')} △` });
+    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses, { frac: Math.min(0.99, (nt - tris) / (0.9 * nt)), label: `Reduction: ${tris.toLocaleString('en-US')} △` });
   }
   const r = compact(P, F, (t) => !!alive[t], nt);
   return { ...r, before: nt, after: tris, maxDev: NaN, collapses, rejects: rej, noiseDeg };
@@ -375,7 +375,7 @@ export function subdivide(m: RawMesh, o: SubdivideOptions): RawMesh & { before: 
       NF.set([a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca], 12 * t);
     }
     P = NP; F = NF;
-    o.onProgress?.(F.length / 3, lv + 1, { frac: (lv + 1) / levels, step: lv + 1, steps: levels, label: `Unterteilung Stufe ${lv + 1}` });
+    o.onProgress?.(F.length / 3, lv + 1, { frac: (lv + 1) / levels, step: lv + 1, steps: levels, label: `Subdivision level ${lv + 1}` });
     // Nach Stufe 1 sind die „linearen“ Lagen nicht mehr auf dem Original: weitere Stufen nur linear + begrenzt (konservativ)
     if (lv === 0) o = { ...o, tol: o.tol / 4 };
   }
@@ -409,7 +409,7 @@ export function smooth(m: RawMesh, o: SmoothOptions): RawMesh {
       const dx = P[3 * v] - P0[3 * v], dy = P[3 * v + 1] - P0[3 * v + 1], dz = P[3 * v + 2] - P0[3 * v + 2], d = Math.hypot(dx, dy, dz);
       if (d > o.tol) { const s = o.tol / d; P[3 * v] = P0[3 * v] + dx * s; P[3 * v + 1] = P0[3 * v + 1] + dy * s; P[3 * v + 2] = P0[3 * v + 2] + dz * s; }
     }
-    o.onProgress?.(F.length / 3, it + 1, { frac: (it + 1) / o.iterations, label: `Glättung Iteration ${it + 1}/${o.iterations}` });
+    o.onProgress?.(F.length / 3, it + 1, { frac: (it + 1) / o.iterations, label: `Smoothing iteration ${it + 1}/${o.iterations}` });
   }
   return { positions: Float32Array.from(P), indices: Uint32Array.from(F) };
 }

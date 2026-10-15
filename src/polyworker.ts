@@ -20,10 +20,10 @@ function parDecimate(req: Extract<PolyReq, { op: 'decimate' }>, onProgress: (t: 
   return decimateParallel(req.mesh, o, K, (c, j) => new Promise<DecimateResult>((res, rej) => {
     const w = new Worker(new URL('./polyworker.ts', import.meta.url), { type: 'module' }); ws.push(w); tr[j] = c.indices.length / 3;
     w.onmessage = (ev) => { const d = ev.data; if (d.progress) { tr[j] = d.progress.tris;
-        const t = tr.reduce((a, b) => a + b, 0); const f = Math.min(1, (nt - t) / (0.9 * nt)); onProgress(t, 0, { frac: 0.95 * f, step: 1, steps: 2, label: `Reduktion ×${K} Threads: ${Math.round(t).toLocaleString('de-DE')} △` }); return; }
+        const t = tr.reduce((a, b) => a + b, 0); const f = Math.min(1, (nt - t) / (0.9 * nt)); onProgress(t, 0, { frac: 0.95 * f, step: 1, steps: 2, label: `Reduction ×${K} threads: ${Math.round(t).toLocaleString('en-US')} △` }); return; }
       w.terminate(); if (d.error) rej(new Error(d.error)); else res(d.result); };
     w.postMessage({ id: j, req: { op: 'decChunk', mesh: c, tol: req.tol, normalDeg: req.normalDeg, featureDeg: req.featureDeg, maxEdge: req.maxEdge, minAngle: req.minAngle } }, [c.positions.buffer, c.indices.buffer]);
-  })).then((r) => { onProgress(r.after, r.collapses, { frac: 1, step: 2, steps: 2, label: 'Nähte' }); return r; }).finally(() => ws.forEach((w) => w.terminate()));
+  })).then((r) => { onProgress(r.after, r.collapses, { frac: 1, step: 2, steps: 2, label: 'Seams' }); return r; }).finally(() => ws.forEach((w) => w.terminate()));
 }
 
 self.onmessage = async (e: MessageEvent<{ id: number; req: PolyReq }>) => {

@@ -133,10 +133,10 @@ const axisAngle = (n: Vec3, k: number) => Math.acos(Math.min(1, Math.abs(n[k]) /
 export function computeDistance(a: FitResult, b: FitResult): FitResult {
   let p1: Vec3, p2: Vec3, rule: string;
   const proj = (pl: FitResult, q: Vec3): Vec3 => sub(q, scale(pl.normal, dot(sub(q, pl.center), pl.normal)));
-  if (a.type === 'Ebene' && b.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'Punkt (B) – Ebene (A)'; }
-  else if (a.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'Punkt (B) – Ebene (A)'; }
-  else if (b.type === 'Ebene') { p1 = a.center; p2 = proj(b, a.center); rule = 'Punkt (A) – Ebene (B)'; }
-  else { p1 = a.center; p2 = b.center; rule = 'Mittelpunkt – Mittelpunkt'; }
+  if (a.type === 'Ebene' && b.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'point (B) – plane (A)'; }
+  else if (a.type === 'Ebene') { p2 = b.center; p1 = proj(a, b.center); rule = 'point (B) – plane (A)'; }
+  else if (b.type === 'Ebene') { p1 = a.center; p2 = proj(b, a.center); rule = 'point (A) – plane (B)'; }
+  else { p1 = a.center; p2 = b.center; rule = 'center – center'; }
   const delta = sub(p2, p1), d = norm(delta);
   return {
     type: 'Abstand', center: scale(add(p1, p2), 0.5), normal: d > 0 ? unit(delta) : [0, 0, 1],

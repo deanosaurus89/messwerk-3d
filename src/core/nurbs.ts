@@ -183,7 +183,7 @@ export function fitCurve(P: Vec3[], nCtrl: number, deg = 3): BSplineCurve {
 
 // ---------------------------------------------------------------- Flächenfit
 export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: NurbsParams): NurbsFit {
-  const N = p.length; if (N < 16) throw new Error('Zu wenige Punkte für eine Freiformfläche');
+  const N = p.length; if (N < 16) throw new Error('Too few points for a freeform surface');
   const deg = Math.max(1, Math.min(5, Math.round(o.deg)));
   const nu = Math.max(deg + 1, Math.round(o.nu)), nv = Math.max(deg + 1, Math.round(o.nv));
   // Ausgleichsebene
@@ -241,7 +241,7 @@ export function fitFreeform(p: Vec3[], nrm: Vec3[], loop: Vec3[] | null, o: Nurb
     // Glättung relativ zur Datenmatrix skaliert; kleine Grundregularisierung füllt leere Bereiche (getrimmt)
     addSmoothing(A, nu, nv, (Math.max(0, o.smooth) + (kind === 'getrimmt' ? 1e-3 : 1e-6)) * (tr / NC));
     for (let i = 0; i < NC; i++) A[i * NC + i] += 1e-10 * (tr / NC);
-    if (!cholSolve(A, NC, B, 3)) throw new Error('Gleichungssystem singulär – weniger Kontrollpunkte wählen');
+    if (!cholSolve(A, NC, B, 3)) throw new Error('Singular system – choose fewer control points');
     S.ctrl = Array.from(B);
   };
   solveLSQ();

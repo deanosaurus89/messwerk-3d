@@ -81,7 +81,7 @@ const state = {
 };
 (window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
 type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve' | 'curveopts';
-const PE_NAME: Record<PeTool, string> = { curveopts: 'Kurvennetz-Optionen', curve: 'Kurve zeichnen', reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
+const PE_NAME: Record<PeTool, string> = { curveopts: 'Curve network options', curve: 'Draw curve', reduce: 'Triangle reduction', subdiv: 'Triangle subdivision', smooth: 'Smoothing', erase: 'Magic eraser' };
 const pe = {
   tool: null as PeTool | null,
   tol: 0.02, normalDeg: 10, featureDeg: 30, maxEdge: 0, minAngle: 0, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
@@ -120,7 +120,7 @@ function toast(t: string) {
   clearTimeout(toastTimer); toastTimer = window.setTimeout(() => e.classList.add('hidden'), 2600);
   status(t);
 }
-async function busy<T>(p: Promise<T>, label = 'Berechne …'): Promise<T> {
+async function busy<T>(p: Promise<T>, label = tt('Computing …')): Promise<T> {
   progressBegin(label);
   try { return await p; } finally { progressEnd(); }
 }
@@ -151,7 +151,7 @@ $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
 document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftype]').forEach((b) => (b.onclick = () => startFitMode(b.dataset.ftype as GeomType)));
 
 function startFitMode(t: GeomType | 'auto') {
-  if (!state.data) { status('Bitte zuerst ein Polygonmodell laden.'); return; }
+  if (!state.data) { status('Please load a polygon model first.'); return; }
   pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
@@ -159,7 +159,7 @@ function startFitMode(t: GeomType | 'auto') {
 }
 function startDistanceMode() {
   pe.tool = null;
-  if (state.features.filter((f) => f.type !== 'Abstand').length < 2) { toast('Für einen Abstand werden zwei Merkmale benötigt.'); return; }
+  if (state.features.filter((f) => f.type !== 'Abstand').length < 2) { toast('A distance needs two features.'); return; }
   const s = state.sel.filter((id) => state.features.find((f) => f.id === id)?.type !== 'Abstand');
   state.mode = { kind: 'dist', a: s[0] ?? null, b: s[1] ?? null, slot: s[0] != null && s[1] == null ? 1 : 0, comp: (state.mode as DistMode | null)?.comp ?? '3D' };
   state.labelOffsets.delete(-1);
@@ -182,20 +182,20 @@ interface SampleInfo { key: string; name: string; file: string; description: str
 let samples: SampleInfo[] | null = null;
 async function loadSample(s: SampleInfo) {
   $('#sample-dialog').classList.add('hidden');
-  status(`Lade ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
+  status(`Loading ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
   try {
     const r = await fetch('./samples/' + s.file); if (!r.ok) throw new Error('HTTP ' + r.status);
     await loadBuffer(s.file, await r.arrayBuffer());
-  } catch (e: any) { toast('Beispiel konnte nicht geladen werden: ' + e.message); } finally { $('#busy').classList.add('hidden'); }
+  } catch (e: any) { toast('Sample could not be loaded: ' + e.message); } finally { $('#busy').classList.add('hidden'); }
 }
 async function openSamples() {
   const d = $('#sample-dialog');
   if (!samples) { try { samples = await (await fetch('./samples/index.json')).json(); } catch { samples = []; } }
   const std = samples!.find((s) => s.key === 'beispielteil');
   if (tour && std) { loadSample(std); return; } // Trainingsmodus: immer das Standard-Beispielteil direkt laden
-  d.innerHTML = `<div class="rv-head"><b>Beispielteil laden</b><span class="note">Demo-Messdaten (Scan-/CT-ähnlich) – Soll-Geometrie in samples/*.json</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
+  d.innerHTML = `<div class="rv-head"><b>${tt('Load sample part')}</b><span class="note">${tt('Demo measurement data (scan/CT-like) – nominal geometry in samples/*.json')}</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
     <div class="sd-grid">${samples!.map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
-      <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k Dreiecke · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
+      <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k ${tt('triangles')} · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
   d.classList.remove('hidden');
   ($('#sd-close') as HTMLButtonElement).onclick = () => d.classList.add('hidden');
   d.querySelectorAll<HTMLButtonElement>('.sample-card').forEach((b) => (b.onclick = () => loadSample(samples!.find((s) => s.key === b.dataset.key)!)));
@@ -230,12 +230,12 @@ function unitDialog(b: { min: number[]; max: number[] }): Promise<number> {
     const el = document.createElement('div'); el.id = 'unit-dlg';
     const draw = (u: string) => { const f = UNITS.find((x) => x.id === u)!.f; const mm = d.map((x) => x * f); const mx = Math.max(...mm);
       const ok = mx >= 5 && mx <= 2000;
-      el.innerHTML = `<div class="ud-box"><h3>Einheit der Datei</h3>
-        <p class="note">Bounding-Box in Datei-Einheiten: <b>${d.map((x) => fmt(x, 3)).join(' × ')}</b></p>
+      el.innerHTML = `<div class="ud-box"><h3>${tt('File unit')}</h3>
+        <p class="note">${tt('Bounding box in file units')}: <b>${d.map((x) => fmt(x, 3)).join(' × ')}</b></p>
         <div class="seg">${UNITS.map((x) => `<button data-u="${x.id}" class="${x.id === u ? 'on' : ''}">${x.label}</button>`).join('')}</div>
-        <p>Ergibt <b>${mm.map((x) => fmt(x, 1)).join(' × ')} mm</b>${u === guess ? ' <span class="note">(Vorschlag)</span>' : ''}</p>
-        <p class="${ok ? 'ud-ok' : 'ud-warn'}">${ok ? '✓ Plausible Bauteilgröße.' : mx < 5 ? '⚠ Sehr klein (< 5 mm) – stimmt die Einheit?' : '⚠ Sehr groß (> 2 m) – stimmt die Einheit?'}</p>
-        <div class="row"><button class="btn primary" data-ok>Übernehmen</button></div></div>`;
+        <p>${tt('Gives')} <b>${mm.map((x) => fmt(x, 1)).join(' × ')} mm</b>${u === guess ? ` <span class="note">(${tt('suggested')})</span>` : ''}</p>
+        <p class="${ok ? 'ud-ok' : 'ud-warn'}">${ok ? tt('✓ Plausible part size.') : mx < 5 ? tt('⚠ Very small (< 5 mm) – is the unit correct?') : tt('⚠ Very large (> 2 m) – is the unit correct?')}</p>
+        <div class="row"><button class="btn primary" data-ok>${tt('Apply')}</button></div></div>`;
       el.querySelectorAll<HTMLButtonElement>('[data-u]').forEach((x) => (x.onclick = () => draw(x.dataset.u!)));
       el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => { el.remove(); res(f); }; };
     draw(guess); document.body.appendChild(el);
@@ -255,9 +255,9 @@ async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale
     state.opts.brush = +(r.bounds.diag / 25).toFixed(1);
     $('#projname').textContent = r.name;
     status(`${name} geladen in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
-    $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`; showBBoxInfo(r.bounds);
+    $('#stats').textContent = `${r.vertexCount.toLocaleString('en-US')} points · ${r.triCount.toLocaleString('en-US')} triangles`; showBBoxInfo(r.bounds);
     renderAll();
-  } catch (e: any) { status('Fehler beim Import: ' + e.message); }
+  } catch (e: any) { status('Import error: ' + e.message); }
 }
 
 // ------------------------------------------------------------------ 3D-Interaktion
@@ -343,8 +343,8 @@ function scheduleAuxHover(h: Hit | null) {
       const r = await auxCall(h.tri, h.point, state.opts.maxAngleDeg, m.type as GeomType, ref);
       if (seq !== auxSeq || state.preview) return;
       viewer.showHoverSets([{ idx: r.aux.indices, color: 0x2f7de1 }, { idx: r.indices, color: 0xff8c1a }]);
-      status(`Vorschau beim Überfahren: ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Hilfsebenen-Punkte (blau) – Klick übernimmt.`);
-    } catch (err: any) { if (seq === auxSeq) { viewer.showHoverSets([]); status("Vorschau: hier keine Hilfsebenen-Kombination (" + err.message + ")"); } } finally { auxBusy = false; }
+      status(tt('Hover preview: {0} wall points (orange), {1} aux. plane points (blue) – click to take it.', r.indices.length, r.aux.indices.length));
+    } catch (err: any) { if (seq === auxSeq) { viewer.showHoverSets([]); status(tt('Preview: no auxiliary plane combination here ({0})', err.message)); } } finally { auxBusy = false; }
   }, 220);
 }
 window.addEventListener('pointerup', async (e) => {
@@ -403,14 +403,14 @@ async function brushAt(h: Hit) {
 }
 function undoBrush() {
   while (brushUndo.length && !brushUndo[brushUndo.length - 1].length) brushUndo.pop();
-  const st = brushUndo.pop(); if (!st || !state.brushMask) { toast('Nichts rückgängig zu machen.'); return; }
+  const st = brushUndo.pop(); if (!st || !state.brushMask) { toast('Nothing to undo.'); return; }
   for (let i = st.length - 1; i >= 0; i--) { const v = Math.abs(st[i]) - 1; const was = st[i] > 0 ? 0 : 1; if (state.brushMask[v] !== was) { state.brushMask[v] = was; state.brushCount += was ? 1 : -1; } }
-  state.preview = null; renderAll(); status(`Pinselstrich rückgängig – ${state.brushCount} Punkte markiert.`);
+  state.preview = null; renderAll(); status(tt('Brush stroke undone – {0} points marked.', state.brushCount));
 }
 function clearBrush() { state.brushMask = state.data ? new Uint8Array(state.data.vertexCount) : null; state.brushCount = 0; brushUndo.length = 0; }
 function clearSelectionAll() {
   const had = state.brushCount > 0 || !!state.preview;
-  clearBrush(); state.preview = null; renderAll(); status(had ? 'Auswahl gelöscht.' : 'Keine Auswahl.');
+  clearBrush(); state.preview = null; renderAll(); status(had ? tt('Selection cleared.') : tt('No selection.'));
 }
 function setMethod(m: 'Klick' | 'Pinsel') {
   if (state.mode?.kind !== 'fit') return;
@@ -420,6 +420,7 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 initCtxPanel(viewer.el); initProgress(viewer.el); initLayout();
 const typeOptions = (cur: string, withAuto = true) => [...(withAuto ? ['auto'] : []), ...FIT_TYPES].map((x) => `<option value="${x}" ${x === cur ? 'selected' : ''}>${typeName(x)}</option>`).join('');
 const formName = (t: GeomType) => FORM_NAME[t];
+const patchKind = (k: string) => (k === 'vierseitig' ? tt('four-sided') : k === 'getrimmt' ? tt('trimmed') : k);
 function sizeRows(f: FitResult): [string, string][] {
   const r: [string, string][] = [];
   if (f.radius != null && f.type !== 'Langloch') r.push([tt('Ø'), fmt(2 * f.radius)]);
@@ -492,7 +493,7 @@ async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch' | 'Linie') {
   const r = await busy(auxCall(h.tri, h.point, state.opts.maxAngleDeg, type, ref));
   state.preview = { fit: r.fit, indices: r.indices, candidates: [], method: 'Klick', hit: h,
     aux: { plane: r.aux.plane, indices: r.aux.indices, source: ref ? ref.name : tt('automatic (adjacent face)'), refId: ref?.id } };
-  status(`Vorschau: ${type} in Hilfsebene – ${r.indices.length} Wandpunkte (orange), ${ref ? 'Ebene ' + ref.name : r.aux.indices.length + ' Ebenenpunkte (blau)'} (${r.ms.toFixed(0)} ms).`);
+  status(tt('Preview: {0} in auxiliary plane – {1} wall points (orange), {2} ({3} ms).', typeName(type), r.indices.length, ref ? tt('plane') + ' ' + ref.name : r.aux.indices.length + ' ' + tt('plane points (blue)'), r.ms.toFixed(0)));
 }
 async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: 'Klick' | 'Pinsel', params: NurbsParams = state.nurbs) {
   try {
@@ -500,8 +501,8 @@ async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: '
     const r = await busy(engine.call<any>({ op: 'nurbs', indices: seed ? undefined : src.indices, seed, params }));
     state.preview = { fit: r.fit, indices: r.indices, candidates: [], method, hit: src.hit, dev: r.dev };
     const nb = r.fit.nurbs;
-    status(`Vorschau Freiformfläche (${nb.kind}, ${nb.surface.nu}×${nb.surface.nv} Kontrollpunkte, Grad ${nb.surface.degU}): ${r.indices.length} Punkte, Std.-Abw. ${fmt(nb.std, 4)} mm (${r.ms.toFixed(0)} ms).`);
-  } catch (e: any) { state.preview = null; status('Freiformfläche: ' + e.message); toast('Freiformfläche: ' + e.message); }
+    status(tt('Freeform preview ({0}, {1}×{2} control points, degree {3}): {4} points, std. dev. {5} mm ({6} ms).', patchKind(nb.kind), nb.surface.nu, nb.surface.nv, nb.surface.degU, r.indices.length, fmt(nb.std, 4), r.ms.toFixed(0)));
+  } catch (e: any) { state.preview = null; status(tt('Freeform surface: {0}', e.message)); toast(tt('Freeform surface: {0}', e.message)); }
   renderAll();
 }
 async function previewByClick(h: Hit) {
@@ -509,7 +510,7 @@ async function previewByClick(h: Hit) {
   if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
   if (usesAux(m.type)) {
     try { await previewWithAux(h, m.type as 'Kreis' | 'Langloch'); }
-    catch (e: any) { state.preview = null; status('Hilfsebene: ' + e.message); toast('Hilfsebene: ' + e.message); }
+    catch (e: any) { state.preview = null; status(tt('Auxiliary plane: {0}', e.message)); toast(tt('Auxiliary plane: {0}', e.message)); }
     renderAll(); return;
   }
   try {
@@ -517,8 +518,8 @@ async function previewByClick(h: Hit) {
     state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Klick', hit: h,
       aux: r.aux ? { plane: r.aux.plane, indices: r.aux.indices, source: tt('automatic (adjacent face)') } : undefined };
     if (r.aux) { status(`Automatik: ${r.fit.type} in Hilfsebene – ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Ebenenpunkte (blau).`); renderAll(); return; }
-    status(`Vorschau: ${r.fit.type} aus ${r.indices.length} Punkten (${r.ms.toFixed(0)} ms). „Erzeugen“ übernimmt das Merkmal.`);
-  } catch (e: any) { state.preview = null; status('Keine Geometrie gefunden: ' + e.message); }
+    status(tt('Preview: {0} from {1} points ({2} ms). ✓ creates the feature.', typeName(r.fit.type), r.indices.length, r.ms.toFixed(0)));
+  } catch (e: any) { state.preview = null; status(tt('No geometry found: {0}', e.message)); }
   renderAll();
 }
 
@@ -526,14 +527,14 @@ async function previewByClickAs(h: Hit, t: GeomType | 'auto') {
   const m = state.mode as FitMode; const old = m.type; m.type = t; await previewByClick(h); m.type = old;
 }
 async function previewFromBrush() {
-  if (!state.brushMask || !state.brushCount) { status('Zuerst Bereich mit dem Pinsel markieren.'); return; }
+  if (!state.brushMask || !state.brushCount) { status('Mark an area with the brush first.'); return; }
   const idx = new Uint32Array(state.brushCount); let k = 0;
   state.brushMask.forEach((v, i) => { if (v) idx[k++] = i; });
   if ((state.mode as FitMode).type === 'Freiformfläche') { await previewNurbs({ indices: idx }, 'Pinsel'); return; }
   try {
     const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type: (state.mode as FitMode).type }));
     state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Pinsel' };
-  } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); }
+  } catch (e: any) { status(tt('Fit failed: {0}', e.message)); }
   renderAll();
 }
 
@@ -542,14 +543,14 @@ async function refitPreview(t: GeomType | 'auto') {
   if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
   if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
-    try { await previewWithAux(p.hit, t); } catch (e: any) { status('Hilfsebene: ' + e.message); }
+    try { await previewWithAux(p.hit, t); } catch (e: any) { status(tt('Auxiliary plane: {0}', e.message)); }
     renderAll(); return;
   }
   try {
     const r = await busy(engine.call<any>({ op: 'fit', indices: p.indices, type: t }));
     state.preview = { ...p, aux: undefined, fit: r.fit, candidates: r.candidates.length ? r.candidates : p.candidates };
-    status(`Neu gefittet als ${r.fit.type}.`);
-  } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); }
+    status(tt('Refitted as {0}.', typeName(r.fit.type)));
+  } catch (e: any) { status(tt('Fit failed: {0}', e.message)); }
   renderAll();
 }
 
@@ -591,7 +592,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
       recomputeDistances();
       const nb = r.fit.nurbs;
-      status(`${f.name} neu rückgeführt: ${nb.surface.nu}×${nb.surface.nv} Kontrollpunkte, Grad ${nb.surface.degU}, Std.-Abw. ${fmt(nb.std, 4)} mm, Flächenprofil ${fmt(r.fit.form, 4)} mm.`);
+      status(tt('{0} refitted: {1}×{2} control points, degree {3}, std. dev. {4} mm, surface profile {5} mm.', f.name, nb.surface.nu, nb.surface.nv, nb.surface.degU, fmt(nb.std, 4), fmt(r.fit.form, 4)));
       renderAll(); scheduleAutosave(); return;
     }
     let idx = f.src ?? f.indices, auxR: any = null;
@@ -614,22 +615,22 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
     state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
     recomputeDistances();
     const m = f.measured!;
-    status(`${f.name} neu gefittet: ${f.pointCount} Punkte, RMS ${fmt(m.rms, 4)}${m.outliers ? `, ${m.outliers} Ausreißer` : ''}${m.nfRemoved ? `, ${m.nfRemoved} durch Normalenfilter verworfen` : ''}.`);
-  } catch (e: any) { status('Fit fehlgeschlagen: ' + e.message); toast('Fit fehlgeschlagen: ' + e.message); }
+    status(tt('{0} refitted: {1} points, RMS {2}', f.name, f.pointCount, fmt(m.rms, 4)) + (m.outliers ? tt(', {0} outliers', m.outliers) : '') + (m.nfRemoved ? tt(', {0} removed by normal filter', m.nfRemoved) : '') + '.');
+  } catch (e: any) { status(tt('Fit failed: {0}', e.message)); toast(tt('Fit failed: {0}', e.message)); }
   renderAll(); scheduleAutosave();
 }
-function discardPreview() { state.preview = null; clearBrush(); status('Vorschau verworfen.'); renderAll(); }
+function discardPreview() { state.preview = null; clearBrush(); status(tt('Preview discarded.')); renderAll(); }
 
 // ------------------------------------------------------------------ Abstand
 function pickFeatureForDistance(h: Hit) {
   const f = featureAtHit(h);
-  if (!f) { status('Kein Merkmal an dieser Stelle.'); return; }
+  if (!f) { status(tt('No feature at this location.')); return; }
   setDistanceSlot(f.id);
 }
 function setDistanceSlot(id: number) {
   const m = state.mode as DistMode;
   if (m.slot === 0) { m.a = id; if (m.b === id) m.b = null; m.slot = 1; }
-  else { if (id === m.a) { status('Zweites Merkmal muss verschieden sein.'); return; } m.b = id; m.slot = 0; }
+  else { if (id === m.a) { status(tt('The second feature must be different.')); return; } m.b = id; m.slot = 0; }
   updateDistancePreview();
   // Telefon: Dialog schließen, damit Vorschau (Linie + Karte) sichtbar ist
   if (state.preview && isPhone()) togglePanel('dialog', false);
@@ -777,13 +778,13 @@ function setDatum(f: FeatureView, letter: string | null) {
   if (letter && old === letter) return;
   if (letter) {
     const other = state.features.find((g) => g.id !== f.id && g.datum === letter);
-    if (other) { other.datum = old; toast(old ? `Bezüge getauscht: ${f.name} = ${letter}, ${other.name} = ${old}` : `${letter} von ${other.name} auf ${f.name} übertragen – ${other.name} hat keinen Bezug mehr`); }
-    else toast(old ? `Bezug ${old} → ${letter} umbenannt (${f.name})` : `Bezug ${letter} = ${f.name}`);
+    if (other) { other.datum = old; toast(old ? tt('Datums swapped: {0} = {1}, {2} = {3}', f.name, letter, other.name, old) : tt('{0} moved from {1} to {2} – {1} has no datum any more', letter, other.name, f.name)); }
+    else toast(old ? tt('Datum {0} → {1} renamed ({2})', old, letter, f.name) : tt('Datum {0} = {1}', letter, f.name));
     f.datum = letter;
   } else {
     f.datum = undefined;
     const n = dependents(f.id).length;
-    toast(`Bezug ${old} entfernt${n ? ` – ${n} Prüfmerkmal${n > 1 ? 'e' : ''} als „Bezug entfernt“ markiert` : ''}`);
+    toast(tt('Datum {0} removed', old ?? '') + (n ? tt(' – {0} control(s) marked as “datum removed”', n) : ''));
   }
   renderAll();
 }
@@ -838,11 +839,11 @@ function toggleControl(kind: ControlKind, id: number, on: boolean) {
 
 // ------------------------------------------------------------------ Berichte
 function makeReport() {
-  if (!state.features.length) { toast('Keine Merkmale für einen Bericht vorhanden.'); return; }
+  if (!state.features.length) { toast('No features for a report.'); return; }
   const r = buildReport(state.nextReport++, state.features, state.controls, state.data?.name ?? '', new Date(), ctx);
   state.reports.push(r); state.openReport = r.id;
   renderAll();
-  toast(`✔ ${r.name} erzeugt (${r.features.length} Merkmale, ${r.controls.length} Prüfmerkmale)`);
+  toast(tt('✔ {0} created ({1} features, {2} controls)', r.name, r.features.length, r.controls.length));
 }
 function renderReport() {
   const el = $('#report-view'); const r = state.reports.find((x) => x.id === state.openReport);
@@ -902,7 +903,7 @@ function togglePanel(p: (typeof PANELS)[number], on?: boolean) {
 document.querySelectorAll<HTMLButtonElement>('#mobile-bar [data-panel]').forEach((b) => (b.onclick = () => togglePanel(b.dataset.panel as any)));
 for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#table-pane', 'table']] as const) {
   const t = document.querySelector(id + ' .pane-title')!;
-  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕'; x.title = 'Schließen';
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕'; x.title = tt('Close');
   x.onclick = () => togglePanel(p, false); t.prepend(x);
 }
 
@@ -921,9 +922,9 @@ function renderHint() {
   if (!state.data) return hint('');
   const m = state.mode;
   if (!m) return hint('');
-  if (m.kind === 'dist') return hint(`Abstand: ${m.slot === 0 ? 'erstes' : 'zweites'} Merkmal im 3D-Bild antippen oder im Baum/Dialog wählen.`);
-  if (state.preview) return hint('Vorschau – Werte prüfen, dann „Erzeugen“ oder „Verwerfen“.');
-  if (m.method === 'Klick') return hint(`${m.type === 'auto' ? 'Automatische Erkennung' : m.type}: auf die Fläche klicken/tippen.`);
+  if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
+  if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
+  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface (mouse wheel = analysis area).', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
   hint('');
 }
 
@@ -1029,23 +1030,23 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
     return [['Abstand 3D', fmt(m.distance)], ['Abstand X', fmt(Math.abs(m.delta![0]))], ['Abstand Y', fmt(Math.abs(m.delta![1]))], ['Abstand Z', fmt(Math.abs(m.delta![2]))],
       ['Regel', m.rule!], ['P1', m.p1!.map((v) => v.toFixed(3)).join(' ')], ['P2', m.p2!.map((v) => v.toFixed(3)).join(' ')]];
   }
-  if (!full && m.nurbs) { const nb = m.nurbs; return [['Std.-Abw. σ', fmt(nb.std)], ['Flächenprofil', fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)],
-    ['Patch', `${nb.kind}, ${nb.surface.nu}×${nb.surface.nv}, Grad ${nb.surface.degU}`]]; }
+  if (!full && m.nurbs) { const nb = m.nurbs; return [[tt('Std. dev. σ'), fmt(nb.std)], [tt('Surface profile'), fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)],
+    [tt('Patch'), `${patchKind(nb.kind)}, ${nb.surface.nu}×${nb.surface.nv}, ${tt('degree')} ${nb.surface.degU}`]]; }
   const rows: [string, string][] = [];
-  if (full) rows.push(['Punkte', String(pointCount)]);
-  rows.push(['Std.-Abw. (RMS)', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)]);
-  if (m.outliers) rows.push(['Ausreißer entfernt', String(m.outliers)]);
-  if (m.type === 'Torus') rows.push(['Leitkreis-Ø 2R', fmt(m.diameter)], ['Leitkreis R', fmt(m.radius)], ['Rohr-Ø 2r', fmt(2 * Math.abs(m.minorRadius ?? 0))], ['Rohr r', fmt(Math.abs(m.minorRadius ?? 0))]);
-  else if (m.diameter != null && m.type !== 'Langloch') rows.push(['Durchmesser', fmt(m.diameter)]);
-  if (m.type === 'Langloch') rows.push(['Länge', fmt(m.length)], ['Breite', fmt(m.width)]);
-  if (m.type === 'Kegel') rows.push(['Kegelwinkel [°]', fmt(2 * m.halfAngle! * DEG, 3)]);
-  if (m.nurbs) { const nb = m.nurbs; rows.splice(full ? 1 : 0, 0, ['Std.-Abw. σ', fmt(nb.std)]);
-    rows.push(['Patch', nb.kind === 'vierseitig' ? 'vierseitig (4 Randkurven)' : 'getrimmt (1 Randkurve)'], ['Kontrollpunkte', `${nb.surface.nu} × ${nb.surface.nv}`], ['Grad', `${nb.surface.degU} / ${nb.surface.degV}`], ['Glättung λ', String(nb.params.smooth)]); }
+  if (full) rows.push([tt('Points'), String(pointCount)]);
+  rows.push([tt('Std. dev. (RMS)'), fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)]);
+  if (m.outliers) rows.push([tt('Outliers removed'), String(m.outliers)]);
+  if (m.type === 'Torus') rows.push([tt('Center circle Ø 2R'), fmt(m.diameter)], [tt('Center circle R'), fmt(m.radius)], [tt('Tube Ø 2r'), fmt(2 * Math.abs(m.minorRadius ?? 0))], [tt('Tube r'), fmt(Math.abs(m.minorRadius ?? 0))]);
+  else if (m.diameter != null && m.type !== 'Langloch') rows.push([tt('Diameter'), fmt(m.diameter)]);
+  if (m.type === 'Langloch') rows.push([tt('Length'), fmt(m.length)], [tt('Width'), fmt(m.width)]);
+  if (m.type === 'Kegel') rows.push([tt('Cone angle [°]'), fmt(2 * m.halfAngle! * DEG, 3)]);
+  if (m.nurbs) { const nb = m.nurbs; rows.splice(full ? 1 : 0, 0, [tt('Std. dev. σ'), fmt(nb.std)]);
+    rows.push([tt('Patch'), nb.kind === 'vierseitig' ? tt('four-sided (4 boundary curves)') : tt('trimmed (1 boundary curve)')], [tt('Control points'), `${nb.surface.nu} × ${nb.surface.nv}`], [tt('Degree'), `${nb.surface.degU} / ${nb.surface.degV}`], [tt('Smoothing λ'), String(nb.params.smooth)]); }
   if (full && m.type === 'Freiformfläche') return rows;
   if (full) {
     rows.push(['X', fmt(m.center[0])], ['Y', fmt(m.center[1])], ['Z', fmt(m.center[2])], ['I', fmt(m.normal[0], 6)], ['J', fmt(m.normal[1], 6)], ['K', fmt(m.normal[2], 6)]);
-    if (m.type === 'Zylinder' || m.type === 'Kegel') rows.push(['Höhe', fmt(m.length)]);
-    if (m.type === 'Langloch') rows.push(['Richtung', m.direction!.map((v) => v.toFixed(4)).join(' ')]);
+    if (m.type === 'Zylinder' || m.type === 'Kegel') rows.push([tt('Height'), fmt(m.length)]);
+    if (m.type === 'Langloch') rows.push([tt('Direction'), m.direction!.map((v) => v.toFixed(4)).join(' ')]);
     if (m.type === 'Kegel') rows.push(['Spitze', m.apex!.map((v) => v.toFixed(3)).join(' ')]);
   }
   return rows;
@@ -1055,11 +1056,11 @@ const kv = (rows: [string, string][]) => `<div class="kv">${rows.map(([k, v]) =>
 /** Zweifarbige Vorschau: Kennwerte von Merkmal (orange) und Hilfsebene (blau). */
 function auxStats(p: Preview): string {
   const m = p.fit, pl = p.aux!.plane;
-  const size: [string, string][] = m.type === 'Langloch' ? [['Länge', fmt(m.length)], ['Breite', fmt(m.width)]] : m.type === 'Torus' ? [['Ø 2R', fmt(m.diameter)], ['Rohr-Ø', fmt(2 * Math.abs(m.minorRadius ?? 0))]] : [['Durchmesser', fmt(m.diameter)]];
+  const size: [string, string][] = m.type === 'Langloch' ? [[tt('Length'), fmt(m.length)], [tt('Width'), fmt(m.width)]] : m.type === 'Torus' ? [['Ø 2R', fmt(m.diameter)], [tt('Tube Ø'), fmt(2 * Math.abs(m.minorRadius ?? 0))]] : m.type === 'Linie' ? [[tt('Length'), fmt(m.length)]] : [[tt('Diameter'), fmt(m.diameter)]];
   return `<div class="aux-stats"><div class="as-col"><div class="as-h"><i style="background:${hex(PREVIEW_COLOR)}"></i>${m.type} (Wand)</div>
-    ${kv([['Punkte', String(p.indices.length)], ['RMS', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ...size])}</div>
+    ${kv([[tt('Points'), String(p.indices.length)], ['RMS', fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ...size])}</div>
     <div class="as-col"><div class="as-h"><i style="background:${hex(AUX_COLOR)}"></i>Hilfsebene</div>
-    ${kv([['Punkte', p.aux!.refId ? '(' + nameOf(p.aux!.refId) + ')' : String(p.aux!.indices.length)], ['RMS', fmt(pl.rms)], ['Ebenheit', fmt(pl.form)], ['Normale', pl.normal.map((v) => v.toFixed(3)).join(' ')]])}</div></div>`;
+    ${kv([[tt('Points'), p.aux!.refId ? '(' + nameOf(p.aux!.refId) + ')' : String(p.aux!.indices.length)], ['RMS', fmt(pl.rms)], [tt('Flatness'), fmt(pl.form)], [tt('Normal'), pl.normal.map((v) => v.toFixed(3)).join(' ')]])}</div></div>`;
 }
 /** Extensible dialog system: the first provider whose when() is true renders the dialog area.
  *  Active tools come first, then the selected object (tree or 3D pick); nothing selected → hint. */
@@ -1159,22 +1160,22 @@ const auxSourceText = (a: AuxPlane) => (a.refId ? nameOf(a.refId) : tt('automati
 
 function nurbsParamsHTML(f: FeatureView) {
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick'; const nb = f.measured!.nurbs!; const P = nb.params;
-  return `<h4>⚙ Freiform-Parameter <span class="note">(Änderung ⇒ automatisch neu rückführen)</span></h4><div id="fp-box">
-    <div class="row"><label>Geometrietyp</label><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-    <div class="row"><label>Kontrollpunkte u</label><input id="nb-nu" value="${P.nu}" inputmode="numeric"></div>
-    <div class="row"><label>Kontrollpunkte v</label><input id="nb-nv" value="${P.nv}" inputmode="numeric"></div>
-    <div class="row"><label>Grad</label><select id="nb-deg">${[1, 2, 3, 4, 5].map((d) => `<option ${d === P.deg ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
-    <div class="row"><label>Glättung λ</label><input id="nb-sm" value="${P.smooth}" inputmode="decimal"></div>
-    ${grow ? `<div class="row"><label>Regionenwachstum: max. Winkel [°]</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>` : `<p class="note">Punkte aus ${f.method === 'Pinsel' ? 'Pinselauswahl' : 'Projektdatei'}.</p>`}
-    <div class="row chk"><label><input type="checkbox" id="nb-dev" ${state.devMap ? 'checked' : ''}> Abweichungs-Farbkarte</label></div>
-    <div class="row chk"><label><input type="checkbox" id="nb-net" ${state.ctrlNet ? 'checked' : ''}> Kontrollnetz anzeigen</label></div>
-    <p class="note">Ablauf: Randschleife der Auswahl → ${nb.kind === 'vierseitig' ? '4 Ecken, 4 Randkurven' : 'getrimmtes Patch (1 Randkurve)'} → Parametrisierung → Ausgleich (kleinste Quadrate) mit Glättung → Parameterkorrektur. Mehr Kontrollpunkte = genauer, aber welliger; λ glättet.</p>
+  return `<h4>⚙ ${tt('Freeform parameters')} <span class="note">(${tt('change ⇒ automatic refit')})</span></h4><div id="fp-box">
+    <div class="row"><label>${tt('Geometry type')}</label><select id="d-retype">${FIT_TYPES.map((t) => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${typeName(t)}</option>`).join('')}</select></div>
+    <div class="row"><label>${tt('Control points u')}</label><input id="nb-nu" value="${P.nu}" inputmode="numeric"></div>
+    <div class="row"><label>${tt('Control points v')}</label><input id="nb-nv" value="${P.nv}" inputmode="numeric"></div>
+    <div class="row"><label>${tt('Degree')}</label><select id="nb-deg">${[1, 2, 3, 4, 5].map((d) => `<option ${d === P.deg ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+    <div class="row"><label>${tt('Smoothing λ')}</label><input id="nb-sm" value="${P.smooth}" inputmode="decimal"></div>
+    ${grow ? `<div class="row"><label>${tt('Region growing: max. angle [°]')}</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection.') : tt('Points from project file.')}</p>`}
+    <div class="row chk"><label><input type="checkbox" id="nb-dev" ${state.devMap ? 'checked' : ''}> ${tt('Deviation color map')}</label></div>
+    <div class="row chk"><label><input type="checkbox" id="nb-net" ${state.ctrlNet ? 'checked' : ''}> ${tt('Show control net')}</label></div>
+    <p class="note">${tt('Process: boundary loop of the selection → {0} → parametrisation → least-squares fit with smoothing → parameter correction. More control points = more accurate but wavier; λ smooths.', nb.kind === 'vierseitig' ? tt('4 corners, 4 boundary curves') : tt('trimmed patch (1 boundary curve)'))}</p>
     <div class="row"><button class="btn" id="nb-igs">⇩ IGES (128)</button><button class="btn" id="nb-stp">⇩ STEP</button><button class="btn" id="nb-json">⇩ JSON</button></div>
     </div>`;
 }
 function bindNurbsParams(d: HTMLElement, f: FeatureView) {
   const fp = f.fp!; const P = f.measured!.nurbs!.params; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
-  const num = (id: string, set: (x: number) => void, ok: (x: number) => boolean) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && ok(x)) { set(x); refitFeature(f); } else toast('Ungültiger Wert'); }; };
+  const num = (id: string, set: (x: number) => void, ok: (x: number) => boolean) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && ok(x)) { set(x); refitFeature(f); } else toast(tt('Invalid value')); }; };
   q<HTMLSelectElement>('#d-retype')?.addEventListener('change', (e) => refitFeature(f, (e.target as HTMLSelectElement).value as GeomType));
   num('#nb-nu', (x) => (P.nu = Math.round(x)), (x) => x >= P.deg + 1 && x <= 40);
   num('#nb-nv', (x) => (P.nv = Math.round(x)), (x) => x >= P.deg + 1 && x <= 40);
@@ -1194,18 +1195,18 @@ function fitParamsHTML(f: FeatureView) {
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
   const m = f.measured!;
-  return `<h4>⚙ Fit-Parameter <span class="note">(Änderung ⇒ automatisch neu fitten)</span></h4><div id="fp-box">
-    <div class="row"><label>Geometrietyp</label><select id="d-retype">${FIT_TYPES.map((t) => `<option ${t === f.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-    <div class="row"><label>Methode</label><select id="fp-method"><option value="lsq" ${fp.k ? '' : 'selected'}>Gauß (kleinste Quadrate)</option><option value="rob" ${fp.k ? 'selected' : ''}>Gauß robust (Ausreißer entfernen)</option></select></div>
-    ${fp.k ? `<div class="row"><label>Ausreißer &gt; k·σ, k =</label><input id="fp-k" value="${fp.k}" inputmode="decimal"></div>` : ''}
-    ${grow ? `<div class="row"><label>Regionenwachstum: max. Winkel [°]</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
-      <div class="row"><label>Suchradius [mm] (0 = ∞)</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">Punkte aus ${f.method === 'Pinsel' ? 'Pinselauswahl' : 'Projektdatei'} – kein Regionenwachstum.</p>`}
-    <div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> Normalenrichtungsfilter</label></div>
-    ${fp.nf.on ? `<div class="row"><label>max. Normalenabweichung [°]</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
-      <div class="row"><label>höchstens verwerfen [%]</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
-    <p class="note">Normalenfilter: Punkte, deren gemessene Flächennormale mehr als den Winkel von der Normalen des gefitteten Elements abweicht (Kanten, Fasen, Nachbarflächen), werden verworfen – die schlimmsten zuerst, höchstens der Prozentsatz.${m.nfRemoved ? ` <b>Aktuell ${m.nfRemoved} Punkte verworfen.</b>` : ''}</p>
-    ${(f.type === 'Kreis' || f.type === 'Langloch') && grow ? `<div class="row"><label>Hilfsebene</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>Automatisch</option>
-      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>Keine (3D-Fit)</option></select></div>` : ''}
+  return `<h4>⚙ ${tt('Fit parameters')} <span class="note">(${tt('change ⇒ automatic refit')})</span></h4><div id="fp-box">
+    <div class="row"><label>${tt('Geometry type')}</label><select id="d-retype">${FIT_TYPES.map((t) => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${typeName(t)}</option>`).join('')}</select></div>
+    <div class="row"><label>${tt('Method')}</label><select id="fp-method"><option value="lsq" ${fp.k ? '' : 'selected'}>${tt('Gauss (least squares)')}</option><option value="rob" ${fp.k ? 'selected' : ''}>${tt('Gauss robust (remove outliers)')}</option></select></div>
+    ${fp.k ? `<div class="row"><label>${tt('Outliers &gt; k·σ, k =')}</label><input id="fp-k" value="${fp.k}" inputmode="decimal"></div>` : ''}
+    ${grow ? `<div class="row"><label>${tt('Region growing: max. angle [°]')}</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
+      <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection – no region growing.') : tt('Points from project file – no region growing.')}</p>`}
+    <div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> ${tt('Normal direction filter')}</label></div>
+    ${fp.nf.on ? `<div class="row"><label>${tt('max. normal deviation [°]')}</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
+      <div class="row"><label>${tt('discard at most [%]')}</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
+    <p class="note">${tt('Normal filter: points whose measured surface normal deviates from the fitted element by more than the angle (edges, chamfers, adjacent faces) are discarded – worst first, at most the percentage.')}${m.nfRemoved ? ` <b>${tt('Currently {0} points discarded.', m.nfRemoved)}</b>` : ''}</p>
+    ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option>
+      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>` : ''}
     </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
@@ -1247,15 +1248,15 @@ function renderTable() {
       const ist = r ? r.measured : isDatumControl(it.kind) ? null : evaluate({ id: 0, kind: it.kind, featureIds: [f.id], nominal: null, tolUp: 0, tolLo: 0 }, fm, ctx).measured;
       const needD = isDatumControl(it.kind) && !c && !datumFeatures().some((d) => d.id !== f.id);
       row.innerHTML = `<label><input type="checkbox" ${c ? 'checked' : ''} ${needD ? 'disabled' : ''}><span class="sym">${it.symbol}</span><span class="cl" title="${it.note ?? ''}">${it.label}</span></label>
-        <span class="ist">${needD ? '<small>Bezug zuweisen</small>' : fmt(ist)}</span>`;
+        <span class="ist">${needD ? `<small>${tt('Assign datum')}</small>` : fmt(ist)}</span>`;
       row.querySelector('input')!.onchange = (e) => toggleControl(it.kind, f.id, (e.target as HTMLInputElement).checked);
       if (c && r && isDatumControl(c.kind)) {
         const ed = document.createElement('span'); ed.className = 'cat-ed datum-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0))));
-        const di = document.createElement('input'); di.className = 'dref'; di.value = datumText(c, fm); di.title = 'Bezüge primär|sekundär|tertiär, z. B. A|B|C';
-        di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast('Unbekannter Bezugsbuchstabe: ' + di.value); } else { c.datumIds = ids; if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') c.basic = c.basic ?? defaultBasic(c.kind, f, ids); } renderAll(); };
-        lab('Bezug', di);
+        const di = document.createElement('input'); di.className = 'dref'; di.value = datumText(c, fm); di.title = tt('Datums primary|secondary|tertiary, e.g. A|B|C');
+        di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast(tt('Unknown datum letter: {0}', di.value)); } else { c.datumIds = ids; if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') c.basic = c.basic ?? defaultBasic(c.kind, f, ids); } renderAll(); };
+        lab(tt('Datum'), di);
         if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') ['X', 'Y', 'Z'].forEach((a, k) => lab(`[${a}]`, numInput(c.basic?.[k] ?? 0, (x) => { c.basic = c.basic ?? [0, 0, 0]; c.basic[k] = x ?? 0; })));
         if (c.kind === 'Neigung') lab('[∠°]', numInput(c.basic?.[0] ?? 45, (x) => (c.basic = [x ?? 0])));
         ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : ''}${fmt(c.tolUp, 3)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
@@ -1335,7 +1336,7 @@ function renderDevLegend(dev: Float32Array | null) {
   if (!dev) { el?.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
   const r = devRange(dev);
-  el.innerHTML = `<b>Abweichung [mm]</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
+  el.innerHTML = `<b>${tt('Deviation [mm]')}</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
 }
 function renderScene() {
   if (!state.data) return;
@@ -1429,8 +1430,8 @@ function centerOn(id?: number | null) {
   status(tt('{0} centered (view along −normal).', f.name));
 }
 {
-  const b = document.createElement('button'); b.id = 'btn-center'; b.title = 'Zentrieren: Ansicht auf Auswahl (oder Modell) ausrichten';
-  b.innerHTML = '<span>⌖</span> Zentrieren'; b.onclick = () => centerOn();
+  const b = document.createElement('button'); b.id = 'btn-center'; b.title = tt('Center: align view to the selection (or model)');
+  b.innerHTML = `<span>⌖</span> ${tt('Center')}`; b.onclick = () => centerOn();
   b.addEventListener('pointerdown', (e) => e.stopPropagation());
   viewer.el.appendChild(b);
 }
@@ -1572,7 +1573,7 @@ function meshArrays() {
   return { positions: g.getAttribute('position').array as Float32Array, indices: (g.index?.array ?? new Uint32Array(0)) as Uint32Array };
 }
 async function saveProject() {
-  if (!state.data) { toast('Kein Projekt zum Speichern.'); return; }
+  if (!state.data) { toast('No project to save.'); return; }
   const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob());
   const name = state.data.name.replace(/\.[^.]+$/, '') + '.mw3d';
   const file = new File([bin as BlobPart], name, { type: 'application/octet-stream' });
@@ -1599,7 +1600,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     curvesReset(); state.curves = st.curves ?? []; state.nextCurve = st.nextCurve ?? state.curves.length + 1; state.showLayout = !!st.showLayout;
     if (state.curves.length) updateLayout();
     state.sel = []; state.mode = null; state.preview = null; state.openReport = null; ptsCache.clear();
-    $('#projname').textContent = r.name; $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
+    $('#projname').textContent = r.name; $('#stats').textContent = `${r.vertexCount.toLocaleString('en-US')} points · ${r.triCount.toLocaleString('en-US')} triangles`;
     loadCount++; await storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
     renderAll();
     if (st.camera) viewer.setCamera(st.camera);
@@ -1610,13 +1611,13 @@ async function openProjectFile(buf: ArrayBuffer, name: string) {
   try {
     const p = readProject(new Uint8Array(buf));
     await applyProject(p.json, p.mesh, p.idx);
-    toast(`✔ Projekt ${name} geladen (${state.features.length} Merkmale, ${state.controls.length} Prüfmerkmale)`);
-  } catch (e: any) { toast('Projekt konnte nicht geladen werden: ' + e.message); }
+    toast(tt('✔ Project {0} loaded ({1} features, {2} controls)', name, state.features.length, state.controls.length));
+  } catch (e: any) { toast(tt('Project could not be loaded: {0}', e.message)); }
 }
 async function storeMeshForAutosave(name: string) {
   if (!viewer.model) return;
   meshKey = name + ':' + Date.now();
-  try { const m = meshArrays(); await idbSet('mesh', { key: meshKey, name, positions: m.positions, indices: m.indices }); } catch (e) { console.warn('Autosave (Netz) nicht möglich', e); }
+  try { const m = meshArrays(); await idbSet('mesh', { key: meshKey, name, positions: m.positions, indices: m.indices }); } catch (e) { console.warn('Autosave (mesh) not possible', e); }
 }
 let autoTimer = 0;
 function scheduleAutosave() {
@@ -1627,12 +1628,12 @@ function scheduleAutosave() {
       const b = featureIndexBlob();
       await idbSet('project', { meshKey, savedAt: new Date().toISOString(), json: projectJSON(), idxOffsets: b.offsets, idxData: b.data, features: state.features.length });
       $('#autosave').textContent = 'Autosave ' + new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch (e) { console.warn('Autosave fehlgeschlagen', e); }
+    } catch (e) { console.warn('Autosave failed', e); }
   }, 1500);
 }
 async function restoreLast() {
   const p = await idbGet('project'), m = await idbGet('mesh');
-  if (!p || !m || p.meshKey !== m.key) { toast('Kein gespeichertes Projekt gefunden.'); return; }
+  if (!p || !m || p.meshKey !== m.key) { toast('No saved project found.'); return; }
   await applyProject(p.json, { positions: m.positions, indices: m.indices }, { offsets: p.idxOffsets, data: p.idxData });
   $('#restore-bar').classList.add('hidden');
   toast(`✔ Letztes Projekt wiederhergestellt (${p.features} Merkmale)`);
@@ -1660,28 +1661,30 @@ $('#btn-restore').onclick = () => restoreLast();
 // ------------------------------------------------------------------ Hilfe + Trainingsmodus
 $('#btn-help').onclick = () => {
   const el = $('#help-view'); el.classList.remove('hidden');
-  el.innerHTML = `<div class="rv-head"><b>Hilfe: Bezüge und Toleranzen mit Bezug</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 Training starten</button><button class="btn" id="hv-close">✕</button></div>
+  el.innerHTML = `<div class="rv-head"><b>${tt('Help: datums and tolerances with datum')}</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 ${tt('Start training')}</button><button class="btn" id="hv-close">✕</button></div>
   <div class="rv-body">${HELP_HTML}</div>`;
   ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
 };
-const HELP_HTML = `<h3>Navigation (Maus)</h3><ul><li><b>Linke Taste</b> ziehen: drehen · <b>mittlere Taste</b> (Rad gedrückt) oder rechte Taste ziehen: verschieben in der Bildebene · <b>Mausrad</b>: zoomen.</li>
-<li>Pinsel aktiv (Fit-Pinsel, Polygon-Radierer): <b>Mausrad ändert den Pinselradius</b> (Kreis und erfasste Dreiecke werden live angezeigt), <b>Strg+Mausrad</b> zoomt.</li>
-<li>Kreis/Langloch per Klick mit Hilfsebene: beim Überfahren Vorschau – <b style="color:#2f7de1">blau</b> Hilfsebene, <b style="color:#ff8c1a">orange</b> Wandpunkte.</li><li>Touch: ein Finger drehen, zwei Finger zoomen/verschieben.</li></ul>
-<h3>Bezug zuweisen (ISO 5459)</h3><ol><li>Merkmal wählen (Ebene, Zylinder/Bohrung, Kreis, Kegel, Langloch, Torus, Kugel).</li>
-<li>Dialog › <b>Bezug</b>: Buchstaben wählen › <b>Bezug zuweisen</b> – oder Rechtsklick/langes Tippen im Baum › „Als Bezug … festlegen“.</li>
-<li>Umbenennen: anderen Buchstaben wählen; ist er vergeben, werden die Buchstaben <b>getauscht</b>. Prüfmerkmale verweisen auf das Merkmal und passen sich an.</li>
-<li>Entfernen: Prüfmerkmale, die den Bezug nutzen, bleiben erhalten und werden mit ⚠ „Bezug entfernt“ markiert, bis ein Bezug wieder zugewiesen wird.</li></ol>
-<h3>Bezugssystem A|B|C</h3><ul><li><b>Primär A</b> legt die Orientierung fest: Ebene → Z = Normale aus dem Material, Ursprung auf A; Achse → Z = Achse.</li>
-<li><b>Sekundär B</b>: Ebene → Richtung in A (senkrecht zu B) und Ursprung auf B; Achse/Kreis → Ursprung auf der Achse von B.</li>
-<li><b>Tertiär C</b> legt die verbleibende Drehung bzw. die letzte Ursprungskoordinate fest. X/Y werden so benannt, dass X der Welt-X-Richtung am nächsten liegt.</li></ul>
-<h3>Toleranzen mit Bezug</h3><ul><li><b>∥ Parallelität / ⟂ Rechtwinkligkeit / ∠ Neigung</b>: Ebenen – Abstand zweier Ebenen in Sollrichtung, die alle Punkte enthalten; Achsen – Länge × sin(Winkelfehler).</li>
-<li><b>⌖ Position</b>: theoretisch genaue Maße [X][Y][Z] im Bezugssystem von Hand. Achsen: zylindrische Zone Ø = 2 × größter Abstand der Achsendpunkte von der Soll-Achse; Kugel/Torus/Punkt: SØ; Ebene: 2 × größter Punktabstand zur Soll-Ebene.</li>
-<li><b>◎ Koaxialität / Konzentrizität</b>: Ø = 2 × Abstand der Achse (Endpunkte) bzw. des Mittelpunkts zur Bezugsachse.</li>
-<li><b>⌯ Symmetrie</b>: 2 × Abstand der Mittelebene/des Mittelpunkts vom Bezug (Langloch: in Breitenrichtung).</li>
-<li><b>↗ Rundlauf</b>: radiale Abstände der Punkte zur Bezugsachse in Messkreisen (Schnitte); größte Spanne. <b>⌰ Gesamtrundlauf</b>: Spanne über die ganze Fläche.</li>
-<li><b>⌓ Flächenprofil mit Bezug</b>: konservative Abschätzung 2 × (max. Formabweichung + Lageabweichung des Mittelpunkts).</li></ul>
-<p class="note">Alle Werte werden aus den gemessenen (Ist-)Geometrien berechnet; ohne CAD gibt es kein Soll-Modell – Sollmaße werden eingetippt.</p>`;
+const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left button</b>: rotate · <b>middle button</b> (wheel pressed) or right button: pan · <b>mouse wheel</b>: zoom.</li>
+<li>Brush tools and Click &amp; grow: the <b>mouse wheel changes the brush radius / analysis area</b> (shown live), <b>Ctrl+wheel</b> zooms.</li>
+<li>Circle/slot/line by click with auxiliary plane: hover preview – <b style="color:#2f7de1">blue</b> auxiliary plane, <b style="color:#ff8c1a">orange</b> wall points.</li><li>Touch: one finger rotates, two fingers zoom/pan.</li>
+<li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the bottom panel of the 3D view. The Dialog shows the object selected in the tree or 3D view.</li></ul>
+<h3>Assign a datum (ISO 5459)</h3><ol><li>Select a feature (plane, cylinder/hole, circle, cone, slot, torus, sphere, line).</li>
+<li>Dialog › <b>Datum</b>: choose a letter › <b>Assign datum</b> – or right-click/long-press in the tree › “Set as datum …”.</li>
+<li>Rename: choose another letter; if it is taken, the letters are <b>swapped</b>. Controls refer to the feature and follow.</li>
+<li>Remove: controls using the datum are kept and flagged with ⚠ “datum removed” until a datum is assigned again.</li></ol>
+<h3>Datum system A|B|C</h3><ul><li><b>Primary A</b> fixes the orientation: plane → Z = normal out of the material, origin on A; axis → Z = axis.</li>
+<li><b>Secondary B</b>: plane → direction in A (perpendicular to B) and origin on B; axis/circle → origin on the axis of B.</li>
+<li><b>Tertiary C</b> fixes the remaining rotation or the last origin coordinate. X/Y are named so that X is closest to the world X direction.</li></ul>
+<h3>Tolerances</h3><ul><li>Form and orientation/location controls use a single tolerance zone <b>0 … t</b>; sizes (diameter, radius, distance, length …) use nominal + upper/lower deviation.</li>
+<li><b>∥ Parallelism / ⟂ Perpendicularity / ∠ Angularity</b>: planes – distance of two planes in the nominal direction containing all points; axes – length × sin(angle error).</li>
+<li><b>⌖ Position</b>: theoretically exact dimensions [X][Y][Z] in the datum system, entered by hand. Axes: cylindrical zone Ø = 2 × largest distance of the axis end points from the nominal axis; sphere/torus/point: SØ; plane: 2 × largest point distance to the nominal plane.</li>
+<li><b>◎ Coaxiality / concentricity</b>: Ø = 2 × distance of the axis (end points) or the center to the datum axis.</li>
+<li><b>⌯ Symmetry</b>: 2 × distance of the median plane/center from the datum (slot: in width direction).</li>
+<li><b>↗ Circular run-out</b>: radial distances of the points to the datum axis in measuring circles (sections); largest span. <b>⌰ Total run-out</b>: span over the whole surface.</li>
+<li><b>⌓ Surface profile with datum</b>: conservative estimate 2 × (max. form deviation + location deviation of the center).</li></ul>
+<p class="note">All values are computed from the measured (actual) geometries; without CAD there is no nominal model – nominal values are typed in.</p>`;
 
 let tour: Tour | null = null;
 const worldToScreen = (p: Vec3) => {
@@ -1745,7 +1748,7 @@ async function ensurePosition() {
 function datumSteps(letter: string, pred: (f: FeatureView) => boolean, what: string): TourStep {
   return {
     auto: () => ensureDatum(letter, pred),
-    title: `Bezug ${letter} zuweisen`, text: `${what} ist ausgewählt. Wähle im Dialog unter <b>Bezug</b> den Buchstaben <b>${letter}</b> und tippe auf <b>Bezug zuweisen</b>.`,
+    title: tt('Assign datum {0}', letter), text: tt('{0} is selected. In the Dialog under <b>Datum</b> choose the letter <b>{1}</b> and tap <b>Assign datum</b>.', what, letter),
     target: () => document.querySelector('#dt-box'),
     enter: () => { const f = findF(pred); if (f) { state.sel = [f.id]; state.mode = null; renderAll(); } if (isPhone()) togglePanel('dialog', true); setTimeout(() => { const s = document.querySelector<HTMLSelectElement>('#dt-letter'); if (s && !findF(pred)?.datum) s.value = letter; }, 50); },
     check: () => findF(pred)?.datum === letter,
@@ -1753,50 +1756,50 @@ function datumSteps(letter: string, pred: (f: FeatureView) => boolean, what: str
 }
 function planeSteps(name: string, p: Vec3, dir: [number, number, number] | null, pred: (f: FeatureView) => boolean, nPred: (m: FitResult) => boolean, n: Vec3 = [0, 0, 1]): TourStep[] {
   return [
-    { auto: () => ensurePreview('Ebene', p, n, pred), title: `${name} antippen`, text: `Modus <b>Ebene</b> ist aktiv. Tippe auf die markierte Stelle (gelber Ring) – die <b>${name}</b> des Teils. Es erscheint eine orange Vorschau.`,
+    { auto: () => ensurePreview('Ebene', p, n, pred), title: tt('Tap the {0}', name), text: tt('Mode <b>Plane</b> is active. Tap the marked spot (yellow ring) – the <b>{0}</b> of the part. An orange preview appears.', name),
       world: () => worldToScreen(p),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); if (state.mode?.kind !== 'fit' || state.mode.type !== 'Ebene') startFitMode('Ebene'); dir ? viewer.viewDir(dir) : viewer.view('iso'); },
       check: () => !!findF(pred) || pv(nPred)() },
-    { auto: () => ensureFeature('Ebene', p, n, pred), title: 'Erzeugen', text: 'Prüfe die Kennwerte (Punkte, RMS, Ebenheit) und tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#cp-ok'), check: () => !!findF(pred) },
+    { auto: () => ensureFeature('Ebene', p, n, pred), title: tt('Create'), text: tt('Check the values (points, RMS, flatness) in the bottom panel and tap <b>✓</b>.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(pred) },
   ];
 }
 function startTraining() {
   if (tour) return;
   let lc0 = loadCount;
   const steps: TourStep[] = [
-    { title: 'Training: Bezüge & Position', text: 'In dieser geführten Übung legst du am Beispielteil das Bezugssystem <b>A|B|C</b> fest (Oberseite, Vorderseite, linke Seite) und prüfst die <b>Position</b> der Bohrung Ø12 mit Bezug auf A|B|C.<br>Jeder Schritt wird automatisch geprüft. Mit <b>Weiter</b> geht es los.' },
-    { title: 'Beispielteil laden', text: 'Tippe im Register <b>Start</b> auf <b>Beispiel laden</b> – im Training wird direkt das Standard-Beispielteil geladen. (Ein laufendes Projekt wird ersetzt – vorher ggf. „Projekt speichern“.)',
+    { title: tt('Training: datums & position'), text: tt('In this guided exercise you set up the datum system <b>A|B|C</b> on the sample part (top, front, left side) and check the <b>position</b> of the Ø12 hole relative to A|B|C.<br>Every step is checked automatically. Press <b>Next</b> to start.') },
+    { title: tt('Load sample part'), text: tt('In the <b>Home</b> ribbon tap <b>Load sample</b> – the training loads the standard sample part directly. (A running project is replaced – save it first if needed.)'),
       auto: ensureSample, target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
       check: () => (loadCount > lc0 || state.features.length > 0) && !!state.data?.name.startsWith('beispielteil') },
-    { auto: async () => tab('merkmale')(), title: 'Register „Merkmale“', text: 'Öffne oben das Register <b>Merkmale</b>.', target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
-    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Ebene'); }, title: 'Merkmalstyp Ebene', text: 'Wähle <b>Ebene</b>. Damit wird nur eine Ebene gefittet.', target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Ebene') || !!findF(isTop) },
-    ...planeSteps('Oberseite', [70, 50, 20], null, isTop, (m) => m.type === 'Ebene' && m.normal[2] > 0.99),
-    datumSteps('A', isTop, 'Die Oberseite (primärer Bezug: legt die Orientierung fest)'),
-    ...planeSteps('Vorderseite', [50, 0, 10], null, isFront, (m) => m.type === 'Ebene' && Math.abs(m.normal[1]) > 0.99, [0, -1, 0]),
-    datumSteps('B', isFront, 'Die Vorderseite (sekundärer Bezug: Richtung in A und Ursprung in Y)'),
-    ...planeSteps('linke Seite', [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99, [-1, 0, 0]),
-    datumSteps('C', isLeft, 'Die linke Seite (tertiärer Bezug: Ursprung in X)'),
-    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Zylinder'); }, title: 'Merkmalstyp Zylinder', text: 'Wähle im Register Merkmale den Typ <b>Zylinder</b>.', target: () => document.querySelector('[data-ftype="Zylinder"]'),
+    { auto: async () => tab('merkmale')(), title: tt('Features ribbon'), text: tt('Open the <b>Features</b> ribbon at the top.'), target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
+    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Ebene'); }, title: tt('Feature type Plane'), text: tt('Choose <b>Plane</b>. Only a plane will be fitted.'), target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Ebene') || !!findF(isTop) },
+    ...planeSteps(tt('top face'), [70, 50, 20], null, isTop, (m) => m.type === 'Ebene' && m.normal[2] > 0.99),
+    datumSteps('A', isTop, tt('The top face (primary datum: defines the orientation)')),
+    ...planeSteps(tt('front face'), [50, 0, 10], null, isFront, (m) => m.type === 'Ebene' && Math.abs(m.normal[1]) > 0.99, [0, -1, 0]),
+    datumSteps('B', isFront, tt('The front face (secondary datum: direction in A and origin in Y)')),
+    ...planeSteps(tt('left face'), [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99, [-1, 0, 0]),
+    datumSteps('C', isLeft, tt('The left face (tertiary datum: origin in X)')),
+    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Zylinder'); }, title: tt('Feature type Cylinder'), text: tt('In the Features ribbon choose the type <b>Cylinder</b>.'), target: () => document.querySelector('[data-ftype="Zylinder"]'),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); viewer.view('iso'); }, check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Zylinder') || !!findF(isHole) },
-    { auto: () => ensurePreview('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Bohrung Ø12 antippen', text: 'Tippe auf die <b>Wand der Bohrung</b> (gelber Ring).', world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
+    { auto: () => ensurePreview('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: tt('Tap the Ø12 hole'), text: tt('Tap the <b>wall of the hole</b> (yellow ring).'), world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
       check: () => !!findF(isHole) || pv((m) => m.type === 'Zylinder' && Math.abs(m.diameter! - 12.08) < 0.3)() },
-    { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: 'Erzeugen', text: 'Tippe auf <b>✔ Erzeugen</b>.', target: () => document.querySelector('#cp-ok'), check: () => !!findF(isHole) },
+    { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: tt('Create'), text: tt('Tap <b>✓</b> in the bottom panel.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(isHole) },
     { auto: async () => { await ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole); const f = findF(isHole)!; f.fp ??= defaultFp(); if (!f.fp.nf.on) { f.fp.nf.on = true; await refitFeature(f); } },
-      title: 'Normalenrichtungsfilter', text: 'Beim Antasten liegen oft Punkte von <b>Kanten und Fasen</b> in der Auswahl. Ihre Flächennormale passt nicht zur Bohrungswand. Der <b>Normalenrichtungsfilter</b> verwirft Punkte, deren Normale mehr als den eingestellten <b>Winkel</b> abweicht – die schlimmsten zuerst, aber höchstens den eingestellten <b>Prozentsatz</b>.<br>Setze im Dialog unter <b>⚙ Fit-Parameter</b> den Haken bei <b>Normalenrichtungsfilter</b>. Das Merkmal wird sofort neu gefittet; Winkel und % kannst du danach ändern.',
+      title: tt('Normal direction filter'), text: tt('The selection often contains points of <b>edges and chamfers</b>. Their surface normal does not match the hole wall. The <b>normal direction filter</b> discards points whose normal deviates by more than the set <b>angle</b> – worst first, but at most the set <b>percentage</b>.<br>In the Dialog under <b>⚙ Fit parameters</b> tick <b>Normal direction filter</b>. The feature is refitted immediately; you can change angle and % afterwards.'),
       target: () => document.querySelector('#fp-nf')?.closest('.row') ?? null,
       enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.mode = null; renderAll(); } if (isPhone()) togglePanel('dialog', true); },
       check: () => !!findF(isHole)?.fp?.nf.on },
-    { auto: ensurePosition, title: 'Positionstoleranz ⌖ A|B|C', text: 'Im Fenster <b>Prüfmerkmale</b> (Katalog) unter „Mit Bezug“ den Haken bei <b>⌖ Position</b> setzen. Die Bezüge A|B|C werden automatisch eingetragen.',
+    { auto: ensurePosition, title: tt('Position tolerance ⌖ A|B|C'), text: tt('In <b>Control Properties</b> under “With datum” tick <b>⌖ Position</b>. The datums A|B|C are filled in automatically.'),
       target: () => document.querySelector('#catalog .cat-item[data-kind="Position"]'),
       enter: () => { const f = findF(isHole); if (f) { state.sel = [f.id]; state.addFeat = f.id; state.ctab = 'katalog'; state.mode = null; renderAll(); } if (isPhone()) togglePanel('table', true); },
       check: () => { const f = findF(isHole); const fm = featMap(); return !!f && state.controls.some((c) => c.kind === 'Position' && c.featureIds[0] === f.id && datumText(c, fm) === 'A|B|C'); } },
-    { auto: async () => { await ensurePosition(); const f = findF(isHole)!; const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f.id)!; c.basic = [20, 20, c.basic?.[2] ?? 0]; renderAll(); }, title: 'Sollmaße [X] [Y] und Toleranz', text: 'Trage die theoretisch genauen Maße <b>[X] = 20</b> und <b>[Y] = 20</b> ein (bereits vorbelegt, bitte prüfen) und lasse die Toleranz <b>Ø 0,1</b>. Ergebnis: IO/NIO und Eintrag im 3D-Label.',
+    { auto: async () => { await ensurePosition(); const f = findF(isHole)!; const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f.id)!; c.basic = [20, 20, c.basic?.[2] ?? 0]; renderAll(); }, title: tt('Basic dimensions [X] [Y] and tolerance'), text: tt('Enter the theoretically exact dimensions <b>[X] = 20</b> and <b>[Y] = 20</b> (pre-filled, please check) and keep the tolerance <b>Ø 0.1</b>. Result: OK/NOK and an entry in the annotation.'),
       target: () => document.querySelector('#catalog .cat-item[data-kind="Position"] .cat-ed'),
       check: () => { const f = findF(isHole); const c = state.controls.find((k) => k.kind === 'Position' && k.featureIds[0] === f?.id); return !!c && Math.abs((c.basic?.[0] ?? 0) - 20) < 1e-6 && Math.abs((c.basic?.[1] ?? 0) - 20) < 1e-6; } },
-    { title: 'Geschafft! 🎉', text: 'Die Bohrung ist jetzt mit <b>⌖ Ø0,1 | A | B | C</b> toleriert. Die Bezugsfahnen stehen im Baum und in den 3D-Labels. Bezüge lassen sich im Dialog umbenennen (Buchstaben tauschen) oder entfernen – abhängige Prüfmerkmale werden dann markiert.',
+    { title: tt('Done! 🎉'), text: tt('The hole is now toleranced with <b>⌖ Ø0.1 | A | B | C</b>. The datum flags appear in the tree and in the annotations. Datums can be renamed (letters swapped) or removed in the Dialog – dependent controls are then flagged.'),
       enter: () => { if (isPhone()) togglePanel('table', false); viewer.view('iso'); } },
   ];
-  tour = new Tour('Training Bezüge', steps, () => { tour = null; (window as any).__app.tour = null; });
+  tour = new Tour(tt('Training: datums'), steps, () => { tour = null; (window as any).__app.tour = null; });
   (window as any).__app.tour = tour;
   tour.start();
 }
@@ -1825,8 +1828,8 @@ function peReset() { pe.undo = []; pe.edits = []; pe.dev = null; pe.devStats = n
 function curMesh() { const m = meshArrays(); return { positions: m.positions.slice(), indices: m.indices.slice() }; }
 
 document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.onclick = () => {
-  if (!state.data) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
-  if (!state.data.triCount) { toast('Polygonbearbeitung benötigt ein Dreiecksnetz (keine Punktwolke).'); return; }
+  if (!state.data) { toast('Please load a polygon model first.'); return; }
+  if (!state.data.triCount) { toast('Mesh editing needs a triangle mesh (not a point cloud).'); return; }
   const t = b.dataset.pe as PeTool;
   if (pe.tool === t) { peExit(); return; }
   state.mode = null; state.preview = null; clearBrush();
@@ -1845,7 +1848,7 @@ function renderPolyRibbon() {
   $('#btn-pe-cmp').classList.toggle('on', pe.cmp);
   ($('#btn-pe-undo') as HTMLButtonElement).disabled = !pe.undo.length;
   ($('#btn-pe-reset') as HTMLButtonElement).disabled = !pe.undo.length;
-  const i = $('#pe-info'); if (i) i.textContent = pe.edits.length ? `${pe.edits.length} Bearbeitung(en) · ${state.data?.triCount.toLocaleString('de-DE')} Dreiecke` : 'Original';
+  const i = $('#pe-info'); if (i) i.textContent = pe.edits.length ? `${pe.edits.length} ${tt('edit(s)')} · ${state.data?.triCount.toLocaleString('en-US')} ${tt('triangles')}` : tt('Original');
 }
 
 /** Toleranz: Zahlenfeld und Schieberegler (logarithmisch 0,001…1 mm), gegenseitig synchronisiert. */
@@ -1861,38 +1864,38 @@ function bindTol(d: HTMLElement, id: string, set: (v: number) => void) {
 
 function renderPolyDialog(d: HTMLElement) {
   const t = pe.tool!, tris = state.data?.triCount ?? 0;
-  const run = pe.running ? `<button class="btn" id="pe-cancel">✕ Abbrechen</button>` : `<button class="btn primary" id="pe-run">▶ Anwenden</button>`;
+  const run = pe.running ? `<button class="btn" id="pe-cancel">✕ ${tt('Abort')}</button>` : `<button class="btn primary" id="pe-run">▶ ${tt('Apply')}</button>`;
   let body = '';
-  if (t === 'reduce') body = `<p class="note">Quadrik-Kantenkollaps, krümmungsadaptiv: entfernt Dreiecke, solange das reduzierte Netz beidseitig höchstens um die Toleranz vom Original abweicht und die Normalen kaum kippen – wie die Sehnenhöhe beim Polygonisieren eines Kreises. Ebene Bereiche werden stark, Radien und Kanten kaum reduziert.</p>
-    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
-    <div class="row"><label title="Krümmungsadaptiv: neue Dreiecke dürfen höchstens so stark von den Originalnormalen abweichen">Max. Normalenabw.</label><input type="number" id="pe-nd" value="${pe.normalDeg}" min="1" max="45" step="1"><span class="unit">°</span></div>
-    <div class="row"><label title="Kanten mit größerem Flächenwinkel bleiben als Kante erhalten (Ecken fest)">Kantenwinkel</label><input type="number" id="pe-fd" value="${pe.featureDeg}" min="5" max="90" step="1"><span class="unit">°</span></div>
-    <div class="row"><label title="Begrenzt die Dreiecksgröße (0 = ohne)">Max. Kantenlänge</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
-    <div class="row"><label title="Keine spitzeren Dreiecke als dieser Winkel (0 = ohne; sinnvoll bis ~15°)">Min. Winkel</label><input type="number" id="pe-ma" value="${pe.minAngle}" min="0" max="30" step="1"><span class="unit">°</span></div>
+  if (t === 'reduce') body = `<p class="note">${tt('Quadric edge collapse, curvature adaptive: removes triangles as long as the reduced mesh deviates at most by the tolerance from the original (both ways) and normals barely tilt – like the chord height when polygonising a circle. Flat areas are reduced strongly, radii and edges hardly.')}</p>
+    ${tolRow('pe-tol', tt('Max. deviation'), pe.tol)}
+    <div class="row"><label title="${tt('Curvature adaptive: new triangles may deviate at most this much from the original normals')}">${tt('Max. normal dev.')}</label><input type="number" id="pe-nd" value="${pe.normalDeg}" min="1" max="45" step="1"><span class="unit">°</span></div>
+    <div class="row"><label title="${tt('Edges with a larger dihedral angle are kept as edges (corners fixed)')}">${tt('Edge angle')}</label><input type="number" id="pe-fd" value="${pe.featureDeg}" min="5" max="90" step="1"><span class="unit">°</span></div>
+    <div class="row"><label title="${tt('Limits the triangle size (0 = none)')}">${tt('Max. edge length')}</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
+    <div class="row"><label title="${tt('No triangles sharper than this angle (0 = none; useful up to ~15°)')}">${tt('Min. angle')}</label><input type="number" id="pe-ma" value="${pe.minAngle}" min="0" max="30" step="1"><span class="unit">°</span></div>
     <div class="row">${run}</div>`;
-  else if (t === 'subdiv') body = `<p class="note">Teilt jedes Dreieck in vier (Loop). Neue Punkte werden geglättet, aber höchstens um die Toleranz von der ursprünglichen Fläche verschoben.</p>
-    ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
-    <div class="row"><label>Stufen</label><select id="pe-lv">${[1, 2].map((x) => `<option ${x === pe.levels ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
-    <div class="row"><label title="Begrenzt die Dreiecksgröße (0 = ohne)">Max. Kantenlänge</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
-    <div class="row"><span class="note">Ergebnis: ≈ ${(tris * 4 ** pe.levels).toLocaleString('de-DE')} Dreiecke${tris * 4 ** pe.levels > 3e6 ? ' – über 3 Mio., wird begrenzt' : ''}</span></div><div class="row">${run}</div>`;
-  else if (t === 'smooth') body = `<p class="note">Taubin-Glättung (schrumpft nicht). Rauschen wird reduziert; jeder Punkt bewegt sich höchstens um die Toleranz (0 = unbegrenzt). Ränder bleiben fest.</p>
-    <div class="row"><label>Stärke λ</label><input type="number" id="pe-lam" value="${pe.lambda}" min="0.05" max="0.9" step="0.05"></div>
-    <div class="row"><label>Iterationen</label><input type="number" id="pe-it" value="${pe.iters}" min="1" max="100" step="1"></div>
-    ${tolRow('pe-stol', 'Max. Verschiebung', pe.smoothTol)}<div class="row">${run}</div>`;
-  else body = `<p class="note">Unebenheit (Streuung, Schweißspritzer, Beule) mit dem Pinsel markieren (Shift = radieren), dann <b>Entfernen &amp; füllen</b>. Aus dem umgebenden Ring wird die saubere Fläche gefittet (Ebene, Zylinder, Kugel; zwei Flächen mit scharfer Kante oder Verrundungsübergang; sonst Quadrik), das Loch mit gleicher Dreiecksdichte trianguliert und auf diese Fläche gelegt.</p>
-    <div class="row"><b>${peCount}</b>&nbsp;Punkte markiert</div>
-    <div class="row"><button class="btn primary" id="pe-go" ${peCount ? '' : 'disabled'}>✔ Entfernen &amp; füllen</button><button class="btn" id="pe-clear" ${peCount ? '' : 'disabled'}>Auswahl löschen</button></div>
-    <div class="row"><label>Pinselradius</label><input type="number" id="pe-rad-n" value="${pe.radius}" min="0.1" step="0.1" inputmode="decimal"><span class="unit">mm</span></div>
-    <div class="row pe-tol"><input type="range" id="pe-rad-r" min="0.2" max="${Math.max(1, +((state.data?.diag ?? 100) / 8).toFixed(1))}" step="0.1" value="${pe.radius}" aria-label="Pinselradius"></div>`;
+  else if (t === 'subdiv') body = `<p class="note">${tt('Splits every triangle into four (Loop). New points are smoothed but moved at most by the tolerance from the original surface.')}</p>
+    ${tolRow('pe-tol', tt('Max. deviation'), pe.tol)}
+    <div class="row"><label>${tt('Levels')}</label><select id="pe-lv">${[1, 2].map((x) => `<option ${x === pe.levels ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="row"><label title="${tt('Limits the triangle size (0 = none)')}">${tt('Max. edge length')}</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
+    <div class="row"><span class="note">${tt('Result')}: ≈ ${(tris * 4 ** pe.levels).toLocaleString('en-US')} ${tt('triangles')}${tris * 4 ** pe.levels > 3e6 ? tt(' – over 3 M, will be limited') : ''}</span></div><div class="row">${run}</div>`;
+  else if (t === 'smooth') body = `<p class="note">${tt('Taubin smoothing (does not shrink). Noise is reduced; every point moves at most by the tolerance (0 = unlimited). Boundaries stay fixed.')}</p>
+    <div class="row"><label>${tt('Strength λ')}</label><input type="number" id="pe-lam" value="${pe.lambda}" min="0.05" max="0.9" step="0.05"></div>
+    <div class="row"><label>${tt('Iterations')}</label><input type="number" id="pe-it" value="${pe.iters}" min="1" max="100" step="1"></div>
+    ${tolRow('pe-stol', tt('Max. displacement'), pe.smoothTol)}<div class="row">${run}</div>`;
+  else body = `<p class="note">${tt('Mark a defect (scatter, weld spatter, dent) with the brush (Shift = erase), then <b>Remove &amp; fill</b>. The clean surface is fitted from the surrounding ring (plane, cylinder, sphere; two faces with a sharp edge or fillet; otherwise a quadric), the hole is triangulated with the same density and placed on that surface.')}</p>
+    <div class="row"><b>${peCount}</b>&nbsp;${tt('points marked')}</div>
+    <div class="row"><button class="btn primary" id="pe-go" ${peCount ? '' : 'disabled'}>✔ ${tt('Remove &amp; fill')}</button><button class="btn" id="pe-clear" ${peCount ? '' : 'disabled'}>${tt('Clear selection')}</button></div>
+    <div class="row"><label>${tt('Brush radius')}</label><input type="number" id="pe-rad-n" value="${pe.radius}" min="0.1" step="0.1" inputmode="decimal"><span class="unit">mm</span></div>
+    <div class="row pe-tol"><input type="range" id="pe-rad-r" min="0.2" max="${Math.max(1, +((state.data?.diag ?? 100) / 8).toFixed(1))}" step="0.1" value="${pe.radius}" aria-label="Brush radius"></div>`;
   d.innerHTML = `<h3>${PE_NAME[t]}</h3>${body}
-    <div class="pe-live" id="pe-live">${pe.live || `Aktuell: <b>${tris.toLocaleString('de-DE')}</b> Dreiecke`}</div>
-    <h4>Vergleich</h4>
-    <div class="row"><button class="btn ${pe.cmp ? 'on' : ''}" id="pe-cmp">◐ Farbvergleich zum Original ${pe.cmp ? 'an' : 'aus'}</button></div>
-    ${pe.cmp && pe.devStats ? `<div class="row"><span class="note">Abweichung zum Original: +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm</span></div>
-      <div class="row"><label>Farbskala ±</label><input type="number" id="pe-scale" value="${pe.scale || ''}" placeholder="auto ${peScale().toFixed(3)}" min="0" step="0.001" inputmode="decimal"><span class="unit">mm</span></div>` : ''}
-    <div class="row"><button class="btn" id="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶ Rückgängig</button><button class="btn" id="pe-reset" ${pe.undo.length ? '' : 'disabled'}>⟲ Original</button><button class="btn" id="pe-exit">Schließen</button></div>
-    ${pe.edits.length ? `<p class="note">Verlauf: ${pe.edits.join(' → ')}</p>` : ''}
-    <p class="note">Merkmale bleiben erhalten; ihre Punkte werden auf das bearbeitete Netz übertragen. Ist-Werte bei Bedarf in den Eigenschaften neu fitten.</p>`;
+    <div class="pe-live" id="pe-live">${pe.live || `${tt('Current')}: <b>${tris.toLocaleString('en-US')}</b> ${tt('triangles')}`}</div>
+    <h4>${tt('Comparison')}</h4>
+    <div class="row"><button class="btn ${pe.cmp ? 'on' : ''}" id="pe-cmp">◐ ${pe.cmp ? tt('Color comparison to original: on') : tt('Color comparison to original: off')}</button></div>
+    ${pe.cmp && pe.devStats ? `<div class="row"><span class="note">${tt('Deviation to original')}: +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm</span></div>
+      <div class="row"><label>${tt('Color scale ±')}</label><input type="number" id="pe-scale" value="${pe.scale || ''}" placeholder="auto ${peScale().toFixed(3)}" min="0" step="0.001" inputmode="decimal"><span class="unit">mm</span></div>` : ''}
+    <div class="row"><button class="btn" id="pe-undo" ${pe.undo.length ? '' : 'disabled'}>↶ ${tt('Undo')}</button><button class="btn" id="pe-reset" ${pe.undo.length ? '' : 'disabled'}>⟲ ${tt('Original')}</button><button class="btn" id="pe-exit">${tt('Close')}</button></div>
+    ${pe.edits.length ? `<p class="note">${tt('History')}: ${pe.edits.join(' → ')}</p>` : ''}
+    <p class="note">${tt('Features are kept; their points are transferred to the edited mesh. Refit actual values in the properties if needed.')}</p>`;
   if (t === 'reduce' || t === 'subdiv') bindTol(d, 'pe-tol', (v) => (pe.tol = v));
   if (t === 'smooth') {
     bindTol(d, 'pe-stol', (v) => (pe.smoothTol = v));
@@ -1927,21 +1930,21 @@ async function peRun() {
   const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol, normalDeg: pe.normalDeg, featureDeg: pe.featureDeg, maxEdge: pe.maxEdge || undefined, minAngle: pe.minAngle || undefined } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels, maxEdge: pe.maxEdge || undefined }
     : { op: 'smooth', iterations: pe.iters, lambda: pe.lambda, tol: pe.smoothTol };
   req.mesh = curMesh();
-  pe.running = true; setLive(`Läuft … <b>${before.toLocaleString('de-DE')}</b> Dreiecke`); renderDialog(); status(`${PE_NAME[t]} läuft …`);
+  pe.running = true; setLive(`${tt('Running …')} <b>${before.toLocaleString('en-US')}</b> ${tt('triangles')}`); renderDialog(); status(tt('{0} running …', PE_NAME[t]));
   try {
     progressBegin(PE_NAME[t]);
     const r = await polyEngine.run<any>(req, (p: any) => { progressUpdate(p.info ?? {}); setLive(t === 'smooth' ? `Iteration ${p.done} / ${pe.iters}` :
-      `Läuft … <b>${p.tris.toLocaleString('de-DE')}</b> Dreiecke (${(100 * p.tris / before).toFixed(1)} %)`); }).finally(progressEnd);
+      `${tt('Running …')} <b>${p.tris.toLocaleString('en-US')}</b> ${tt('triangles')} (${(100 * p.tris / before).toFixed(1)} %)`); }).finally(progressEnd);
     pe.running = false;
-    const label = t === 'reduce' ? `Reduktion ${pe.tol} mm` : t === 'subdiv' ? `Unterteilung ×${pe.levels} (${pe.tol} mm)` : `Glättung ${pe.iters}×λ${pe.lambda}${pe.smoothTol ? ` ≤${pe.smoothTol} mm` : ''}`;
+    const label = t === 'reduce' ? `${tt('Reduction')} ${pe.tol} mm` : t === 'subdiv' ? `${tt('Subdivision')} ×${pe.levels} (${pe.tol} mm)` : `${tt('Smoothing')} ${pe.iters}×λ${pe.lambda}${pe.smoothTol ? ` ≤${pe.smoothTol} mm` : ''}`;
     await applyEditedMesh(r.positions, r.indices, label);
     const after = state.data!.triCount;
     setLive(`${before.toLocaleString('de-DE')} → <b>${after.toLocaleString('de-DE')}</b> Dreiecke (${(100 * after / before).toFixed(1)} %) in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     toast(`✔ ${label}: ${before.toLocaleString('de-DE')} → ${after.toLocaleString('de-DE')} Dreiecke`);
   } catch (e: any) {
     pe.running = false;
-    setLive(e.message === 'abgebrochen' ? 'Abgebrochen – Netz unverändert.' : 'Fehler: ' + e.message);
-    status(e.message === 'abgebrochen' ? `${PE_NAME[t]} abgebrochen.` : 'Fehler: ' + e.message);
+    setLive(e.message === 'abgebrochen' ? tt('Aborted – mesh unchanged.') : tt('Error: {0}', e.message));
+    status(e.message === 'abgebrochen' ? tt('{0} aborted.', PE_NAME[t]) : tt('Error: {0}', e.message));
   }
   renderDialog();
 }
@@ -1961,7 +1964,7 @@ async function pePaint(h: Hit) {
       if (!pePaintErase && !peMask[v]) { peMask[v] = 1; peCount++; st.push(v + 1); }
       else if (pePaintErase && peMask[v]) { peMask[v] = 0; peCount--; st.push(-(v + 1)); }
     }
-    renderScene(); renderModeBar(); setLive(`Ausgewählt: <b>${peCount}</b> Punkte – „Entfernen &amp; füllen“`);
+    renderScene(); renderModeBar(); setLive(tt('Selected: <b>{0}</b> points – “Remove &amp; fill”', peCount));
   } finally { pePaintBusy = false; }
 }
 function peClearSel() { peMask = null; peCount = 0; peStroke.length = 0; }
@@ -1971,17 +1974,17 @@ function peUndoStroke() {
   renderScene(); renderModeBar();
 }
 async function peErase() {
-  if (pe.running || !state.data || !peMask || !peCount) { toast('Zuerst die Unebenheit mit dem Pinsel markieren.'); return; }
+  if (pe.running || !state.data || !peMask || !peCount) { toast('Mark the defect with the brush first.'); return; }
   const sel = new Uint32Array(peCount); let k = 0; peMask.forEach((v, i) => { if (v) sel[k++] = i; });
-  pe.running = true; setLive('Entferne Auswahl, fitte Umgebung, fülle Loch …');
+  pe.running = true; setLive(tt('Removing selection, fitting surroundings, filling hole …'));
   try {
     const r = await busy(polyEngine.run<any>({ op: 'erase', mesh: curMesh(), sel }));
     pe.running = false;
-    if (!r.loops) { setLive(r.skipped ? 'Auswahl berührt einen offenen Rand – nicht gefüllt.' : 'Nichts entfernt.'); return; }
+    if (!r.loops) { setLive(r.skipped ? tt('Selection touches an open boundary – not filled.') : tt('Nothing removed.')); return; }
     peClearSel();
     await applyEditedMesh(r.positions, r.indices, `Radierer (${r.surfaces.join(', ')})`);
-    setLive(`Loch geschlossen: ${r.removed} Dreiecke entfernt, ${r.added} Punkte neu · Ersatzfläche: <b>${r.surfaces.join(', ')}</b>${r.skipped ? ` · ${r.skipped} offene Ränder übersprungen` : ''}`);
-  } catch (e: any) { pe.running = false; setLive('Fehler: ' + e.message); }
+    setLive(tt('Hole closed: {0} triangles removed, {1} new points · replacement surface: <b>{2}</b>', r.removed, r.added, r.surfaces.map((x: string) => typeName(x)).join(', ')) + (r.skipped ? tt(' · {0} open boundaries skipped', r.skipped) : ''));
+  } catch (e: any) { pe.running = false; setLive(tt('Error: {0}', e.message)); }
   renderDialog(); renderModeBar();
 }
 
@@ -2003,7 +2006,7 @@ async function applyEditedMesh(positions: Float32Array, indices: Uint32Array, la
   viewer.setModel(positions, indices, r.normals, true);
   if (label) pe.edits.push(label); else pe.edits.pop();
   state.data!.vertexCount = r.vertexCount; state.data!.triCount = r.triCount;
-  $('#stats').textContent = `${r.vertexCount} Punkte · ${r.triCount} Dreiecke`;
+  $('#stats').textContent = `${r.vertexCount.toLocaleString('en-US')} points · ${r.triCount.toLocaleString('en-US')} triangles`;
   state.preview = null; clearBrush();
   pe.dev = null; pe.devStats = null;
   if (pe.cmp) await peCompute();
@@ -2020,17 +2023,17 @@ async function peToggleCompare() {
   pe.cmp = !pe.cmp; if (pe.cmp) state.showLayout = false;
   if (pe.cmp && !pe.dev) await peCompute();
   renderAll();
-  if (pe.cmp && pe.devStats) status(`Farbvergleich zum Original: max. +${pe.devStats.maxPos.toFixed(4)} / ${pe.devStats.maxNeg.toFixed(4)} mm`);
+  if (pe.cmp && pe.devStats) status(tt('Color comparison to original: max. +{0} / {1} mm', pe.devStats.maxPos.toFixed(4), pe.devStats.maxNeg.toFixed(4)));
 }
 async function peUndo() {
-  const u = pe.undo.pop(); if (!u) { toast('Nichts rückgängig zu machen.'); return; }
-  await applyEditedMesh(u.positions, u.indices, null, false); toast('Bearbeitung rückgängig gemacht.');
+  const u = pe.undo.pop(); if (!u) { toast('Nothing to undo.'); return; }
+  await applyEditedMesh(u.positions, u.indices, null, false); toast(tt('Edit undone.'));
 }
 async function peResetOriginal() {
   if (!pe.undo.length) return;
   const o = await busy(engine.call<any>({ op: 'getOriginal' }));
   pe.undo = []; await applyEditedMesh(o.positions, o.indices, null, false); pe.edits = []; pe.origTris = 0; renderAll();
-  toast('Original-Polygonmodell wiederhergestellt.');
+  toast(tt('Original polygon model restored.'));
 }
 /** Farbskala ±: manuell oder automatisch = 99. Perzentil der geänderten Knoten (|d| > 0,1 µm), damit einzelne große Füllungen die Reduktions-Abweichungen nicht überdecken. */
 function peScale() {
@@ -2047,28 +2050,28 @@ function paintPolyCompare(): boolean {
   viewer.paintScalar(all, pe.dev, r);
   let el = document.getElementById('dev-legend');
   if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
-  el.innerHTML = `<b>Abweichung zum Original [mm]</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
+  el.innerHTML = `<b>${tt('Deviation to original [mm]')}</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
   return true;
 }
 
 
 // ------------------------------------------------------------------ Kurvennetz (Modeler-artig)
 const CURVE_COLOR: Record<CurveView['kind'], number> = { Kante: 0xd81b60, Tangente: 0x1e88e5, Übergang: 0x8e24aa, Benutzer: 0x2e7d32, Vorschlag: 0xff6f00 };
-const CURVE_NAME: Record<CurveView['kind'], string> = { Kante: 'Kante', Tangente: 'Tangente', Übergang: 'Übergang', Benutzer: 'Kurve', Vorschlag: 'Naht' };
+const CURVE_NAME: Record<CurveView['kind'], string> = { Kante: 'Edge', Tangente: 'Tangent', Übergang: 'Transition', Benutzer: 'Curve', Vorschlag: 'Seam' };
 /** Erkennungs-/Aufräumoptionen (Dialog „Optionen"). */
 const curveOpts = { sharpDeg: 30, flatKappa: 0.055, binRatio: 1.6, minLen: 0, gap: 0, dangling: 0, mergeDeg: 30, turnDeg: 55, autoCorners: true };
 const CURVE_OPT_DEF: [keyof typeof curveOpts, string, number, number, number, string][] = [
-  ['sharpDeg', 'Kantenwinkel', 5, 80, 1, '°'], ['flatKappa', 'Krümmung „eben" unter', 0.005, 0.3, 0.005, '1/mm'], ['binRatio', 'Radiussprung (Verhältnis)', 1.1, 4, 0.05, '×'],
-  ['minLen', 'Mindestlänge (0 = auto)', 0, 50, 0.5, 'mm'], ['gap', 'Lücken schließen bis (0 = auto)', 0, 20, 0.5, 'mm'], ['dangling', 'Lose Enden kürzen bis (0 = auto)', 0, 50, 0.5, 'mm'],
-  ['mergeDeg', 'Fluchtende Stücke verbinden bis', 0, 60, 1, '°'], ['turnDeg', 'Eckpunkt ab Richtungsknick', 20, 120, 1, '°']];
+  ['sharpDeg', 'Edge angle', 5, 80, 1, '°'], ['flatKappa', 'Curvature “flat” below', 0.005, 0.3, 0.005, '1/mm'], ['binRatio', 'Radius jump (ratio)', 1.1, 4, 0.05, '×'],
+  ['minLen', 'Minimum length (0 = auto)', 0, 50, 0.5, 'mm'], ['gap', 'Close gaps up to (0 = auto)', 0, 20, 0.5, 'mm'], ['dangling', 'Trim loose ends up to (0 = auto)', 0, 50, 0.5, 'mm'],
+  ['mergeDeg', 'Join aligned pieces up to', 0, 60, 1, '°'], ['turnDeg', 'Corner at direction change from', 20, 120, 1, '°']];
 /** Bearbeitung der gewählten Kurve: Undo-Stapel, Unter-Modus, Ziehen. */
 const cv = { undo: [] as string[], edit: null as null | 'insert' | 'delpt' | 'split' | 'join', hover: null as number | null, drag: null as null | { id: number; i: number; moved: boolean }, ctrlSel: null as number | null, raf: 0 };
 Object.assign((window as any).__app, { cv: () => cv, curveOpts, curveUndo, acceptSuggestions });
 function curveSnapshot() { cv.undo.push(JSON.stringify({ curves: state.curves, next: state.nextCurve, sel: state.curveSel })); if (cv.undo.length > 50) cv.undo.shift(); }
 async function curveUndo() {
-  const s = cv.undo.pop(); if (!s) { toast('Nichts rückgängig zu machen.'); return; }
+  const s = cv.undo.pop(); if (!s) { toast('Nothing to undo.'); return; }
   const o = JSON.parse(s); state.curves = o.curves; state.nextCurve = o.next; state.curveSel = o.sel; cv.edit = null; cv.ctrlSel = null;
-  await updateLayout(); renderAll(); status('Kurvenbearbeitung rückgängig gemacht.');
+  await updateLayout(); renderAll(); status(tt('Curve edit undone.'));
 }
 function curveById(id: number | null) { return state.curves.find((c) => c.id === id) ?? null; }
 function sampleCtrl(ctrl: number[][], closed: boolean): number[][] {
@@ -2088,11 +2091,11 @@ async function curveClick(x: number, y: number): Promise<boolean> {
   if (!state.curves.length || pe.tool) return false;
   const h = viewer.pickCurve(x, y); const c = curveById(state.curveSel);
   if (c && cv.edit === 'delpt' && h?.ctrl != null) {
-    if (c.ctrl.length <= (c.closed ? 3 : 2)) { toast('Zu wenige Kontrollpunkte.'); return true; }
+    if (c.ctrl.length <= (c.closed ? 3 : 2)) { toast('Too few control points.'); return true; }
     curveSnapshot(); const ctrl = c.ctrl.filter((_, i) => i !== h.ctrl); await busy(curveApplyCtrl(c, ctrl)); cv.ctrlSel = null; await updateLayout(); renderAll(); return true;
   }
   if (h?.ctrl != null) { cv.ctrlSel = h.ctrl; renderScene(); renderDialog(); return true; }
-  if (!h || h.curveId == null) { if (cv.edit) { toast('Bitte auf eine Kurve tippen.'); return true; } return false; }
+  if (!h || h.curveId == null) { if (cv.edit) { toast('Please tap on a curve.'); return true; } return false; }
   if (c && cv.edit === 'insert' && h.curveId === c.id) {
     // Position im Kontrollpolygon über den nächstgelegenen Kurvenparameter bestimmen
     const S = sampleCtrl(c.ctrl, c.closed); let bk = 0, bd = Infinity;
@@ -2102,7 +2105,7 @@ async function curveClick(x: number, y: number): Promise<boolean> {
   }
   if (c && cv.edit === 'split' && h.curveId === c.id) {
     const r = await busy(engine.call<any>({ op: 'curveSplit', curve: { chain: c.chain, kind: c.kind }, p: h.point as any }));
-    if (!r.curves) { toast('Teilen hier nicht möglich (zu nah am Ende).'); return true; }
+    if (!r.curves) { toast('Cannot split here (too close to the end).'); return true; }
     curveSnapshot(); const i = state.curves.indexOf(c);
     const b = { id: state.nextCurve, name: `${CURVE_NAME[c.kind]} ${state.nextCurve++}`, visible: true, ...r.curves[1] };
     Object.assign(c, r.curves[0], { kind: c.kind, closed: false }); b.kind = c.kind; state.curves.splice(i + 1, 0, b);
@@ -2112,7 +2115,7 @@ async function curveClick(x: number, y: number): Promise<boolean> {
     const o = curveById(h.curveId)!; curveSnapshot();
     const r = await busy(engine.call<any>({ op: 'curveJoin', a: { chain: c.chain, kind: c.kind }, b: { chain: o.chain } }));
     Object.assign(c, r.curve, { kind: c.kind }); state.curves = state.curves.filter((x) => x !== o);
-    cv.edit = null; await updateLayout(); toast(`✔ ${o.name} mit ${c.name} verbunden (${c.length.toFixed(1)} mm)`); renderAll(); return true;
+    cv.edit = null; await updateLayout(); toast(tt('✔ {0} joined with {1} ({2} mm)', o.name, c.name, c.length.toFixed(1))); renderAll(); return true;
   }
   curveSelect(state.curveSel === h.curveId && !cv.edit ? null : h.curveId); return true;
 }
@@ -2140,10 +2143,10 @@ async function curveDragEnd() {
 }
 /** Naht-/Teilungsvorschläge als Benutzerkurven übernehmen. */
 async function acceptSuggestions() {
-  const L = state.layout; if (!L?.suggestions?.length) { toast('Keine Vorschläge vorhanden.'); return; }
+  const L = state.layout; if (!L?.suggestions?.length) { toast('No suggestions available.'); return; }
   curveSnapshot(); const n0 = L.regions.filter((r) => r.sides === 4 && r.loops === 1).length;
   for (const s of L.suggestions) { const { reason, region, ...c } = s; state.curves.push({ ...c, kind: 'Vorschlag', id: state.nextCurve, name: `Naht ${state.nextCurve++}`, visible: true }); }
-  await updateLayout(); toast(`✔ ${L.suggestions.length} Vorschläge übernommen – 4-seitig: ${n0} → ${state.layout!.foursided}`); renderAll();
+  await updateLayout(); toast(tt('✔ {0} suggestions applied – 4-sided: {1} → {2}', L.suggestions.length, n0, state.layout!.foursided)); renderAll();
 }
 let curveDraft: { v: number; p: number[] }[] = [];
 function curvesReset() { cv.undo.length = 0; cv.edit = null; state.curves = []; state.nextCurve = 1; state.curveSel = null; state.layout = null; state.showLayout = false; curveDraft = []; }
@@ -2176,7 +2179,7 @@ async function updateLayout() {
   state.layout = await engine.call<any>({ op: 'curveLayout', chains: state.curves.map((c) => c.chain), opts: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } });
 }
 async function detectCurvesUI() {
-  if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
+  if (!state.data?.triCount) { toast('Please load a polygon model first.'); return; }
   const t0 = performance.now();
   const o: any = { ...curveOpts }; for (const k of ['minLen', 'gap', 'dangling'] as const) if (!o[k]) delete o[k];
   const r = await busy(engine.call<any>({ op: 'curvesDetect', opts: o, layout: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } }), 'Kurvenerkennung');
@@ -2185,7 +2188,7 @@ async function detectCurvesUI() {
   for (const c of r.curves) state.curves.push({ id: state.nextCurve, name: `${CURVE_NAME[c.kind as CurveView['kind']]} ${state.nextCurve++}`, visible: true, ...c });
   await updateLayout();
   const L = state.layout!;
-  toast(`✔ ${r.curves.length} Kurven erkannt (${['Kante', 'Tangente', 'Übergang'].map((k) => `${r.curves.filter((c: any) => c.kind === k).length} ${k}`).join(', ')}) · ${L.regions.length} Patches, ${L.foursided} 4-seitig, ${L.tJunctions} T-Stöße · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  toast(tt('✔ {0} curves detected ({1}) · {2} patches, {3} 4-sided, {4} T-junctions · {5} s', r.curves.length, (['Kante', 'Tangente', 'Übergang'] as const).map((k) => `${r.curves.filter((c: any) => c.kind === k).length} ${CURVE_NAME[k].toLowerCase()}`).join(', '), L.regions.length, L.foursided, L.tJunctions, ((performance.now() - t0) / 1000).toFixed(1)));
   renderAll();
 }
 function curveAddPoint(h: Hit) {
@@ -2199,22 +2202,22 @@ function curveAddPoint(h: Hit) {
   renderScene(); renderDialog(); renderModeBar();
 }
 async function curveFinish() {
-  if (curveDraft.length < 2) { toast('Mindestens zwei Punkte auf das Netz setzen.'); return; }
+  if (curveDraft.length < 2) { toast('Place at least two points on the mesh.'); return; }
   try {
     const r = await busy(engine.call<any>({ op: 'curvePath', verts: curveDraft.map((d) => d.v) }));
-    curveSnapshot(); state.curves.push({ id: state.nextCurve, name: `Kurve ${state.nextCurve++}`, visible: true, ...r.curve });
-    curveDraft = []; await updateLayout(); toast(`✔ Kurve erzeugt (${r.curve.length.toFixed(1)} mm) – Patches: ${state.layout!.regions.length}, 4-seitig: ${state.layout!.foursided}`);
-  } catch (e: any) { toast('Fehler: ' + e.message); }
+    curveSnapshot(); state.curves.push({ id: state.nextCurve, name: `${tt('Curve')} ${state.nextCurve++}`, visible: true, ...r.curve });
+    curveDraft = []; await updateLayout(); toast(tt('✔ Curve created ({0} mm) – patches: {1}, 4-sided: {2}', r.curve.length.toFixed(1), state.layout!.regions.length, state.layout!.foursided));
+  } catch (e: any) { toast(tt('Error: {0}', e.message)); }
   renderAll();
 }
 async function curveDelete(id = state.curveSel) {
-  if (id == null) { toast('Zuerst eine Kurve im Baum wählen.'); return; }
+  if (id == null) { toast('Select a curve in the tree first.'); return; }
   curveSnapshot(); state.curves = state.curves.filter((c) => c.id !== id); state.curveSel = null; cv.edit = null;
   await updateLayout(); renderAll();
 }
 $('#btn-curve-detect').onclick = () => detectCurvesUI();
 $('#btn-curve-draw').onclick = () => {
-  if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
+  if (!state.data?.triCount) { toast('Please load a polygon model first.'); return; }
   if (pe.tool === 'curve') { peExit(); return; }
   state.mode = null; state.preview = null; clearBrush(); pe.tool = 'curve'; curveDraft = []; renderAll();
 };
@@ -2223,10 +2226,10 @@ $('#btn-curve-accept').onclick = () => acceptSuggestions();
 $('#btn-curve-undo').onclick = () => curveUndo();
 $('#btn-curve-opts').onclick = () => { if (pe.tool === 'curveopts') { peExit(); return; } state.mode = null; pe.tool = 'curveopts'; renderAll(); if (isPhone()) togglePanel('dialog', true); };
 function renderCurveOpts(d: HTMLElement) {
-  d.innerHTML = `<h3>Kurvennetz – Optionen</h3><p class="note">Erkennung (Kanten, Tangenten, Radius-Übergänge), Aufräumen kleiner/loser Kurvenstücke und Eckpunkte des Patch-Layouts.</p>
-    ${CURVE_OPT_DEF.map(([k, l, a, b, st, u]) => `<div class="row"><label style="flex:1">${l}</label><input type="number" data-co="${k}" min="${a}" max="${b}" step="${st}" value="${curveOpts[k]}" style="width:5.5em"> <span class="sub">${u}</span></div>`).join('')}
-    <div class="row"><label><input type="checkbox" id="co-auto" ${curveOpts.autoCorners ? 'checked' : ''}> Ecken auf geschlossenen Kurven automatisch setzen</label></div>
-    <div class="row"><button class="btn primary" id="co-run">⟳ Neu erkennen</button><button class="btn" id="co-lay">Nur Layout neu</button><button class="btn" id="co-exit">Schließen</button></div>`;
+  d.innerHTML = `<h3>${tt('Curve network – options')}</h3><p class="note">${tt('Detection (edges, tangents, radius transitions), clean-up of small/loose curve pieces and corners of the patch layout.')}</p>
+    ${CURVE_OPT_DEF.map(([k, l, a, b, st, u]) => `<div class="row"><label style="flex:1">${tt(l)}</label><input type="number" data-co="${k}" min="${a}" max="${b}" step="${st}" value="${curveOpts[k]}" style="width:5.5em"> <span class="sub">${u}</span></div>`).join('')}
+    <div class="row"><label><input type="checkbox" id="co-auto" ${curveOpts.autoCorners ? 'checked' : ''}> ${tt('Set corners on closed curves automatically')}</label></div>
+    <div class="row"><button class="btn primary" id="co-run">⟳ ${tt('Detect again')}</button><button class="btn" id="co-lay">${tt('Layout only')}</button><button class="btn" id="co-exit">${tt('Close')}</button></div>`;
   d.querySelectorAll<HTMLInputElement>('[data-co]').forEach((i) => i.addEventListener('change', () => { const v = parseFloat(i.value); if (isFinite(v)) (curveOpts as any)[i.dataset.co!] = v; }));
   d.querySelector<HTMLInputElement>('#co-auto')!.addEventListener('change', (e) => { curveOpts.autoCorners = (e.target as HTMLInputElement).checked; });
   d.querySelector('#co-run')!.addEventListener('click', () => detectCurvesUI());
@@ -2235,23 +2238,23 @@ function renderCurveOpts(d: HTMLElement) {
 }
 function renderCurveSel(d: HTMLElement, c: CurveView) {
   const E = (m: string, t: string, l: string) => `<button class="btn ${cv.edit === m ? 'on primary' : ''}" data-ce="${m}" title="${t}">${l}</button>`;
-  const hint: Record<string, string> = { insert: 'Auf die Kurve tippen, um dort einen Kontrollpunkt einzufügen.', delpt: 'Auf einen Kontrollpunkt tippen, um ihn zu entfernen.', split: 'Auf die Kurve tippen, wo sie geteilt werden soll.', join: 'Auf die zweite Kurve tippen; die nächsten Enden werden über das Netz verbunden.' };
-  d.innerHTML = `<h3>〰 ${c.name}</h3>${kv([['Typ', c.kind], ['Länge', c.length.toFixed(2) + ' mm'], ['Kontrollpunkte', String(c.ctrl.length)], ['Grad', '3 (B-Spline)'], ['Geschlossen', c.closed ? 'ja' : 'nein']] as any)}
-    <p class="note">${cv.edit ? hint[cv.edit] : 'Kontrollpunkte (weiß) ziehen – sie rasten auf dem Netz ein.'}</p>
-    <div class="row">${E('insert', 'Kontrollpunkt einfügen', '+ Punkt')}${E('delpt', 'Kontrollpunkt löschen', '− Punkt')}${E('split', 'Kurve teilen', '✂ Teilen')}${E('join', 'Mit anderer Kurve verbinden', '⛓ Verbinden')}</div>
-    <div class="row"><button class="btn" id="cv-del">✕ Löschen</button><button class="btn" id="cv-und" ${cv.undo.length ? '' : 'disabled'}>↶ Rückgängig</button><button class="btn" id="cv-close">Fertig</button></div>`;
+  const hint: Record<string, string> = { insert: 'Tap on the curve to insert a control point there.', delpt: 'Tap on a control point to remove it.', split: 'Tap on the curve where it should be split.', join: 'Tap on the second curve; the nearest ends are joined across the mesh.' };
+  d.innerHTML = `<h3>〰 ${c.name}</h3>${kv([[tt('Type'), CURVE_NAME[c.kind]], [tt('Length'), c.length.toFixed(2) + ' mm'], [tt('Control points'), String(c.ctrl.length)], [tt('Degree'), '3 (B-spline)'], [tt('Closed'), c.closed ? tt('yes') : tt('no')]] as any)}
+    <p class="note">${cv.edit ? tt(hint[cv.edit]) : tt('Drag control points (white) – they snap onto the mesh.')}</p>
+    <div class="row">${E('insert', tt('Insert control point'), '+ ' + tt('Point'))}${E('delpt', tt('Delete control point'), '− ' + tt('Point'))}${E('split', tt('Split curve'), '✂ ' + tt('Split'))}${E('join', tt('Join with another curve'), '⛓ ' + tt('Join'))}</div>
+    <div class="row"><button class="btn" id="cv-del">✕ ${tt('Delete')}</button><button class="btn" id="cv-und" ${cv.undo.length ? '' : 'disabled'}>↶ ${tt('Undo')}</button><button class="btn" id="cv-close">${tt('Done')}</button></div>`;
   d.querySelectorAll<HTMLButtonElement>('[data-ce]').forEach((b) => b.addEventListener('click', () => { cv.edit = cv.edit === b.dataset.ce ? null : (b.dataset.ce as any); renderDialog(); renderModeBar(); }));
   d.querySelector('#cv-del')!.addEventListener('click', () => curveDelete(c.id));
   d.querySelector('#cv-und')!.addEventListener('click', () => curveUndo());
   d.querySelector('#cv-close')!.addEventListener('click', () => curveSelect(null));
 }
-$('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Zuerst Kurven erkennen oder zeichnen.'); return; } state.showLayout = !state.showLayout; if (state.showLayout) pe.cmp = false; if (!state.layout) await updateLayout(); renderAll(); };
+$('#btn-curve-layout').onclick = async () => { if (!state.curves.length) { toast('Detect or draw curves first.'); return; } state.showLayout = !state.showLayout; if (state.showLayout) pe.cmp = false; if (!state.layout) await updateLayout(); renderAll(); };
 function renderCurveDialog(d: HTMLElement) {
   const L = state.layout;
-  d.innerHTML = `<h3>Kurve zeichnen</h3><p class="note">Punkte auf das Netz tippen/klicken; sie werden über den kürzesten Kantenweg verbunden, als kubischer B-Spline gefittet und auf das Netz gelegt. Punkte nahe einer bestehenden Kurve rasten dort ein (T-Stoß).</p>
-    <div class="row"><b>${curveDraft.length}</b>&nbsp;Punkte gesetzt</div>
-    <div class="row"><button class="btn primary" id="cv-ok" ${curveDraft.length > 1 ? '' : 'disabled'}>✔ Kurve erzeugen</button><button class="btn" id="cv-undo" ${curveDraft.length ? '' : 'disabled'}>↶ Punkt</button><button class="btn" id="cv-exit">Schließen</button></div>
-    ${L ? `<h4>Patch-Aufteilung</h4><div class="row"><span class="note">${state.curves.length} Kurven · ${L.nodes.length} Knoten · ${L.tJunctions} T-Stöße · ${L.regions.length} Patches · <b>${L.foursided}</b> 4-seitig</span></div>` : ''}`;
+  d.innerHTML = `<h3>${tt('Draw curve')}</h3><p class="note">${tt('Tap/click points on the mesh; they are connected along the shortest edge path, fitted as a cubic B-spline and placed on the mesh. Points near an existing curve snap to it (T-junction).')}</p>
+    <div class="row"><b>${curveDraft.length}</b>&nbsp;${tt('points placed')}</div>
+    <div class="row"><button class="btn primary" id="cv-ok" ${curveDraft.length > 1 ? '' : 'disabled'}>✔ ${tt('Create curve')}</button><button class="btn" id="cv-undo" ${curveDraft.length ? '' : 'disabled'}>↶ ${tt('Point')}</button><button class="btn" id="cv-exit">${tt('Close')}</button></div>
+    ${L ? `<h4>${tt('Patch layout')}</h4><div class="row"><span class="note">${tt('{0} curves · {1} nodes · {2} T-junctions · {3} patches · <b>{4}</b> 4-sided', state.curves.length, L.nodes.length, L.tJunctions, L.regions.length, L.foursided)}</span></div>` : ''}`;
   d.querySelector('#cv-ok')?.addEventListener('click', () => curveFinish());
   d.querySelector('#cv-undo')?.addEventListener('click', () => { curveDraft.pop(); renderAll(); });
   d.querySelector('#cv-exit')?.addEventListener('click', () => peExit());

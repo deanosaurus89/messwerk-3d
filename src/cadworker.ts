@@ -21,12 +21,12 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
   try {
     let r: any; const tr: Transferable[] = [];
     if (req.op === 'load') {
-      const t0 = performance.now(); const first = !oc; if (first) prog('OpenCascade wird geladen …', { step: 1, steps: 3 });
+      const t0 = performance.now(); const first = !oc; if (first) prog('Loading OpenCascade …', { step: 1, steps: 3 });
       const o = await getOC(); const tInit = performance.now() - t0;
-      prog('Datei wird gelesen …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
+      prog('Reading file …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
       orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
-      prog(`${orig.length} Flächen werden tesselliert …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
-      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellierung Fläche ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
+      prog(`Tessellating ${orig.length} faces …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
+      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
       r = { faces: fl, diag, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
     } else if (req.op === 'apply') {
       // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat
@@ -36,7 +36,7 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
       for (const i of touched) { seen++;
         const chain = req.ops.map((op, k) => ({ op, k })).filter((x) => x.op.faces.includes(i)); const key = JSON.stringify(chain.map((x) => x.op));
         if (cache.get(i)?.key === key) continue;
-        prog(`Fläche ${i + 1} wird beschnitten (${++n}) …`, { frac: (seen - 1) / todo });
+        prog(`Trimming face ${i + 1} (${++n}) …`, { frac: (seen - 1) / todo });
         let sh = orig[i];
         for (const { op, k } of chain) { try { sh = C.applyOne(o, sh, op, orig); } catch (err: any) { errors[k] = String(err?.message ?? err); } }
         if (!chain.length) { cache.delete(i); changed.push({ id: i, reset: true }); continue; }

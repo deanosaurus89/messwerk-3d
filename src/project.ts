@@ -32,7 +32,7 @@ export function writeProject(json: any, mesh: ProjectBinary, idx: IndexBlob): Ui
 
 export function readProject(data: Uint8Array): { json: any; mesh: ProjectBinary; idx: IndexBlob } {
   const z = unzipSync(data);
-  if (!z['project.json']) throw new Error('Keine MessWerk-3D-Projektdatei (project.json fehlt)');
+  if (!z['project.json']) throw new Error('Not a MessWerk 3D project file (project.json missing)');
   const json = JSON.parse(strFromU8(z['project.json']));
   if (json.format !== FORMAT) throw new Error('Unbekanntes Dateiformat');
   if (json.version > VERSION) throw new Error(`Projektversion ${json.version} ist neuer als diese App`);

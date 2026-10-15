@@ -28,7 +28,7 @@ export function readCAD(oc: OC, bytes: Uint8Array, name: string): any {
   if (!isStep && ext !== 'igs' && ext !== 'iges') throw new Error('Nur STEP (.stp/.step) oder IGES (.igs/.iges)');
   const r = isStep ? new oc.STEPControl_Reader_1() : new oc.IGESControl_Reader_1();
   const st = r.ReadFile(path); oc.FS.unlink(path);
-  if (st !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) throw new Error('Datei konnte nicht gelesen werden');
+  if (st !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) throw new Error('File could not be read');
   r.TransferRoots(pr(oc)); const sh = r.OneShape(); r.delete?.();
   return sh;
 }

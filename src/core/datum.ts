@@ -90,18 +90,18 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
   const f = feats.get(c.featureIds[0]); if (!f?.measured) return { value: null };
   const kind = c.kind as DatumKindCtl;
   const ds = (c.datumIds ?? []).map((id) => feats.get(id));
-  if (ds.some((d) => !d)) return { value: null, flag: 'Bezugsmerkmal gelöscht' };
+  if (ds.some((d) => !d)) return { value: null, flag: 'datum feature deleted' };
   if (ds.some((d) => !d!.datum)) return { value: null, flag: 'Bezug entfernt' };
   const [mn] = DATUM_COUNT[kind];
   if (ds.length < mn) return { value: null, flag: 'Bezug fehlt' };
-  if (ds.some((d) => d!.id === f.id)) return { value: null, flag: 'Merkmal ist eigener Bezug' };
+  if (ds.some((d) => d!.id === f.id)) return { value: null, flag: 'feature is its own datum' };
   const D = ds as Feature[];
   const m = f.measured, D0 = D[0], k0 = datumKind(D0.type);
   const pts = () => ctx.points?.(f.id) ?? null;
   switch (kind) {
     case 'Parallelität': case 'Rechtwinkligkeit': case 'Neigung': {
-      if (k0 === 'point') return { value: null, flag: 'Bezug muss Ebene oder Achse sein' };
-      const cls = elemClass(f.type); if (!cls) return { value: null, flag: 'nicht anwendbar' };
+      if (k0 === 'point') return { value: null, flag: 'Datum must be a plane or axis' };
+      const cls = elemClass(f.type); if (!cls) return { value: null, flag: 'not applicable' };
       const e = dirOf(f), g = dirOf(D0);
       // gewünschter Winkel β zwischen Element-Richtung e (Normale bzw. Achse) und Bezugsrichtung g
       const eIsNormal = cls !== 'axis', gIsNormal = k0 === 'plane';
@@ -119,7 +119,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         if (P && P.length) return { value: range(P, nz), detail: `Zone ⟂ ${nz.map((v) => v.toFixed(3)).join(' ')}` };
         return { value: elemSize(f) * Math.sin(err) + m.form, detail: 'aus Ausgleichsebene (ohne Punkte)' };
       }
-      return { value: elemSize(f) * Math.sin(err), detail: `Winkelfehler ${(err * 180 / Math.PI).toFixed(4)}° über ${elemSize(f).toFixed(2)} mm` };
+      return { value: elemSize(f) * Math.sin(err), detail: `angle error ${(err * 180 / Math.PI).toFixed(4)}° over ${elemSize(f).toFixed(2)} mm` };
     }
     case 'Position': {
       const F = buildDRF(D);
@@ -140,10 +140,10 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         for (const s of [-0.5, 0.5]) { const e = add(loc, scale(a, s * L)); mx = Math.max(mx, norm(orth(sub(e, b), g))); }
         return { value: 2 * mx, detail: `zylindrische Zone um Soll-Achse ∥ ${'XYZ'[ax]} (DRF ${F.text})` };
       }
-      return { value: 2 * norm(d), detail: `kugelförmige Zone SØ (DRF ${F.text})` };
+      return { value: 2 * norm(d), detail: `spherical zone SØ (DRF ${F.text})` };
     }
     case 'Koaxialität': case 'Konzentrizität': case 'Rundlauf': case 'Gesamtrundlauf': {
-      if (k0 !== 'axis' && !(kind === 'Konzentrizität' && k0 === 'point')) return { value: null, flag: 'Bezug muss eine Achse sein' };
+      if (k0 !== 'axis' && !(kind === 'Konzentrizität' && k0 === 'point')) return { value: null, flag: 'datum must be an axis' };
       const g = dirOf(D0), pD = D0.measured!.center;
       const distLine = (q: Vec3) => norm(orth(sub(q, pD), g));
       if (kind === 'Konzentrizität') return { value: 2 * (k0 === 'point' ? norm(sub(m.center, pD)) : distLine(m.center)) };
@@ -151,9 +151,9 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         const a = dirOf(f), L = m.length || 0;
         return { value: 2 * Math.max(distLine(add(m.center, scale(a, L / 2))), distLine(add(m.center, scale(a, -L / 2)))) };
       }
-      const P = pts(); if (!P || P.length < 10) return { value: null, flag: 'keine Punkte' };
+      const P = pts(); if (!P || P.length < 10) return { value: null, flag: 'no points' };
       const rho = P.map((q) => distLine(q)), t = P.map((q) => dot(sub(q, pD), g));
-      if (kind === 'Gesamtrundlauf') return { value: Math.max(...rho) - Math.min(...rho), detail: 'radial über die gesamte Fläche' };
+      if (kind === 'Gesamtrundlauf') return { value: Math.max(...rho) - Math.min(...rho), detail: 'radial over the whole surface' };
       const tmin = Math.min(...t), tmax = Math.max(...t), bw = Math.max(0.5, (tmax - tmin) / 10);
       const bins = new Map<number, [number, number]>();
       t.forEach((tt, i) => { const k = Math.floor((tt - tmin) / bw); const b = bins.get(k) ?? [Infinity, -Infinity]; b[0] = Math.min(b[0], rho[i]); b[1] = Math.max(b[1], rho[i]); bins.set(k, b); });
@@ -166,7 +166,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         const w = f.type === 'Langloch' ? unit(cross(dirOf(f), m.direction!)) : basis(dirOf(D0))[0];
         return { value: 2 * Math.abs(dot(orth(sub(m.center, D0.measured!.center), dirOf(D0)), w)) };
       }
-      return { value: null, flag: 'Bezug muss Ebene oder Achse sein' };
+      return { value: null, flag: 'Datum must be a plane or axis' };
     }
     case 'Profil (Bezug)': {
       const F = buildDRF(D);

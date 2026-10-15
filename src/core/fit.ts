@@ -59,7 +59,7 @@ function scatter(p: Vec3[], c: Vec3 = [0, 0, 0]): number[][] {
 
 // ---------------------------------------------------------------- Ebene
 export function fitPlane(p: Vec3[], normalHint?: Vec3): FitResult {
-  if (p.length < 3) throw new Error('Ebene: mindestens 3 Punkte');
+  if (p.length < 3) throw new Error('Plane: at least 3 points');
   const c = centroid(p);
   let n = eigSym3(scatter(p, c)).vectors[0];
   if (normalHint && dot(n, normalHint) < 0) n = scale(n, -1);
@@ -294,7 +294,7 @@ export function fitSlot(p: Vec3[], axis: Vec3): FitResult {
  *  Start: Punkte um r entlang der Normalen verschieben -> liegen auf dem Leitkreis (Ebene ⟂ Achse, Radius R);
  *  r (vorzeichenbehaftet, konvex/konkav) per Gitter- und Goldener-Schnitt-Suche, danach Levenberg-Marquardt (7 Parameter). */
 export function fitTorus(p: Vec3[], nrm: Vec3[]): FitResult {
-  if (p.length < 12 || nrm.length !== p.length) throw new Error('Torus: mindestens 12 Punkte mit Normalen');
+  if (p.length < 12 || nrm.length !== p.length) throw new Error('Torus: at least 12 points with normals');
   const step = Math.max(1, Math.ceil(p.length / 4000));
   const P = p.filter((_, i) => i % step === 0), N = nrm.filter((_, i) => i % step === 0);
   const ext = extent(P);
@@ -379,7 +379,7 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit: boolean
       case 'Torus': return fitTorus(pp, nn);
       case 'Punkt': return fitPoint(pp, nn);
       case 'Linie': return fitLine(pp);
-      default: throw new Error('Typ nicht fitbar: ' + type);
+      default: throw new Error('Type cannot be fitted: ' + type);
     }
   };
   const k = robustFit === true ? 3 : robustFit === false ? 0 : robustFit;

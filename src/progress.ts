@@ -12,7 +12,7 @@ export function progressUpdate(info: ProgressInfo) {
   if (!el || !depth) return;
   const f = info.frac; el.className = f === undefined ? 'indet' : '';
   el.querySelector<HTMLElement>('.pg-l')!.textContent = info.label ?? title;
-  el.querySelector<HTMLElement>('.pg-s')!.textContent = info.steps && info.steps > 1 ? `Schritt ${info.step ?? 1}/${info.steps}` : '';
+  el.querySelector<HTMLElement>('.pg-s')!.textContent = info.steps && info.steps > 1 ? `Step ${info.step ?? 1}/${info.steps}` : '';
   el.querySelector<HTMLElement>('.pg-p')!.textContent = f === undefined ? '' : `${Math.round(100 * Math.min(1, Math.max(0, f)))} %`;
   (el.querySelector('.pg-bar i') as HTMLElement).style.width = f === undefined ? '' : `${(100 * Math.min(1, Math.max(0, f))).toFixed(1)}%`;
   el.setAttribute('aria-valuenow', f === undefined ? '' : String(Math.round(100 * f)));
