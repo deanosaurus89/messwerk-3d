@@ -1,6 +1,7 @@
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
 import { initActionBar, setActions } from './actionbar';
+import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
 import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType } from './core/fit';
@@ -103,9 +104,9 @@ function toast(t: string) {
   clearTimeout(toastTimer); toastTimer = window.setTimeout(() => e.classList.add('hidden'), 2600);
   status(t);
 }
-async function busy<T>(p: Promise<T>): Promise<T> {
-  $('#busy').classList.remove('hidden');
-  try { return await p; } finally { $('#busy').classList.add('hidden'); }
+async function busy<T>(p: Promise<T>, label = 'Berechne …'): Promise<T> {
+  progressBegin(label);
+  try { return await p; } finally { progressEnd(); }
 }
 
 // ------------------------------------------------------------------ Ribbon
@@ -223,7 +224,7 @@ function unitDialog(b: { min: number[]; max: number[] }): Promise<number> {
 async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale = 1): Promise<void> {
   try {
     const t0 = performance.now(); const keep = askUnit ? buf.slice(0) : null;
-    const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf, scale } as any, [buf]));
+    const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf, scale } as any, [buf]), `Import ${name}`);
     if (keep) { const f = await unitDialog(r.bounds); if (f !== 1) return loadBuffer(name, keep, false, f); }
     viewer.setModel(r.positions, r.indices, r.normals); peReset(); curvesReset();
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
@@ -387,7 +388,7 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 }
 /** Immer sichtbare Modusanzeige über der 3D-Ansicht (aktives Werkzeug + Aktionen). */
 const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
-initActionBar(viewer.el);
+initActionBar(viewer.el); initProgress(viewer.el);
 modeBar.addEventListener('pointerdown', (e) => e.stopPropagation());
 function renderModeBar() {
   renderModeBarInner();
@@ -1671,8 +1672,9 @@ async function peRun() {
   req.mesh = curMesh();
   pe.running = true; setLive(`Läuft … <b>${before.toLocaleString('de-DE')}</b> Dreiecke`); renderDialog(); status(`${PE_NAME[t]} läuft …`);
   try {
-    const r = await polyEngine.run<any>(req, (p) => setLive(t === 'smooth' ? `Iteration ${p.done} / ${pe.iters}` :
-      `Läuft … <b>${p.tris.toLocaleString('de-DE')}</b> Dreiecke (${(100 * p.tris / before).toFixed(1)} %)`));
+    progressBegin(PE_NAME[t]);
+    const r = await polyEngine.run<any>(req, (p: any) => { progressUpdate(p.info ?? {}); setLive(t === 'smooth' ? `Iteration ${p.done} / ${pe.iters}` :
+      `Läuft … <b>${p.tris.toLocaleString('de-DE')}</b> Dreiecke (${(100 * p.tris / before).toFixed(1)} %)`); }).finally(progressEnd);
     pe.running = false;
     const label = t === 'reduce' ? `Reduktion ${pe.tol} mm` : t === 'subdiv' ? `Unterteilung ×${pe.levels} (${pe.tol} mm)` : `Glättung ${pe.iters}×λ${pe.lambda}${pe.smoothTol ? ` ≤${pe.smoothTol} mm` : ''}`;
     await applyEditedMesh(r.positions, r.indices, label);
@@ -1920,7 +1922,7 @@ async function detectCurvesUI() {
   if (!state.data?.triCount) { toast('Bitte zuerst ein Polygonmodell laden.'); return; }
   const t0 = performance.now();
   const o: any = { ...curveOpts }; for (const k of ['minLen', 'gap', 'dangling'] as const) if (!o[k]) delete o[k];
-  const r = await busy(engine.call<any>({ op: 'curvesDetect', opts: o, layout: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } }));
+  const r = await busy(engine.call<any>({ op: 'curvesDetect', opts: o, layout: { turnDeg: curveOpts.turnDeg, autoCorners: curveOpts.autoCorners } }), 'Kurvenerkennung');
   if (state.curves.length) curveSnapshot();
   state.curves = state.curves.filter((c) => c.kind === 'Benutzer' || c.kind === 'Vorschlag'); state.curveSel = null;
   for (const c of r.curves) state.curves.push({ id: state.nextCurve, name: `${CURVE_NAME[c.kind as CurveView['kind']]} ${state.nextCurve++}`, visible: true, ...c });

@@ -7,7 +7,8 @@ import { axisFromNormals, fitCylinder, fitPlane, fitSphere } from './fit';
 import { basis, solve, type Vec3 } from './linalg';
 
 export interface RawMesh { positions: Float32Array; indices: Uint32Array; }
-export type Progress = (triCount: number, done: number) => void;
+/** Fortschritt: Dreiecke, erledigte Einheiten, optional Anteil 0..1 / Schritt i von n / Bezeichnung */
+export type Progress = (triCount: number, done: number, info?: { frac?: number; step?: number; steps?: number; label?: string }) => void;
 
 // ---------------------------------------------------------------- Hilfen
 /** Abstand² Punkt–Dreieck (Ericson, Real-Time Collision Detection 5.1.5). */
@@ -305,7 +306,7 @@ export function subdivide(m: RawMesh, o: SubdivideOptions): RawMesh & { before: 
       NF.set([a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca], 12 * t);
     }
     P = NP; F = NF;
-    o.onProgress?.(F.length / 3, lv + 1);
+    o.onProgress?.(F.length / 3, lv + 1, { frac: (lv + 1) / levels, step: lv + 1, steps: levels, label: `Unterteilung Stufe ${lv + 1}` });
     // Nach Stufe 1 sind die „linearen“ Lagen nicht mehr auf dem Original: weitere Stufen nur linear + begrenzt (konservativ)
     if (lv === 0) o = { ...o, tol: o.tol / 4 };
   }
@@ -338,7 +339,7 @@ export function smooth(m: RawMesh, o: SmoothOptions): RawMesh {
       const dx = P[3 * v] - P0[3 * v], dy = P[3 * v + 1] - P0[3 * v + 1], dz = P[3 * v + 2] - P0[3 * v + 2], d = Math.hypot(dx, dy, dz);
       if (d > o.tol) { const s = o.tol / d; P[3 * v] = P0[3 * v] + dx * s; P[3 * v + 1] = P0[3 * v + 1] + dy * s; P[3 * v + 2] = P0[3 * v + 2] + dz * s; }
     }
-    o.onProgress?.(F.length / 3, it + 1);
+    o.onProgress?.(F.length / 3, it + 1, { frac: (it + 1) / o.iterations, label: `Glättung Iteration ${it + 1}/${o.iterations}` });
   }
   return { positions: Float32Array.from(P), indices: Uint32Array.from(F) };
 }

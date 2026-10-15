@@ -17,26 +17,26 @@ async function getOC() {
 }
 const post = (m: any, tr: Transferable[] = []) => (self as any).postMessage(m, tr);
 self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
-  const { id, req } = e.data; const prog = (text: string) => post({ id, progress: { text } });
+  const { id, req } = e.data; const prog = (text: string, info: { frac?: number; step?: number; steps?: number } = {}) => post({ id, progress: { text, ...info } });
   try {
     let r: any; const tr: Transferable[] = [];
     if (req.op === 'load') {
-      const t0 = performance.now(); const first = !oc; if (first) prog('OpenCascade wird geladen …');
+      const t0 = performance.now(); const first = !oc; if (first) prog('OpenCascade wird geladen …', { step: 1, steps: 3 });
       const o = await getOC(); const tInit = performance.now() - t0;
-      prog('Datei wird gelesen …'); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
+      prog('Datei wird gelesen …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
       orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
-      prog(`${orig.length} Flächen werden tesselliert …`);
-      const defl = diag / 1500; const fl = orig.map((f, i) => { const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
+      prog(`${orig.length} Flächen werden tesselliert …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
+      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellierung Fläche ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
       r = { faces: fl, diag, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
     } else if (req.op === 'apply') {
       // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat
       const o = oc; const changed: any[] = []; const errors: (string | null)[] = req.ops.map(() => null);
       const touched = new Set<number>(); req.ops.forEach((op) => op.faces.forEach((i) => touched.add(i))); for (const i of cache.keys()) touched.add(i);
-      let n = 0;
-      for (const i of touched) {
+      let n = 0; const todo = touched.size; let seen = 0;
+      for (const i of touched) { seen++;
         const chain = req.ops.map((op, k) => ({ op, k })).filter((x) => x.op.faces.includes(i)); const key = JSON.stringify(chain.map((x) => x.op));
         if (cache.get(i)?.key === key) continue;
-        prog(`Fläche ${i + 1} wird beschnitten (${++n}) …`);
+        prog(`Fläche ${i + 1} wird beschnitten (${++n}) …`, { frac: (seen - 1) / todo });
         let sh = orig[i];
         for (const { op, k } of chain) { try { sh = C.applyOne(o, sh, op, orig); } catch (err: any) { errors[k] = String(err?.message ?? err); } }
         if (!chain.length) { cache.delete(i); changed.push({ id: i, reset: true }); continue; }
@@ -47,7 +47,8 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
       r = { changed, errors };
     } else {
       const o = oc; const list = req.faces.map((i) => cache.get(i)?.shape ?? orig[i]);
-      const bytes = C.writeCAD(o, list, req.fmt);
+      prog(`${req.fmt === 'step' ? 'STEP' : 'IGES'} schreiben …`, { step: 1, steps: 2 }); const bytes = C.writeCAD(o, list, req.fmt);
+      prog('Prüfung: wieder einlesen …', { step: 2, steps: 2 });
       // Prüfung: wieder einlesen, Fläche und Gültigkeit vergleichen
       const back = C.readCAD(o, bytes, req.fmt === 'step' ? 'x.stp' : 'x.igs');
       const want = list.reduce((s, x) => s + C.area(o, x), 0), got = C.area(o, back);

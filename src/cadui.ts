@@ -1,5 +1,6 @@
 // Register „Nützliche Funktionen": CAD-Flächen (STEP/IGES) anzeigen, wählen, nicht-destruktiv beschneiden und exportieren.
 import { setActions } from './actionbar';
+import { progressBegin, progressEnd, progressUpdate } from './progress';
 import * as THREE from 'three';
 import type { Viewer } from './viewer';
 import type { CadReq } from './cadworker';
@@ -10,11 +11,13 @@ class CadEngine {
   private pending = new Map<number, { res: (v: any) => void; rej: (e: Error) => void; prog?: (t: string) => void }>();
   private make() {
     this.w = new Worker(new URL('./cadworker.ts', import.meta.url), { type: 'module' });
-    this.w.onmessage = (e) => { const p = this.pending.get(e.data.id); if (!p) return; if (e.data.progress) { p.prog?.(e.data.progress.text); return; } this.pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result); };
+    this.w.onmessage = (e) => { const p = this.pending.get(e.data.id); if (!p) return; if (e.data.progress) { const g = e.data.progress; progressUpdate({ label: g.text, frac: g.frac, step: g.step, steps: g.steps }); p.prog?.(g.text); return; } this.pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result); };
     this.w.onerror = (e) => { for (const p of this.pending.values()) p.rej(new Error('CAD-Rechenkern abgestürzt: ' + (e.message || 'WASM-Fehler'))); this.pending.clear(); this.w?.terminate(); this.w = null; };
   }
   get loaded() { return !!this.w; }
-  call<T = any>(req: CadReq, prog?: (t: string) => void, tr: Transferable[] = []): Promise<T> { if (!this.w) this.make(); const id = ++this.seq; return new Promise((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }); }
+  call<T = any>(req: CadReq, prog?: (t: string) => void, tr: Transferable[] = []): Promise<T> { if (!this.w) this.make(); const id = ++this.seq;
+    progressBegin(req.op === 'load' ? 'CAD laden' : req.op === 'apply' ? 'CAD beschneiden' : 'CAD exportieren');
+    return new Promise<T>((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }).finally(progressEnd); }
 }
 
 interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; tess: Tess; res: null | { tess: Tess; area: number; pieces: number }; }
@@ -39,9 +42,14 @@ function geo(t: Tess) { const g = new THREE.BufferGeometry(); g.setAttribute('po
 /** CAD-Kanten (Flächenränder/Knicke) ein/aus. */
 export let cadEdgesOn = true;
 export function setCadEdges(on: boolean) { cadEdgesOn = on; for (const m of meshes) if (m) for (const c of m.children) if (c.userData.cadEdge) c.visible = on; }
+/** Rückseite (gegen die Flächennormale) deutlich andersfarbig (ocker) zeichnen – Orientierung sichtbar. */
+function backTint<M extends THREE.Material>(m: M): M {
+  m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( gl_FrontFacing ? diffuse : diffuse * 0.3 + vec3( 0.62, 0.36, 0.08 ), opacity );'); };
+  return m;
+}
 function buildFace(f: CadFace) {
   const old = meshes[f.id]; if (old) { group.remove(old); old.geometry.dispose(); } const og = ghosts[f.id]; if (og) { group.remove(og); og.geometry.dispose(); ghosts[f.id] = null; }
-  const m = new THREE.Mesh(geo(f.res ? f.res.tess : f.tess), new THREE.MeshStandardMaterial({ color: TYPE_COLOR[f.type], roughness: 0.5, metalness: 0.08, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  const m = new THREE.Mesh(geo(f.res ? f.res.tess : f.tess), backTint(new THREE.MeshStandardMaterial({ color: TYPE_COLOR[f.type], roughness: 0.5, metalness: 0.08, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })));
   m.userData.face = f.id; meshes[f.id] = m; group.add(m);
   { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), new THREE.LineBasicMaterial({ color: 0x23303d })); e.raycast = () => {}; e.userData.cadEdge = true; e.visible = cadEdgesOn; m.add(e); }
   if (f.res) { const g = new THREE.Mesh(geo(f.tess), new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 })); g.raycast = () => {}; g.renderOrder = 1; ghosts[f.id] = g; group.add(g); }
@@ -189,7 +197,7 @@ export function cadDialog(d: HTMLElement): boolean {
   if (!cad.faces.length && !cad.busy) { if (!document.querySelector('.tab.active[data-tab="nuetz"]')) return false; d.innerHTML = `<h3>📐 CAD-Flächen beschneiden</h3><p class="note">STEP- oder IGES-Datei öffnen (z. B. aus PolyWorks exportierte Flächen). Flächen wählen, mit Rand-Offset, Schnittlinie oder Inseln beschneiden und als STEP/IGES exportieren – das Original bleibt erhalten.</p>`; return true; }
   if (!cadActive() && !cad.sel.size) return false;
   const sel = [...cad.sel].map((i) => cad.faces[i]); const t = cad.tool; const b = cad.busy ? 'disabled' : '';
-  let h = `<h3>📐 ${cad.name}</h3>`;
+  let h = `<h3>📐 ${cad.name}</h3><p class="note">Vorderseite (Flächennormale) in Typfarbe, <b style="color:#9e5c14">Rückseite ocker</b>.</p>`;
   if (t === 'offset') h += `<h4>Rand-Offset</h4><p class="note">Rand der gewählten Fläche(n) um den Abstand nach innen versetzen (Abstand im Raum zur Randkante, auf der Fläche). Gemeinsame Kanten mehrerer gewählter Flächen bleiben.</p>
     <div class="row"><input type="range" id="cad-d-r" min="0.1" max="10" step="0.1" value="${cad.offsetD}" style="flex:1"><input type="number" id="cad-d" min="0.01" max="100" step="0.1" value="${cad.offsetD}" style="width:5em"> mm</div>
     <div class="row"><button class="btn primary" id="cad-off-ok" ${sel.length ? '' : 'disabled'} ${b}>✔ Anwenden auf ${sel.length} Fläche(n)</button>${cad.opSel >= 0 && cad.ops[cad.opSel]?.kind === 'offset' ? `<button class="btn" id="cad-off-upd" ${b}>Gewählte Operation ändern</button>` : ''}</div>`;

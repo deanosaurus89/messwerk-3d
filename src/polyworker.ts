@@ -9,7 +9,7 @@ export type PolyReq =
 
 self.onmessage = (e: MessageEvent<{ id: number; req: PolyReq }>) => {
   const { id, req } = e.data; const t0 = performance.now();
-  const onProgress = (tris: number, done: number) => (self as any).postMessage({ id, progress: { tris, done } });
+  const onProgress = (tris: number, done: number, info?: any) => (self as any).postMessage({ id, progress: { tris, done, info } });
   try {
     let r: any;
     if (req.op === 'decimate') r = decimate(req.mesh, { tol: req.tol, maxNormalDeg: req.normalDeg, featureDeg: req.featureDeg, onProgress, progressEvery: 5000 });

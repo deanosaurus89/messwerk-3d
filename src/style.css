@@ -280,3 +280,12 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 #bbox-info.hidden { display:none; }
 @media (max-width:700px){ #view-gear { left:6px; bottom:96px; } #bbox-info { bottom:60px; right:6px; font-size:11px; } }
 body.thumb #view-gear, body.thumb #bbox-info, body.thumb #action-bar { display:none !important; }
+#progress { position:absolute; left:124px; bottom:10px; z-index:7; width:min(300px, calc(100% - 140px)); background:rgba(255,255,255,.93); border:1px solid #9fb2c8; border-radius:6px; padding:4px 8px 6px; font:12px system-ui; color:#1e3a5c; box-shadow:0 2px 8px rgba(0,0,0,.18); pointer-events:none; }
+#progress.hidden { display:none; }
+#progress .pg-t { display:flex; gap:8px; white-space:nowrap; } #progress .pg-l { flex:1; overflow:hidden; text-overflow:ellipsis; font-weight:600; } #progress .pg-s { color:#5b6b7c; }
+#progress .pg-bar { height:6px; background:#dde5ee; border-radius:3px; overflow:hidden; margin-top:4px; position:relative; }
+#progress .pg-bar i { display:block; height:100%; background:#1f6fd1; width:0; transition:width .2s; }
+#progress.indet .pg-bar i { width:30% !important; position:absolute; animation:pg-ind 1.2s ease-in-out infinite; }
+@keyframes pg-ind { 0% { left:-30%; } 100% { left:100%; } }
+@media (max-width:700px){ #progress { left:96px; bottom:56px; width:calc(100% - 110px); } }
+body.thumb #progress { display:none !important; }
