@@ -12,7 +12,7 @@ export interface Feature {
   measured?: FitResult;      // Ist-Komponente
   nominal?: FitResult;       // Soll-Komponente (spätere CAD-Erweiterung)
   pointCount: number;
-  method: 'Klick' | 'Pinsel' | 'Konstruiert';
+  method: 'Klick' | 'Pinsel' | 'Konstruiert' | 'Anker';
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
   aux?: AuxPlane;            // Hilfsebene (Projektionsebene) für Kreis/Langloch
   datum?: string;            // Bezugsbuchstabe (A, B, C …)

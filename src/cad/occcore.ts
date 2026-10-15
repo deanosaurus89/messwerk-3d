@@ -115,16 +115,24 @@ function polyWire(oc: OC, pts: number[][], closed: boolean): any {
 export function cutByLine(oc: OC, sh: any, pts: V3[], dir: V3, remove: V3): any {
   const D = norm(dir); const { L, base } = sweepRange(oc, sh, pts, D);
   // Enden über die Fläche hinaus verlängern (Gerade schneidet ganz durch)
-  const b = base.slice(); if (b.length >= 2) { const e0 = norm(sub(b[0], b[1])), e1 = norm(sub(b[b.length - 1], b[b.length - 2])); b[0] = add(b[0], e0, L); b[b.length - 1] = add(b[b.length - 1], e1, L); }
+  const closed = pts.length >= 4 && Math.hypot(...sub(pts[0], pts[pts.length - 1])) < 1e-9;
+  const b = base.slice(); if (b.length >= 2 && !closed) { const e0 = norm(sub(b[0], b[1])), e1 = norm(sub(b[b.length - 1], b[b.length - 2])); b[0] = add(b[0], e0, L); b[b.length - 1] = add(b[b.length - 1], e1, L); }
   const sheet = new oc.BRepPrimAPI_MakePrism_1(polyWire(oc, b, false), new oc.gp_Vec_4(2 * L * D[0], 2 * L * D[1], 2 * L * D[2]), false, true).Shape();
   const sp = new oc.BRepAlgoAPI_Splitter_1(); sp.SetArguments(listOf(oc, [sh])); sp.SetTools(listOf(oc, [sheet])); sp.SetFuzzyValue?.(1e-5); sp.Build(pr(oc));
   if (!sp.IsDone()) throw new Error('Teilen fehlgeschlagen');
   const parts = faces(oc, sp.Shape()); if (parts.length < 2) return sh;
   // Teile auf der Seite des Klickpunkts (bezogen auf die Schnittfläche) entfernen
-  const side = (q: number[]) => sideOfSheet(b, D, q);
+  const side = (q: number[]) => closed ? (insidePoly(b, D, q) ? 1 : -1) : sideOfSheet(b, D, q);
   const s0 = side(remove);
   const keep = parts.filter((f) => { const c = innerPoint(oc, f); return side(c) !== s0; });
   return compound(oc, keep);
+}
+/** Geschlossenes Polygon (Projektion ⟂ D): liegt q innen? (Strahltest in einer Ebene ⟂ D) */
+function insidePoly(pts: number[][], D: number[], q: number[]): boolean {
+  const u = norm(Math.abs(D[0]) < 0.9 ? cross(D, [1, 0, 0]) : cross(D, [0, 1, 0])), v = cross(D, u);
+  const P = pts.map((p) => [dot(p, u), dot(p, v)]), x = dot(q, u), y = dot(q, v); let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; }
+  return c;
 }
 /** Seite eines Punkts bzgl. der extrudierten Polylinie: nächstes Segment (in der Ebene ⟂ Blickrichtung), Vorzeichen des Kreuzprodukts. */
 function sideOfSheet(pts: number[][], D: number[], q: number[]): number {

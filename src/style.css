@@ -220,7 +220,7 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #labels, body.thumb #hin
 .tc-list button { display:block; width:100%; text-align:left; border:none; background:none; padding:6px 4px; font:inherit; border-radius:4px; cursor:pointer; min-height:32px; }
 .tc-list button.cur { background:#e6eef8; font-weight:700; } .tc-list button.done::after { content:' ✔'; color:var(--io); }
 .row.chk label{width:auto;flex:1;display:flex;gap:6px;align-items:center;max-width:none}
-#dev-legend{position:absolute;right:10px;top:44px;background:rgba(255,255,255,.92);border:1px solid #ccd;border-radius:6px;padding:5px 8px;font-size:11px;z-index:6;width:170px;pointer-events:none}
+#dev-legend{position:absolute;right:10px;top:44px;background:rgba(255,255,255,.92);border:1px solid #ccd;border-radius:6px;padding:5px 8px;font-size:11px;z-index:6;width:220px;pointer-events:none}
 #dev-legend .bar{height:10px;margin:4px 0 2px;border-radius:3px;background:linear-gradient(90deg,#00f,#0bf 25%,#0c0 50%,#fc0 75%,#f00)}
 #dev-legend .ticks{display:flex;justify-content:space-between}
 @media (max-width:700px){#dev-legend{top:auto;bottom:8px;right:auto;left:50%;transform:translateX(-50%);width:150px}}
@@ -330,3 +330,13 @@ body.thumb #cs-ind { display:none !important; }
 .method-seg { margin:4px 0 8px; } .method-seg .seg button { padding:4px 10px; }
 .con-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; } .con-item { font-size:12.5px; cursor:pointer; }
 .chain { font-size:11px; margin-left:3px; }
+#panels-btn{position:absolute;top:6px;right:6px;z-index:8;width:32px;height:32px;border:1px solid #9fb2c8;border-radius:6px;background:rgba(255,255,255,.92);font-size:16px;cursor:pointer}
+#panels-menu{position:absolute;top:42px;right:6px;z-index:9;background:#fff;border:1px solid #9fb2c8;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:8px 10px;display:flex;flex-direction:column;gap:6px;font-size:13px;min-width:170px}
+#panels-menu.hidden{display:none}
+#panels-menu label{display:flex;gap:6px;align-items:center;min-height:26px}
+.docs .doc-toc{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.docs .doc-toc a{padding:3px 8px;border:1px solid #c9d6e8;border-radius:12px;font-size:12px;text-decoration:none;color:#1f6fd1}
+.docs section{margin-bottom:14px}
+.doc-fig{margin:8px 0;max-width:640px}.doc-fig img{max-width:100%;border:1px solid #ccd;border-radius:4px}.doc-fig figcaption{font-size:11px;color:#556}
+.method-seg .seg{flex-wrap:wrap}
+.rsec{display:flex;align-items:stretch;padding:0 2px 0 8px;border-left:2px solid #1f6fd1;margin-left:6px}.rsec span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;color:#1f6fd1;text-align:center}

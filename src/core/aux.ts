@@ -28,6 +28,8 @@ export function fitInPlane(type: 'Kreis' | 'Langloch', p: Vec3[], plane: FitResu
   return r;
 }
 
+/** Local aux plane: annulus/stadium band starting `gap` mm outside the contour, `width` mm wide. */
+export interface AuxRing { gap: number; width: number }
 export interface AuxResult {
   fit: FitResult;              // Kreis/Langloch in der Hilfsebene
   plane: FitResult;            // Hilfsebene
@@ -50,8 +52,8 @@ function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
 }
 
 export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
-  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult {
-  const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, o, type, givenPlane, maxDist);
+  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity, ring?: AuxRing): AuxResult {
+  const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, o, type, givenPlane, maxDist, ring);
   if (!r) throw new Error('No plane/hole transition near the click point');
   return r;
 }
@@ -59,7 +61,7 @@ export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri:
 /** Wie extractWithAuxPlane; mit maxDist: nur wenn der Klick näher als maxDist am Übergang Ebene/Wand liegt, sonst null.
  *  type 'auto': Kreis oder Langloch anhand der Konturfits in der Ebene. */
 export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
-  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity): AuxResult | null {
+  type: 'Kreis' | 'Langloch' | 'auto', givenPlane?: FitResult, maxDist = Infinity, ring?: AuxRing): AuxResult | null {
   H = topo.localEdge(seedTri) * 0.4; const nt = mesh.indices.length / 3;
   const visited = new Uint8Array(nt);
   const mk = (tris: Uint32Array): Region => {
@@ -157,8 +159,25 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   fit.n = wall.verts.length;
   // Plausibilität (relativ zur Netzauflösung): Wand passt nicht zu Kreis/Langloch -> keine Hilfsebenen-Lösung
   if (!(fit.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)))) { if (isFinite(maxDist)) return null; throw new Error(`Wall does not match ${type === 'auto' ? 'circle/slot' : type === 'Kreis' ? 'circle' : 'slot'} (RMS ${fit.rms.toFixed(2)} mm)`); }
+  let planeIdx = planeReg ? planeReg.verts : new Uint32Array(0);
+  // Local ring: only the plane points in an annulus (circle) / stadium band (slot) around the contour, after a safety gap
+  if (ring && planeReg && !givenPlane) {
+    const Pp = mesh.positions, Nn = mesh.vertexNormals, keep: number[] = [];
+    const d = fit.direction ? fit.direction : null, half = fit.type === 'Langloch' ? (fit.length! - fit.width!) / 2 : 0, r0 = fit.radius!;
+    for (const v of planeReg.verts) {
+      const q = projOnPlane(plane, [Pp[3 * v], Pp[3 * v + 1], Pp[3 * v + 2]]), w = sub(q, fit.center);
+      let e = w; if (d && half > 0) { const t = Math.max(-half, Math.min(half, dot(w, d))); e = sub(w, scale(d, t)); }
+      const x = Math.hypot(e[0], e[1], e[2]) - r0;
+      if (x >= ring.gap && x <= ring.gap + ring.width) keep.push(v);
+    }
+    if (keep.length < 20) throw new Error(`Local ring: only ${keep.length} plane points – increase the ring width or reduce the gap`);
+    const pts = keep.map((v) => [Pp[3 * v], Pp[3 * v + 1], Pp[3 * v + 2]] as Vec3), nrm = Nn ? keep.map((v) => [Nn[3 * v], Nn[3 * v + 1], Nn[3 * v + 2]] as Vec3) : pts.map(() => plane.normal);
+    let pl = fitType('Ebene', pts, nrm); if (dot(pl.normal, plane.normal) < 0) pl = { ...pl, normal: scale(pl.normal, -1) };
+    plane = pl; const f2 = fitInPlane(fit.type === 'Langloch' ? 'Langloch' : 'Kreis', wall.p, plane); f2.n = wall.verts.length; fit = f2;
+    planeIdx = Uint32Array.from(keep);
+  }
   delete fit.residuals; delete plane.residuals;
-  return { fit, plane, wallIdx: wall.verts, planeIdx: planeReg ? planeReg.verts : new Uint32Array(0) };
+  return { fit, plane, wallIdx: wall.verts, planeIdx };
 }
 
 /** Automatik-Modus: Region wachsen + Typ erkennen; liegt der Klick nahe am Übergang Ebene/Bohrung bzw. auf einer
@@ -179,8 +198,43 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
       const a = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, 'auto', undefined, maxD);
       if (a) return { ...base, indices: a.wallIdx, fit: a.fit, aux: { plane: a.plane, indices: a.planeIdx } };
     } catch { /* keine Hilfsebene */ }
+    // Click on the rim between aux plane and hole wall (e.g. viewed at ~45°): segment the neighborhood into the
+    // planar part and the wall, restart from the nearest planar triangle and fit the circle/slot in that plane.
+    if (r.best.type !== 'Ebene') {
+      const seg = segmentedRim(mesh, topo, seedTri, seedPoint, o, T);
+      if (seg && (seg.fit.rms < r.best.rms || seg.fit.rms < 0.05)) return { ...base, indices: seg.wallIdx, fit: seg.fit, aux: { plane: seg.plane, indices: seg.planeIdx } };
+    }
   }
   return { ...base, aux: undefined as undefined | { plane: FitResult; indices: Uint32Array } };
+}
+
+/** Neighborhood segmentation plane + wall: dominant face-normal direction N in a disc around the click; restart the
+ *  aux-plane extraction from the nearest triangle whose normal is parallel to N. */
+export function segmentedRim(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions, T: number): AuxResult | null {
+  const R = Math.max(3 * topo.localEdge(seedTri), T);
+  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true });
+  const fn = mesh.faceNormals!; if (!fn || tris.length < 10) return null;
+  const N_: Vec3[] = Array.from(tris, (t) => [fn[3 * t], fn[3 * t + 1], fn[3 * t + 2]] as Vec3);
+  // mode of the normal directions (most neighbors within ~10°), sampled
+  let best = -1, bc = -1; const step = Math.max(1, Math.floor(N_.length / 200));
+  for (let i = 0; i < N_.length; i += step) { let c = 0; for (let j = 0; j < N_.length; j += step) if (dot(N_[i], N_[j]) > 0.985) c++; if (c > bc) { bc = c; best = i; } }
+  const N = N_[best]; let wallN = 0; for (const n of N_) if (Math.abs(dot(n, N)) < 0.2) wallN++;
+  if (wallN < 5) return null;
+  // the clicked facet itself lies in the dominant direction (e.g. a flat facet strip of a hole wall) → no rim
+  if (Math.abs(fn[3 * seedTri] * N[0] + fn[3 * seedTri + 1] * N[1] + fn[3 * seedTri + 2] * N[2]) > 0.97) return null;
+  const P = mesh.positions, F = mesh.indices, cand: [number, number][] = [];
+  tris.forEach((t, i) => { if (dot(N_[i], N) < 0.97 || topo.sliver[t] || t === seedTri) return; const v = F[3 * t];
+    cand.push([t, Math.hypot(P[3 * v] - seedPoint[0], P[3 * v + 1] - seedPoint[1], P[3 * v + 2] - seedPoint[2])]); });
+  cand.sort((x, y) => x[1] - y[1]);
+  // only a click AT the rim (plane within a few edges of the click) is segmented; mid-wall clicks stay cylinders
+  if (!cand.length || cand[0][1] > 4 * topo.localEdge(seedTri)) return null;
+  // planar triangles at increasing distance (the ones right at the rim often grow into the edge chamfer)
+  const tries = [0, 0.15, 0.3, 0.5, 0.7].map((q) => cand[Math.floor(q * (cand.length - 1))]).filter(Boolean);
+  for (const [t] of tries) {
+    const v = F[3 * t]; const sp: Vec3 = [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+    try { const r = tryExtractWithAuxPlane(mesh, topo, t, sp, { ...o, radius: 0 }, 'auto', undefined, 2 * R); if (r) return r; } catch { /* next */ }
+  }
+  return null;
 }
 
 export interface LineResult {

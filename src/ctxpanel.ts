@@ -13,7 +13,7 @@ const slots = new Map<string, CtxSpec | null>();
 const ORDER = ['preview', 'dist', 'cad', 'mesh', 'tool'];
 let el: HTMLDivElement | null = null;
 export function initCtxPanel(host: HTMLElement) {
-  el = document.createElement('div'); el.id = 'ctx-panel'; el.className = 'hidden'; host.appendChild(el);
+  el = document.createElement('div'); el.id = 'ctx-panel'; el.className = 'hidden'; el.setAttribute('role', 'toolbar'); el.setAttribute('aria-label', 'Action Bar'); el.title = ''; host.appendChild(el);
   for (const ev of ['pointerdown', 'wheel', 'pointerup'] as const) el.addEventListener(ev, (e) => e.stopPropagation());
 }
 export function setCtx(slot: string, spec: CtxSpec | null) { slots.set(slot, spec); draw(); }

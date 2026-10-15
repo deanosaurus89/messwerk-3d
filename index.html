@@ -14,11 +14,9 @@
     <input id="search" placeholder="Search tree …" /></header>
   <nav id="ribbon-tabs">
     <button class="tab active" data-tab="start">Home</button>
-    <button class="tab" data-tab="merkmale">Features</button>
+    <button class="tab" data-tab="merkmale" title="Start: features, coordinate systems and mesh editing">Start</button>
     <button class="tab" data-tab="pruef">Controls</button>
-    <button class="tab" data-tab="csys">Coordinate Systems</button>
     <button class="tab" data-tab="analyze">Analyze</button>
-    <button class="tab" data-tab="poly">Mesh</button>
     <button class="tab" data-tab="re">Reverse Engineering</button>
     <button class="tab" data-tab="nuetz">Tools</button>
     <button class="tab" data-tab="ansicht">View</button>
@@ -28,7 +26,7 @@
     <div class="panel" data-tab="start">
       <div class="group"><div class="btns">
         <label class="big" title="Import polygon model or point cloud"><span class="ico">⤓</span>Import<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc,.gz" hidden /></label>
-        <button class="big" id="btn-sample"><span class="ico">▣</span>Load sample</button>
+        <button class="big" id="btn-sample" title="Load a demo part (sample data)"><span class="ico">▣</span>Load sample</button>
       </div><div class="glabel">Data</div></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-save" title="Save project as .mw3d"><span class="ico">💾</span>Save project</button>
@@ -36,27 +34,23 @@
         <button class="big" id="btn-restore" title="Restore autosave"><span class="ico">↺</span>Last project</button>
       </div><div class="glabel">Project <span id="autosave"></span></div></div>
       <div class="group"><div class="btns">
-        <button class="big" id="btn-csv"><span class="ico">⎙</span>Controls CSV</button>
-        <button class="big" id="btn-csv-feat"><span class="ico">⎙</span>Features CSV</button>
-        <button class="big" id="btn-report"><span class="ico">▤</span>Create report</button>
+        <button class="big" id="btn-csv" title="Export all controls as CSV (Excel)"><span class="ico">⎙</span>Controls CSV</button>
+        <button class="big" id="btn-csv-feat" title="Export all features as CSV"><span class="ico">⎙</span>Features CSV</button>
+        <button class="big" id="btn-report" title="Freeze the current results as a report table"><span class="ico">▤</span>Create report</button>
       </div><div class="glabel">Report</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-options" title="Options: feature colors, annotation contents and view settings"><span class="ico">⚙</span>Options</button>
+        <button class="big" id="btn-docs" title="Documentation: key functions and workflows"><span class="ico">📖</span>Documentation</button>
+      </div><div class="glabel">Settings &amp; help</div></div>
     </div>
     <div class="panel hidden" data-tab="merkmale">
-      <div class="group"><div class="btns" id="feat-type-btns"></div><div class="glabel">Create feature (click on the mesh)</div></div>
+      <div class="rsec" title="Features"><span>Features</span></div>
+      <div class="group"><div class="btns" id="feat-type-btns"><button class="big" id="btn-distance" title="Distance between two features or two clicked points" data-ftype="Abstand"><span class="ico" id="ico-dist"></span>Distance</button></div><div class="glabel">Create feature – method (polygon model, construction, anchor) in the dialog</div></div>
       <div class="group"><div class="btns">
-        <button class="big" id="btn-distance" data-ftype="Abstand"><span class="ico" id="ico-dist"></span>Distance</button>
-      </div><div class="glabel">Construct</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-delete-feat"><span class="ico">✕</span>Delete</button>
+        <button class="big" id="btn-delete-feat" title="Delete the selected feature or control"><span class="ico">✕</span>Delete</button>
       </div><div class="glabel">Edit</div></div>
-    </div>
-    <div class="panel hidden" data-tab="pruef">
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-report2"><span class="ico">▤</span>Create report</button>
-        <button class="big" id="btn-csv2" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>List CSV</button>
-      </div><div class="glabel">Report · tick controls in the catalog below the 3D view</div></div>
-    </div>
-    <div class="panel hidden" data-tab="csys">
+    
+      <div class="rsec" title="Coordinate Systems"><span>Coordinate Systems</span></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-cs-new" title="New coordinate system from features (primary – secondary – origin)"><span class="ico" id="ico-cs"></span>New 3-2-1</button>
         <button class="big" id="btn-cs-datum" disabled title="From datum system A|B|C (planned)"><span class="ico">⌖</span>From datums</button>
@@ -71,7 +65,26 @@
         <button class="big" id="btn-cs-show" title="Show or hide all coordinate system triads"><span class="ico">👁</span>Show all</button>
         <button class="big" id="btn-cs-view" title="View along the Z axis of the active system"><span class="ico">⬇</span>View along Z</button>
       </div><div class="glabel">Display</div></div>
+      <div class="rsec" title="Mesh editing"><span>Mesh editing</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-pe="reduce" title="Triangle reduction with tolerance to the original"><span class="ico">◭</span>Reduce</button>
+        <button class="big" data-pe="subdiv" title="Triangle subdivision (Loop) with tolerance"><span class="ico">⟁</span>Subdivide</button>
+        <button class="big" data-pe="smooth" title="Smoothing (Taubin)"><span class="ico">≈</span>Smooth</button>
+        <button class="big" data-pe="erase" title="Magic eraser: cut out a bump and fill the hole"><span class="ico">✧</span>Magic eraser</button>
+      </div><div class="glabel">Edit polygon model</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-pe-cmp" title="Color comparison with the original polygon model"><span class="ico">◐</span>Compare</button>
+        <button class="big" id="btn-pe-undo" title="Undo the last mesh edit"><span class="ico">↶</span>Undo</button>
+        <button class="big" id="btn-pe-reset" title="Restore the original polygon model"><span class="ico">⟲</span>Original</button>
+      </div><div class="glabel">Compare · <span id="pe-info">Original</span></div></div>
     </div>
+    <div class="panel hidden" data-tab="pruef">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-report2" title="Freeze the current results as a report table"><span class="ico">▤</span>Create report</button>
+        <button class="big" id="btn-csv2" title="Export the control list as CSV" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>List CSV</button>
+      </div><div class="glabel">Report · tick controls in the catalog below the 3D view</div></div>
+    </div>
+    
     <div class="panel hidden" data-tab="analyze">
       <div class="group"><div class="btns">
         <button class="big" data-an="form" title="Form deviation of the selected feature(s): points vs. fitted geometry"><span class="ico">◐</span>Feature deviation</button>
@@ -84,19 +97,7 @@
         <button class="big" id="btn-an-set" title="Color scale, legend and whisker settings"><span class="ico">⚙</span>Settings</button>
       </div><div class="glabel">Display</div></div>
     </div>
-    <div class="panel hidden" data-tab="poly">
-      <div class="group"><div class="btns">
-        <button class="big" data-pe="reduce" title="Triangle reduction with tolerance to the original"><span class="ico">◭</span>Reduce</button>
-        <button class="big" data-pe="subdiv" title="Triangle subdivision (Loop) with tolerance"><span class="ico">⟁</span>Subdivide</button>
-        <button class="big" data-pe="smooth" title="Smoothing (Taubin)"><span class="ico">≈</span>Smooth</button>
-        <button class="big" data-pe="erase" title="Magic eraser: cut out a bump and fill the hole"><span class="ico">✧</span>Magic eraser</button>
-      </div><div class="glabel">Edit polygon model</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-pe-cmp" title="Color comparison with the original polygon model"><span class="ico">◐</span>Compare</button>
-        <button class="big" id="btn-pe-undo"><span class="ico">↶</span>Undo</button>
-        <button class="big" id="btn-pe-reset"><span class="ico">⟲</span>Original</button>
-      </div><div class="glabel">Compare · <span id="pe-info">Original</span></div></div>
-    </div>
+    
     <div class="panel hidden" data-tab="re">
       <div class="group wip-note"><div class="wip">🚧 Work in progress / paused</div><div class="glabel">Status</div></div>
       <div class="group"><div class="btns">
@@ -135,39 +136,37 @@
     </div>
     <div class="panel hidden" data-tab="hilfe">
       <div class="group"><div class="btns">
-        <button class="big" id="btn-training"><span class="ico">🎓</span>Training: datums</button>
-        <button class="big" id="btn-help"><span class="ico">?</span>Help datums</button>
-        <button class="big" id="btn-whatsnew"><span class="ico">★</span>What's new</button>
+        <button class="big" id="btn-training" title="Guided training: datums and datum systems"><span class="ico">🎓</span>Training: datums</button>
+        <button class="big" id="btn-help" title="Help on datums (ISO 5459)"><span class="ico">?</span>Help datums</button>
+        <button class="big" id="btn-docs2" title="Documentation: key functions and workflows"><span class="ico">📖</span>Documentation</button>
+        <button class="big" id="btn-whatsnew" title="Changes per version"><span class="ico">★</span>What's new</button>
       </div><div class="glabel">Help</div></div>
       <div class="group"><div class="btns"><div class="ver-box" id="ver-box"></div></div><div class="glabel">Version</div></div>
     </div>
     <div class="panel hidden" data-tab="ansicht">
       <div class="group"><div class="btns">
-        <button class="big" id="btn-view-center"><span class="ico">⌖</span>Center</button>
-        <button class="big" id="btn-view-fit"><span class="ico">⤢</span>Fit</button>
-        <button class="big" data-view="iso"><span class="ico">◩</span>Isometric</button>
-        <button class="big" data-view="+Z"><span class="ico">Z+</span>Top</button>
-        <button class="big" data-view="-Z"><span class="ico">Z−</span>Bottom</button>
-        <button class="big" data-view="-Y"><span class="ico">Y−</span>Front</button>
-        <button class="big" data-view="+Y"><span class="ico">Y+</span>Back</button>
-        <button class="big" data-view="+X"><span class="ico">X+</span>Right</button>
-        <button class="big" data-view="-X"><span class="ico">X−</span>Left</button>
+        <button class="big" id="btn-view-center" title="Center the view on the selection"><span class="ico">⌖</span>Center</button>
+        <button class="big" id="btn-view-fit" title="Zoom to fit the whole model"><span class="ico">⤢</span>Fit</button>
+        <button class="big" data-view="iso" title="Isometric view"><span class="ico">◩</span>Isometric</button>
+        <button class="big" data-view="+Z" title="View from the top (+Z)"><span class="ico">Z+</span>Top</button>
+        <button class="big" data-view="-Z" title="View from the bottom (−Z)"><span class="ico">Z−</span>Bottom</button>
+        <button class="big" data-view="-Y" title="View from the front (−Y)"><span class="ico">Y−</span>Front</button>
+        <button class="big" data-view="+Y" title="View from the back (+Y)"><span class="ico">Y+</span>Back</button>
+        <button class="big" data-view="+X" title="View from the right (+X)"><span class="ico">X+</span>Right</button>
+        <button class="big" data-view="-X" title="View from the left (−X)"><span class="ico">X−</span>Left</button>
       </div><div class="glabel">Standard views</div></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-toggle-prims" data-vt="prims" title="Show/hide the geometry of all features"><span class="ico">◎</span>Geometries</button>
         <button class="big" id="btn-toggle-labels" data-vt="labels" title="Show/hide the annotations of all features"><span class="ico">🏷</span>Annotations</button>
-        <button class="big" id="btn-toggle-pts"><span class="ico">⁘</span>Color points</button>
+        <button class="big" id="btn-toggle-pts" title="Color the points of each feature"><span class="ico">⁘</span>Color points</button>
         <button class="big" id="btn-toggle-wire" data-vt="wire" title="Show triangle edges"><span class="ico">▦</span>Mesh edges</button>
         <button class="big on" id="btn-toggle-curves" data-vt="curves" title="Show curves and CAD edges"><span class="ico">〰</span>Curves/edges</button>
       </div><div class="glabel">Display</div></div>
       <div class="group"><div class="btns">
-        <button class="big on" data-pane-toggle="tree"><span class="ico">☰</span>Tree</button>
-        <button class="big on" data-pane-toggle="dialog"><span class="ico">ⓘ</span>Dialog</button>
-        <button class="big on" data-pane-toggle="table"><span class="ico">▤</span>Controls</button>
+        <button class="big on" data-pane-toggle="tree" title="Show/hide the tree"><span class="ico">☰</span>Tree</button>
+        <button class="big on" data-pane-toggle="dialog" title="Show/hide the dialog area"><span class="ico">ⓘ</span>Dialog</button>
+        <button class="big on" data-pane-toggle="table" title="Show/hide the controls table"><span class="ico">▤</span>Controls</button>
       </div><div class="glabel">Panels</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-options"><span class="ico">⚙</span>Options</button>
-      </div><div class="glabel">Settings</div></div>
     </div>
   </section>
   <main id="workspace">

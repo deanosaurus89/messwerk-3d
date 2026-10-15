@@ -119,10 +119,10 @@ export class Viewer {
   resetColors() { if (!this.colors) return; for (let i = 0; i < this.colors.length / 3; i++) this.colors.set(BASE_COLOR, 3 * i); }
   paint(idx: Uint32Array, rgb: number[]) { if (!this.colors) return; for (const v of idx) this.colors.set(rgb, 3 * v); }
   /** Abweichungs-Farbkarte: −r blau → 0 grün → +r rot. */
-  paintScalar(idx: Uint32Array, val: Float32Array, r: number, steps = 0) {
+  paintScalar(idx: Uint32Array, val: Float32Array, r: number, steps = 0, c0 = 0) {
     if (!this.colors) return;
     for (let k = 0; k < idx.length; k++) {
-      let t = Math.max(-1, Math.min(1, val[k] / r)); let c: number[];
+      let t = Math.max(-1, Math.min(1, (val[k] - c0) / r)); let c: number[];
       if (steps > 0) t = Math.max(-1, Math.min(1, (Math.round(((t + 1) / 2) * steps - 0.5) + 0.5) / steps * 2 - 1));
       if (t < 0) { const a = -t; c = a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]; }
       else { const a = t; c = a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0]; }
@@ -145,6 +145,48 @@ export class Viewer {
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true })); l.renderOrder = 4; this.prims.add(l);
+  }
+  /** Analyse-Pfeile: dicke, farbcodierte Vektoren (InstancedMesh, Schaft + Spitze) je Punkt entlang der Normalen. */
+  addArrows(pos: Float32Array, dir: Float32Array, dev: Float32Array, exag: number, r: number, c0 = 0, maxN = 4000) {
+    const n = dev.length, step = Math.max(1, Math.ceil(n / maxN)), m = Math.ceil(n / step);
+    let sp = 0; { let ext = 0; for (let i = 0; i < n; i += step) ext = Math.max(ext, Math.abs(dev[i] * exag)); sp = Math.max(this.radius / 900, Math.min(this.radius / 120, ext / 10 || this.radius / 300)); }
+    const shaft = new THREE.CylinderGeometry(1, 1, 1, 8); shaft.translate(0, 0.5, 0);
+    const head = new THREE.ConeGeometry(1, 1, 10); head.translate(0, 0.5, 0);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const S = new THREE.InstancedMesh(shaft, mat, m), H = new THREE.InstancedMesh(head, mat, m);
+    const up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), q = new THREE.Quaternion(), M = new THREE.Matrix4(), P = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+    let k = 0;
+    for (let i = 0; i < n && k < m; i += step, k++) {
+      const d = dev[i] * exag; v.set(dir[3 * i], dir[3 * i + 1], dir[3 * i + 2]); if (d < 0) v.negate(); const L = Math.abs(d);
+      q.setFromUnitVectors(up, v.normalize()); P.set(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
+      const hl = Math.min(L * 0.45, sp * 4), w = Math.min(sp, Math.max(L, 1e-9) * 0.25);
+      M.compose(P, q, sc.set(w * 0.5, Math.max(L - hl, 1e-9), w * 0.5)); S.setMatrixAt(k, M);
+      M.compose(P.clone().addScaledVector(v, L - hl), q, sc.set(w * 1.3, Math.max(hl, 1e-9), w * 1.3)); H.setMatrixAt(k, M);
+      const t = Math.max(-1, Math.min(1, (dev[i] - c0) / r)), a = Math.abs(t);
+      const c = t < 0 ? (a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]) : (a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0]);
+      col.setRGB(c[0], c[1], c[2]); S.setColorAt(k, col); H.setColorAt(k, col);
+    }
+    S.count = H.count = k; S.renderOrder = H.renderOrder = 4; this.prims.add(S, H);
+  }
+  /** Toleranz-/Formzone (ISO 1101): Grenzflächen bei Abweichung lo und hi entlang der Normalen des Ausgleichselements. */
+  addZone(f: FitResult, lo: number, hi: number) {
+    const c = new THREE.Vector3(...f.center), n = new THREE.Vector3(...f.normal).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n), qz = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    const mk = (g: THREE.BufferGeometry, color: number) => new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
+    const out: THREE.Object3D[] = [], s = this.radius;
+    for (const [d, color] of [[lo, 0x2060ff], [hi, 0xff4020]] as [number, number][]) {
+      let o: THREE.Object3D | null = null;
+      switch (f.type) {
+        case 'Ebene': { const z = Math.max(s * 0.25, 5); o = mk(new THREE.PlaneGeometry(z, z), color); o.quaternion.copy(qz); o.position.copy(c).addScaledVector(n, d); break; }
+        case 'Zylinder': { const R = Math.max(1e-6, f.radius! + d); o = mk(new THREE.CylinderGeometry(R, R, f.length || f.radius!, 48, 1, true), color); o.quaternion.copy(q); o.position.copy(c); break; }
+        case 'Kugel': { const R = Math.max(1e-6, f.radius! + d); o = mk(new THREE.SphereGeometry(R, 32, 20), color); o.position.copy(c); break; }
+        case 'Kreis': { const R = Math.max(1e-6, f.radius! + d), w = Math.max(f.radius! * 0.04, 0.05); o = mk(new THREE.RingGeometry(R - w / 2, R + w / 2, 72), color); o.quaternion.copy(qz); o.position.copy(c); break; }
+        case 'Linie': { if (d <= 0) break; const L = f.length || s * 0.1; o = mk(new THREE.CylinderGeometry(d, d, L, 24, 1, true), 0xff8020); o.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...f.direction!).normalize())); o.position.copy(c); break; }
+      }
+      if (o) { o.renderOrder = 3; out.push(o); }
+    }
+    if (out.length) this.prims.add(...out);
+    return out.length > 0;
   }
   /** Freiformfläche: halbtransparente Fläche + Isolinien, Randkurven (kräftig), optional Kontrollnetz. */
   addFreeform(nb: NurbsInfo, color: number, selected: boolean, net: boolean) {

@@ -1,13 +1,14 @@
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
 import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
-import { initLayout, setPaneOpen, paneOpen } from './layout';
+import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
+import { docsHtml } from './docs';
 import { t as tt, typeName, kindName, methodName } from './i18n';
 import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
 import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
 import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
-import { FitResult, GeomType } from './core/fit';
+import { FitResult, GeomType, fitType } from './core/fit';
 import {
   Control, ControlKind, Feature, availableControls, computeDistance, controlLabel, controlsCSV,
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
@@ -31,13 +32,16 @@ type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel
 type DimComp = '3D' | 'X' | 'Y' | 'Z';
 type DistMode = { kind: 'dist'; a: number | null; b: number | null; slot: 0 | 1; comp: DimComp };
 type ConMode = { kind: 'con'; out: GeomType; key: string; refs: (number | null)[]; slot: number; params: Record<string, number> };
-type Mode = FitMode | DistMode | ConMode | null;
-interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'none' | number; }
+type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm: Vec3[] };
+type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
+/** Anchor: mathematical minimum of picked points per feature type. */
+const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
+interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
-  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; }
+  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; }
 type V3 = [number, number, number];
 interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
 
@@ -57,8 +61,8 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'none' | number, lineSide: 0 as 0 | 1 },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, trans: true, scale: 0, steps: 0 },
+  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -71,7 +75,7 @@ const state = {
   /** filter of the All Controls list */
   ctrlFilter: false,
   labelOffsets: new Map<number, V3>(),
-  /** local coordinate systems (3-2-1 alignments); activeCs null = global WCS */
+  /** local coordinate systems (3-2-1); activeCs null = global WCS */
   csys: [] as CSys[], activeCs: null as number | null, nextCs: 1, csSel: null as number | null, showCs: true,
   csEdit: null as null | { draft: CSys; orig: CSys | null; field: CsField | null; activate: boolean },
   reports: [] as Report[], nextReport: 1, openReport: null as number | null,
@@ -152,6 +156,7 @@ for (const t of TYPES) {
   b.onclick = () => startFitMode(t);
   typeBtns.appendChild(b);
 }
+typeBtns.appendChild($('#btn-distance'));
 $('#btn-distance').onclick = () => startDistanceMode();
 $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
 document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftype]').forEach((b) => (b.onclick = () => startFitMode(b.dataset.ftype as GeomType)));
@@ -165,7 +170,7 @@ function startFitMode(t: GeomType | 'auto') {
 }
 function startDistanceMode() {
   pe.tool = null;
-  if (state.features.filter((f) => f.type !== 'Abstand').length < 2) { toast('A distance needs two features.'); return; }
+  if (state.features.filter((f) => f.type !== 'Abstand').length < 2) { toast(tt('Fewer than two features – distance between two clicked points (Anchor).')); startAnchor('Abstand'); return; }
   const s = state.sel.filter((id) => state.features.find((f) => f.id === id)?.type !== 'Abstand');
   state.mode = { kind: 'dist', a: s[0] ?? null, b: s[1] ?? null, slot: s[0] != null && s[1] == null ? 1 : 0, comp: (state.mode as DistMode | null)?.comp ?? '3D' };
   state.labelOffsets.delete(-1);
@@ -255,6 +260,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale
     viewer.setModel(r.positions, r.indices, r.normals); peReset(); curvesReset();
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = []; state.controls = []; state.sel = []; state.mode = null; state.preview = null;
+    if (!isPhone()) showAllPanes(); // new project: all panels visible
     state.hidden.clear(); state.labelOffsets.clear(); state.modelVisible = true; state.typeCount = {};
     state.reports = []; state.openReport = null; state.nextId = 1; state.nextCtrl = 1; state.nextReport = 1; ptsCache.clear();
     loadCount++; storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
@@ -365,7 +371,8 @@ window.addEventListener('pointerup', async (e) => {
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) { if (!state.mode && !pe.tool) clearSelection(); return; }
   if (pe.tool === 'curve') curveAddPoint(h);
-  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h); }
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h, e.shiftKey); }
+  else if (state.mode?.kind === 'anchor') anchorPick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
   else if (state.mode?.kind === 'con') { const f = featureAtHit(h); if (f) conPick(f.id); else status(tt('No feature at this location.')); }
   else if (state.csEdit) { const f = featureAtHit(h); if (f) selectFeature(f.id); else status(tt('No feature at this location.')); }
@@ -425,7 +432,7 @@ function setMethod(m: 'Klick' | 'Pinsel') {
   state.mode.method = m; state.preview = null; clearBrush(); brushErase = false; viewer.showCursor(null, 1); clearAuxHover(); renderAll();
 }
 // ------------------------------------------------------------------ Bottom context panel (one for all modes and previews)
-initCtxPanel(viewer.el); initProgress(viewer.el); initLayout();
+initCtxPanel(viewer.el); initProgress(viewer.el); initLayout(); initPanelsMenu(viewer.el, (s) => tt(s), (p, on) => { if (isPhone()) togglePanel(p, on); });
 const typeOptions = (cur: string, withAuto = true) => [...(withAuto ? ['auto'] : []), ...FIT_TYPES].map((x) => `<option value="${x}" ${x === cur ? 'selected' : ''}>${typeName(x)}</option>`).join('');
 const formName = (t: GeomType) => FORM_NAME[t];
 const patchKind = (k: string) => (k === 'vierseitig' ? tt('four-sided') : k === 'getrimmt' ? tt('trimmed') : k);
@@ -464,10 +471,11 @@ function ctxSpec(): CtxSpec | null {
   const p = state.preview;
   if (m.kind === 'dist') return distSpec(m);
   if (m.kind === 'con') return conSpec(m);
+  if (m.kind === 'anchor') return anchorSpec();
   const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
+    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && p.fit.type === 'Ebene' && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this plane: click further faces (or Shift+click). Also for split or disjoint plane areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
     : `${seg}${type}<label>r <input id="cp-brush" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -476,7 +484,7 @@ function ctxSpec(): CtxSpec | null {
     controls: ctl, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
-        if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); }));
+        if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
       el.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => (b.onclick = async () => { state.opts.lineSide = Number(b.dataset.side) as 0 | 1;
         if (state.preview?.hit && state.preview.fit.type === 'Linie') { try { await previewWithAux(state.preview.hit, 'Linie'); } catch (e: any) { toast(e.message); } } renderAll(); }));
       el.querySelector<HTMLSelectElement>('#cp-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; (state.mode as FitMode).type = v; if (state.preview) refitPreview(v); else renderAll(); };
@@ -493,14 +501,14 @@ function ctxSpec(): CtxSpec | null {
 const usesAux = (t: GeomType | 'auto') => (t === 'Kreis' || t === 'Langloch' || t === 'Linie') && state.opts.aux !== 'none';
 const usesAuxType = usesAux;
 /** Hilfsebenen-Extraktion im Worker: Kreis/Langloch (Wand in Ebene) bzw. Linie (Kante, Seite wählbar). */
-function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView) {
+function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView, ring?: { gap: number; width: number }) {
   return type === 'Linie'
     ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured })
-    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured });
+    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring });
 }
 async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch' | 'Linie') {
   const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
-  const r = await busy(auxCall(h.tri, h.point, state.opts.maxAngleDeg, type, ref));
+  const r = await busy(auxCall(h.tri, h.point, state.opts.maxAngleDeg, type, ref, state.opts.aux === 'ring' ? state.opts.ring : undefined));
   state.preview = { fit: r.fit, indices: r.indices, candidates: [], method: 'Klick', hit: h,
     aux: { plane: r.aux.plane, indices: r.aux.indices, source: ref ? ref.name : tt('automatic (adjacent face)'), refId: ref?.id } };
   status(tt('Preview: {0} in auxiliary plane – {1} wall points (orange), {2} ({3} ms).', typeName(type), r.indices.length, ref ? tt('plane') + ' ' + ref.name : r.aux.indices.length + ' ' + tt('plane points (blue)'), r.ms.toFixed(0)));
@@ -515,8 +523,10 @@ async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: '
   } catch (e: any) { state.preview = null; status(tt('Freeform surface: {0}', e.message)); toast(tt('Freeform surface: {0}', e.message)); }
   renderAll();
 }
-async function previewByClick(h: Hit) {
+async function previewByClick(h: Hit, add = false) {
   const m = state.mode as FitMode;
+  const pv = state.preview;
+  if ((add || state.opts.multi) && pv && pv.fit.type === 'Ebene' && !pv.aux && (m.type === 'Ebene' || m.type === 'auto')) { await addPlaneRegion(h); return; }
   if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
   if (usesAux(m.type)) {
     try { await previewWithAux(h, m.type as 'Kreis' | 'Langloch'); }
@@ -533,6 +543,23 @@ async function previewByClick(h: Hit) {
   renderAll();
 }
 
+/** Multi-seed plane: grow another region at the click and fit one plane through all regions (also split/disjoint faces). */
+async function addPlaneRegion(h: Hit) {
+  const pv = state.preview!;
+  try {
+    const g = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: 'Ebene' }));
+    const regions = [...(pv.regions ?? [pv.indices]), g.indices as Uint32Array];
+    await refitRegions(regions, pv.hit);
+    status(tt('Plane from {0} regions: {1} points, flatness {2} mm.', regions.length, state.preview!.indices.length, fmt(state.preview!.fit.form, 4)));
+  } catch (e: any) { status(tt('No geometry found: {0}', e.message)); }
+  renderAll();
+}
+async function refitRegions(regions: Uint32Array[], hit?: Hit) {
+  const set = new Set<number>(); for (const r of regions) for (const v of r) set.add(v);
+  const idx = Uint32Array.from(set);
+  const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type: 'Ebene' }));
+  state.preview = { fit: r.fit, indices: r.indices, candidates: [], method: 'Klick', hit, regions: regions.length > 1 ? regions : undefined };
+}
 async function previewByClickAs(h: Hit, t: GeomType | 'auto') {
   const m = state.mode as FitMode; const old = m.type; m.type = t; await previewByClick(h); m.type = old;
 }
@@ -573,6 +600,7 @@ function commitPreview() {
     method: p.method, color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
     src: p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
   };
+  if (p.regions) { f.hit = undefined; state.opts.multi = false; }
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -590,7 +618,7 @@ function commitPreview() {
   node?.classList.add('flash'); node?.scrollIntoView({ block: 'nearest' });
   toast(`✔ ${tt('{0} created', f.name)} (${f.cons ? tt('constructed') : p.method === 'Konstruiert' ? fmt(distValue(p.fit, f.dim?.comp ?? '3D'), 3) + ' mm' : p.indices.length + ' ' + tt('points')})`);
 }
-const defaultFp = (): FitParamsUI => ({ k: 3, nf: { on: false, angleDeg: 30, maxPct: 10 }, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, aux: state.opts.aux });
+const defaultFp = (): FitParamsUI => ({ k: 3, nf: { on: false, angleDeg: 30, maxPct: 10 }, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, aux: state.opts.aux, ring: { ...state.opts.ring } });
 /** Merkmal mit seinen Fit-Parametern neu berechnen (Extraktion + Fit) und alles Abhängige aktualisieren. */
 async function refitFeature(f: FeatureView, type: GeomType = f.type) {
   if (f.type === 'Abstand' || f.cons) { recomputeDistances(); renderAll(); return; }
@@ -613,8 +641,8 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
     if (f.hit && f.method === 'Klick') {
       if (inPlane) {
         const ref = typeof fp.aux === 'number' ? state.features.find((g) => g.id === fp.aux) : undefined;
-        auxR = await busy(auxCall(f.hit.tri, f.hit.point, fp.maxAngleDeg, type, ref));
-        auxR.source = ref ? ref.name : tt('automatic (adjacent face)'); auxR.refId = ref?.id;
+        auxR = await busy(auxCall(f.hit.tri, f.hit.point, fp.maxAngleDeg, type, ref, fp.aux === 'ring' ? (fp.ring ??= { ...state.opts.ring }) : undefined));
+        auxR.source = ref ? ref.name : fp.aux === 'ring' ? tt('local ring (gap {0} mm, width {1} mm)', fp.ring!.gap, fp.ring!.width) : tt('automatic (adjacent face)'); auxR.refId = ref?.id;
       } else idx = (await busy(engine.call<any>({ op: 'grow', tri: f.hit.tri, point: f.hit.point, maxAngleDeg: fp.maxAngleDeg, radius: fp.radius, type }))).indices;
     }
     if (auxR) {
@@ -711,7 +739,7 @@ function distSpec(m: DistMode): CtxSpec {
 // für Whisker). Quellen heute: Formabweichung je Merkmal (Punkte ↔ Ausgleichselement) und Polygon ↔ Original;
 // eine CAD-Quelle (Netz ↔ Sollgeometrie) lässt sich als weiterer Eintrag in AN_SOURCES ergänzen.
 type AnKind = 'form' | 'mesh';
-interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string }
+interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[] }
 const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   form: async () => {
     let fs = state.features.filter((f) => state.sel.includes(f.id) && f.type !== 'Abstand' && f.indices.length);
@@ -721,7 +749,8 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     const n = parts.reduce((a, r) => a + r.dev.length, 0), idx = new Uint32Array(n), dev = new Float32Array(n), pos = new Float32Array(3 * n), dir = new Float32Array(3 * n);
     let o = 0; parts.forEach((r, k) => { const f = fs[k]; idx.set(f.indices, o); dev.set(f.dev && f.dev.length === f.indices.length ? f.dev : r.dev, o); pos.set(r.pos, 3 * o); dir.set(r.dir, 3 * o); o += r.dev.length; });
     state.an.ids = fs.map((f) => f.id);
-    return { idx, dev, pos, dir, label: fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
+    let off = 0; const feats = fs.map((f) => { let lo = Infinity, hi = -Infinity; for (let i = off; i < off + f.indices.length; i++) { lo = Math.min(lo, dev[i]); hi = Math.max(hi, dev[i]); } off += f.indices.length; return { id: f.id, lo, hi }; });
+    return { feats, idx, dev, pos, dir, label: fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
   },
   mesh: async () => {
     if (!pe.dev) await peCompute();
@@ -739,38 +768,63 @@ async function analyze(kind: AnKind) {
   renderAll();
 }
 function analyzeOff() { state.an.on = false; state.an.res = null; viewer.setModelOpacity(1); renderAll(); }
-function anScale(r: AnResult) {
-  if (state.an.scale > 0) return state.an.scale;
-  const a = Array.from(r.dev, Math.abs).filter((v) => v > 1e-5).sort((x, y) => x - y);
-  return a.length ? Math.max(1e-3, a[Math.min(a.length - 1, Math.floor(0.99 * a.length))]) : 1e-3;
+/** Form tolerance t of a single analysed feature (Form control), else null. */
+function anTol(r: AnResult): number | null {
+  if (r.feats?.length !== 1) return null;
+  const c = state.controls.find((c) => c.kind === 'Form' && c.featureIds[0] === r.feats![0].id && c.tolUp > 0);
+  return c ? c.tolUp : null;
+}
+/** Color scale (centre c, half range h). Default “zone”: centred on the mid of the form zone (ISO 1101 minimum zone),
+ *  half range = zone width / 2, or t/2 if a form tolerance t exists (flatness 4 → ±2 around the zone mid). */
+function anRange(r: AnResult): { c: number; h: number } {
+  const a = state.an;
+  let mx = -Infinity, mn = Infinity; for (const v of r.dev) { if (v > mx) mx = v; if (v < mn) mn = v; }
+  if (!isFinite(mx)) return { c: 0, h: 1e-3 };
+  let c = 0, h: number;
+  if (a.center === 'zone') { c = (mx + mn) / 2; const t = anTol(r); h = t != null ? t / 2 : (mx - mn) / 2; }
+  else { c = a.center === 'custom' ? a.c0 : 0; const q = Array.from(r.dev, (v) => Math.abs(v - c)).sort((x, y) => x - y); h = q.length ? q[Math.min(q.length - 1, Math.floor(0.99 * q.length))] : 1e-3; }
+  if (a.scale > 0) h = a.scale;
+  return { c, h: Math.max(1e-4, h) };
 }
 function paintAnalysis(): boolean {
   const a = state.an, r = a.res;
   if (!a.on || !r || !viewer.colors) return false;
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }
-  const sc = anScale(r);
-  viewer.paintScalar(r.idx, r.dev, sc, a.steps);
+  const { c, h } = anRange(r);
+  viewer.paintScalar(r.idx, r.dev, h, a.steps, c);
   viewer.setModelOpacity(a.trans ? 0.5 : 1);
   let mx = -Infinity, mn = Infinity, s2 = 0; for (const v of r.dev) { if (v > mx) mx = v; if (v < mn) mn = v; s2 += v * v; }
   let el = document.getElementById('dev-legend');
   if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
-  el.innerHTML = `<b>${r.label} [mm]</b><div class="bar${a.steps ? ' stepped' : ''}"></div><div class="ticks"><span>${sgn(-sc, 3)}</span><span>0</span><span>${sgn(sc, 3)}</span></div>
-    <small>${tt('max')} ${sgn(mx, 4)} · ${tt('min')} ${sgn(mn, 4)} · σ ${fmt(Math.sqrt(s2 / Math.max(1, r.dev.length)), 4)}</small>`;
+  const t = anTol(r), cls = a.steps > 0 ? tt('{0} classes of {1} mm', a.steps, fmt((2 * h) / a.steps, 4)) : tt('continuous');
+  el.innerHTML = `<b>${r.label} [mm]</b><div class="bar${a.steps ? ' stepped' : ''}"></div><div class="ticks"><span>${sgn(c - h, 3)}</span><span>${sgn(c, 3)}</span><span>${sgn(c + h, 3)}</span></div>
+    <small>${a.center === 'zone' ? (t != null ? tt('Centre = zone mid, ± t/2 (t = {0})', fmt(t, 3)) : tt('Centre = zone mid, ± zone/2')) : tt('Centre = {0}', sgn(c, 3))} · ${cls}</small>
+    <small>${tt('max')} ${sgn(mx, 4)} · ${tt('min')} ${sgn(mn, 4)} · ${tt('zone')} ${fmt(mx - mn, 4)} · σ ${fmt(Math.sqrt(s2 / Math.max(1, r.dev.length)), 4)}</small>`;
   return true;
 }
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
   return {
     title: `◐ ${tt('Analyze')}`, cls: 'an',
-    controls: `<label title="${tt('Color scale ± [mm], 0 = automatic (99th percentile)')}">${tt('Scale ±')} <input id="an-sc" type="number" min="0" step="0.01" value="${a.scale}" inputmode="decimal"></label>
-      <label title="${tt('Number of color steps, 0 = continuous')}">${tt('Steps')} <input id="an-st" type="number" min="0" max="40" step="1" value="${a.steps}"></label>
-      <button data-a="whisk" class="${a.whisk ? 'on' : ''}" ${a.res.dir ? '' : 'disabled'}>⟂ ${tt('Whiskers')}</button>
-      <label>× <input id="an-ex" type="number" min="1" step="10" value="${a.exag}" title="${tt('Whisker exaggeration')}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}">◌ ${tt('Transparent')}</button>`,
+    controls: `<label title="${tt('Centre of the color scale. Zone mid (default, ISO 1101): green = middle of the form zone; 0 = fitted element; custom = your value')}">${tt('Centre')} <select id="an-cm"><option value="zone" ${a.center === 'zone' ? 'selected' : ''}>${tt('Zone mid')}</option><option value="zero" ${a.center === 'zero' ? 'selected' : ''}>0</option><option value="custom" ${a.center === 'custom' ? 'selected' : ''}>${tt('Custom')}</option></select></label>
+      ${a.center === 'custom' ? `<input id="an-c0" type="number" step="0.001" value="${a.c0}" inputmode="decimal" title="${tt('Custom centre [mm]')}" style="width:70px">` : ''}
+      <label title="${tt('Half range of the color scale ± [mm] around the centre. 0 = automatic: zone/2, or t/2 if a form tolerance exists')}">${tt('Range ±')} <input id="an-sc" type="number" min="0" step="0.01" value="${a.scale}" inputmode="decimal"></label>
+      <label title="${tt('Color classes: number of discrete color bands over the full range (each band = range / classes). 0 = continuous gradient')}">${tt('Classes')} <input id="an-st" type="number" min="0" max="40" step="1" value="${a.steps}"></label>
+      <button data-a="whisk" class="${a.whisk ? 'on' : ''}" ${a.res.dir ? '' : 'disabled'} title="${tt('Deviation arrows: one colored arrow per point along the surface normal, length = deviation × exaggeration')}">➚ ${tt('Arrows')}</button>
+      <label title="${tt('Exaggeration: arrow length = deviation × this factor (deviations are often µm, invisible at 1×)')}">× <input id="an-ex" type="number" min="1" step="10" value="${a.exag}"></label>
+      <button data-a="zones" class="${a.zones ? 'on' : ''}" ${a.kind === 'form' ? '' : 'disabled'} title="${tt('Show the bounding surfaces of the form zone (ISO 1101), e.g. two parallel planes for flatness, two coaxial cylinders for cylindricity')}">▤ ${tt('Zone')}</button>
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model under the color map')}">◌ ${tt('Transparent')}</button>
+      <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
     bind: (el) => {
-      const num = (id: string, f: (v: number) => void) => { const i = el.querySelector<HTMLInputElement>(id)!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { f(v); renderScene(); } }; };
-      num('#an-sc', (v) => (a.scale = v)); num('#an-st', (v) => (a.steps = Math.round(v))); num('#an-ex', (v) => (a.exag = Math.max(1, v)));
-      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'whisk') a.whisk = !a.whisk; else a.trans = !a.trans; renderAll(); }));
+      const num = (id: string, f: (v: number) => void, neg = false) => { const i = el.querySelector<HTMLInputElement>(id); if (!i) return; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && (neg || v >= 0)) { f(v); renderScene(); } }; };
+      num('#an-sc', (v) => (a.scale = v)); num('#an-st', (v) => (a.steps = Math.round(v))); num('#an-ex', (v) => (a.exag = Math.max(1, v))); num('#an-c0', (v) => (a.c0 = v), true);
+      const cm = el.querySelector<HTMLSelectElement>('#an-cm')!; cm.onchange = () => { a.center = cm.value as any; renderAll(); };
+      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => {
+        const k = b.dataset.a;
+        if (k === 'help') { showDocs('analyze'); return; }
+        if (k === 'whisk') { a.whisk = !a.whisk; if (a.whisk && a.res && a.res.dev.length > 1e6) toast(tt('{0} points – more than 1 million: arrows are thinned out to 4000 for display speed', a.res.dev.length.toLocaleString())); }
+        else if (k === 'zones') a.zones = !a.zones; else a.trans = !a.trans; renderAll();
+      }));
     },
     cancel: { run: analyzeOff, title: tt('Close analysis') },
   };
@@ -950,7 +1004,9 @@ function renderHint() {
   const m = state.mode;
   if (!m) return hint('');
   if (m.kind === 'con') { const c = conByKey(m.key)!, s = slotFor(c, m.slot); return hint(s ? tt('Construction: pick “{0}” in the 3D view or the tree.', tt(s.label)) : tt('Construction: check the preview, then ✓ create.')); }
+  if (m.kind === 'anchor') return hint(tt('Anchor: click point {0} of {1} on the mesh.', Math.min(m.pts.length + 1, ANCHOR_N[m.out]!), ANCHOR_N[m.out]!));
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
+  if (state.preview && state.opts.multi && state.preview.fit.type === 'Ebene') return hint(tt('Add region: click further faces of the plane (Shift+click also works), then ✓ create.'));
   if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
   if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface (mouse wheel = analysis area).', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
   hint('');
@@ -1103,6 +1159,7 @@ const DIALOGS: DialogProvider[] = [
   { id: 'mesh-tool', when: () => !!pe.tool, render: (d) => renderPolyDialog(d) },
   { id: 'csys-edit', when: () => !!state.csEdit, render: (d) => renderCsEdit(d) },
   { id: 'construct-mode', when: () => state.mode?.kind === 'con', render: (d) => renderConDialog(d) },
+  { id: 'anchor-mode', when: () => state.mode?.kind === 'anchor', render: (d) => renderAnchorDialog(d) },
   { id: 'distance-mode', when: () => state.mode?.kind === 'dist', render: (d) => renderDistDialog(d) },
   { id: 'fit-mode', when: () => state.mode?.kind === 'fit', render: (d) => renderFitDialog(d) },
   { id: 'curve', when: () => curveById(state.curveSel) != null, render: (d) => renderCurveSel(d, curveById(state.curveSel)!) },
@@ -1120,7 +1177,7 @@ function renderDialog() {
 function renderModelDialog(d: HTMLElement) {
   d.innerHTML = `<h3>${ICON.mesh} ${tt('Polygon model')}</h3>${kv([[tt('Name'), state.data!.name], [tt('Points'), state.data!.vertexCount.toLocaleString('en-US')], [tt('Triangles'), state.data!.triCount.toLocaleString('en-US')], [tt('Edits'), pe.edits.length ? pe.edits.join(' → ') : tt('original')]])}
     <h4>${tt('Display')}</h4><div class="row chk"><label><input type="checkbox" id="md-vis" ${state.modelVisible ? 'checked' : ''}> ${tt('Visible')}</label></div>
-    <p class="note">${tt('Features ribbon: choose a type (or Auto), click on the mesh, check the preview in the bottom panel and confirm with ✓.')}</p>
+    <p class="note">${tt('Start ribbon › Features: choose a type (or Auto), click on the mesh, check the preview in the Action Bar and confirm with ✓.')}</p>
     <div><button class="btn" id="md-center">⌖ ${tt('Center')}</button><button class="btn" id="md-dev">◑ ${tt('Deviation to original')}</button></div>`;
   d.querySelector<HTMLInputElement>('#md-vis')!.onchange = (e) => { state.modelVisible = (e.target as HTMLInputElement).checked; renderTree(); renderScene(); };
   d.querySelector('#md-center')!.addEventListener('click', () => centerOn(null));
@@ -1128,8 +1185,8 @@ function renderModelDialog(d: HTMLElement) {
 }
 function renderDistDialog(d: HTMLElement) {
   const m = state.mode as DistMode; const p = state.preview;
-  d.innerHTML = `<h3>${ICON['Abstand 3D']} ${tt('Distance')}</h3>
-    <p class="note">${tt('Pick two features in the 3D view or in the tree. Choose 3D, X, Y or Z in the bottom panel, drag the annotation to place the dimension, then confirm with ✓.')}</p>
+  d.innerHTML = `<h3>${ICON['Abstand 3D']} ${tt('Distance')}</h3>${methodSeg('Abstand', 'mesh')}
+    <p class="note">${tt('Pick two features in the 3D view or in the tree. Choose 3D, X, Y or Z in the Action Bar, drag the annotation to place the dimension, then confirm with ✓.')}</p>
     ${kv([[tt('Feature A'), nameOf(m.a)], [tt('Feature B'), nameOf(m.b)]])}
     ${p ? `<h4>${tt('Result (actual)')}</h4>${kv(fitRows(p.fit, 0))}` : ''}
     <p class="note">${tt('Rule: center to center; if a plane is involved, the center of the other feature is projected perpendicularly onto the plane (point–plane distance). X/Y/Z are the absolute components.')}</p>`;
@@ -1137,23 +1194,25 @@ function renderDistDialog(d: HTMLElement) {
 function renderFitDialog(d: HTMLElement) {
   const m = state.mode as FitMode; const p = state.preview;
   d.innerHTML = `<h3>${ICON[m.type] ?? ''} ${tt('Create feature')}: ${m.type === 'auto' ? tt('Auto detection') : typeName(m.type)}</h3>${methodSeg(m.type, 'mesh')}
-    <p class="note">${tt('Method, type, brush/area radius and ✓ ✕ are in the bottom panel of the 3D view. Here: settings and details.')}</p>
+    <p class="note">${tt('Method, type, brush/area radius and ✓ ✕ are in the Action Bar (bottom of the 3D view). Here: settings and details.')}</p>
     ${m.method === 'Klick' ? `<h4>${tt('Region growing')}</h4>
     <div class="row"><label>${tt('Max. normal angle [°]')}</label><input id="d-ang" value="${state.opts.maxAngleDeg}" inputmode="decimal"></div>
     <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="d-rad" value="${state.opts.radius}" inputmode="decimal"></div>
     ${usesAuxType(m.type) ? `<h4>${ICON.aux} ${tt('Auxiliary plane (projection plane)')}</h4>
-    <div class="row"><select id="d-aux"><option value="auto" ${state.opts.aux === 'auto' ? 'selected' : ''}>${tt('Automatic – adjacent planar face')}</option>
+    <div class="row"><select id="d-aux"><option value="auto" ${state.opts.aux === 'auto' ? 'selected' : ''}>${tt('Automatic – full adjacent planar face')}</option><option value="ring" ${state.opts.aux === 'ring' ? 'selected' : ''}>${tt('Local ring around the contour')}</option>
       ${state.features.filter((f) => f.type === 'Ebene').map((f) => `<option value="${f.id}" ${state.opts.aux === f.id ? 'selected' : ''}>${tt('Existing plane')}: ${f.name}</option>`).join('')}
       <option value="none" ${state.opts.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
-    <p class="note">${m.type === 'Linie' ? tt('Click on the edge between two faces. The line is the intersection edge fitted inside the auxiliary plane; choose which adjacent face is the auxiliary plane in the bottom panel.') : tt('Click near the transition face/wall (or on the wall): the wall points are projected into the plane and the feature is fitted in the plane. The center lies in the plane, orientation = plane normal.')}</p>` : ''}`
+    ${state.opts.aux === 'ring' && m.type !== 'Linie' ? `<div class="row"><label>${tt('Ring gap [mm]')}</label><input id="d-rg" value="${state.opts.ring.gap}" inputmode="decimal"></div><div class="row"><label>${tt('Ring width [mm]')}</label><input id="d-rw" value="${state.opts.ring.width}" inputmode="decimal"></div><p class="note">${tt('Only the plane points in a ring (circle) or stadium band (slot) around the contour are used: starting at the gap outside the edge, with the given width. Useful when the face is not flat far away from the hole.')}</p>` : ''}
+    <p class="note">${m.type === 'Linie' ? tt('Click on the edge between two faces. The line is the intersection edge fitted inside the auxiliary plane; choose which adjacent face is the auxiliary plane in the Action Bar.') : tt('Click near the transition face/wall (or on the wall): the wall points are projected into the plane and the feature is fitted in the plane. The center lies in the plane, orientation = plane normal.')}</p>` : ''}`
     : `<h4>${tt('Brush')}</h4><p class="note">${tt('Paint: stroke over the mesh. Erase: Erase button or hold Shift. Undo: Ctrl+Z. Esc clears the selection, a second Esc returns to Click & grow.')}</p>`}
     ${p ? `<h4>${tt('Preview')}: ${typeName(p.fit.type)}</h4>${p.aux ? auxStats(p) : ''}${kv(fitRows(p.fit, p.indices.length))}
       ${p.candidates.length ? `<h4>${tt('Detection (RMS per type)')}</h4>${kv(p.candidates.map((c) => [typeName(c.type), fmt(c.rms)] as [string, string]))}` : ''}`
     : `<p class="note">${tt('A click first creates a preview (points + geometry + values). Only ✓ creates the feature.')}</p>`}`;
   const bind = (id: string, key: 'maxAngleDeg' | 'radius' | 'brush') => { const el = d.querySelector<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x)) { state.opts[key] = x; renderModeBar(); } }; };
-  bind('#d-ang', 'maxAngleDeg'); bind('#d-rad', 'radius'); bindMethodSeg(d, m.type);
+  bind('#d-ang', 'maxAngleDeg'); bind('#d-rad', 'radius');
+  for (const [id, k] of [['#d-rg', 'gap'], ['#d-rw', 'width']] as const) { const el = d.querySelector<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && x >= 0) state.opts.ring[k] = k === 'width' ? Math.max(0.2, x) : x; }; } bindMethodSeg(d, m.type);
   d.querySelector<HTMLSelectElement>('#d-aux')?.addEventListener('change', (e) => {
-    const v = (e.target as HTMLSelectElement).value; state.opts.aux = v === 'auto' || v === 'none' ? v : +v;
+    const v = (e.target as HTMLSelectElement).value; state.opts.aux = v === 'auto' || v === 'none' || v === 'ring' ? v : +v;
     if (state.preview?.hit) refitPreview(state.preview.fit.type); else renderAll();
   });
 }
@@ -1239,8 +1298,9 @@ function fitParamsHTML(f: FeatureView) {
     ${fp.nf.on ? `<div class="row"><label>${tt('max. normal deviation [°]')}</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
       <div class="row"><label>${tt('discard at most [%]')}</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
     <p class="note">${tt('Normal filter: points whose measured surface normal deviates from the fitted element by more than the angle (edges, chamfers, adjacent faces) are discarded – worst first, at most the percentage.')}${m.nfRemoved ? ` <b>${tt('Currently {0} points discarded.', m.nfRemoved)}</b>` : ''}</p>
-    ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option>
-      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>` : ''}
+    ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option><option value="ring" ${fp.aux === 'ring' ? 'selected' : ''}>${tt('Local ring')}</option>
+      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
+      ${fp.aux === 'ring' && f.type !== 'Linie' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
     </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
@@ -1252,8 +1312,9 @@ function bindFitParams(d: HTMLElement, f: FeatureView) {
   num('#fp-k', (x) => (fp.k = Math.max(1, x)));
   num('#fp-ang', (x) => (fp.maxAngleDeg = x)); num('#fp-rad', (x) => (fp.radius = x));
   q<HTMLInputElement>('#fp-nf')?.addEventListener('change', (e) => { fp.nf.on = (e.target as HTMLInputElement).checked; refitFeature(f); });
+  num('#fp-rg', (x) => ((fp.ring ??= { ...state.opts.ring }).gap = x)); num('#fp-rw', (x) => ((fp.ring ??= { ...state.opts.ring }).width = Math.max(0.2, x)));
   num('#fp-nfa', (x) => (fp.nf.angleDeg = Math.min(89, x))); num('#fp-nfp', (x) => (fp.nf.maxPct = Math.min(90, x)));
-  q<HTMLSelectElement>('#fp-aux')?.addEventListener('change', (e) => { const v = (e.target as HTMLSelectElement).value; fp.aux = v === 'auto' || v === 'none' ? v : +v; refitFeature(f); });
+  q<HTMLSelectElement>('#fp-aux')?.addEventListener('change', (e) => { const v = (e.target as HTMLSelectElement).value; fp.aux = v === 'auto' || v === 'none' || v === 'ring' ? v : +v; refitFeature(f); });
 }
 
 const CTRL_SYMBOL = (c: Control, f?: Feature) => {
@@ -1399,7 +1460,9 @@ function renderScene() {
   viewer.commitColors();
   viewer.clearPrims();
   renderCurves();
-  if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) viewer.addWhiskers(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, anScale(state.an.res));
+  if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
+  if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
+  if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
@@ -1698,6 +1761,14 @@ $('#file-project').onchange = async (e) => {
 $('#btn-restore').onclick = () => restoreLast();
 
 // ------------------------------------------------------------------ Hilfe + Trainingsmodus
+function showDocs(sec?: string) {
+  const el = $('#help-view'); el.classList.remove('hidden');
+  el.innerHTML = `<div class="rv-head"><b>📖 ${tt('Documentation')}</b><span style="flex:1"></span><button class="btn" id="hv-close" title="${tt('Close')}">✕</button></div><div class="rv-body docs">${docsHtml()}</div>`;
+  ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
+  el.querySelectorAll<HTMLAnchorElement>('[data-doc]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); el.querySelector('#doc-' + a.dataset.doc)?.scrollIntoView({ behavior: 'smooth' }); }));
+  if (sec) setTimeout(() => el.querySelector('#doc-' + sec)?.scrollIntoView(), 50);
+}
+document.querySelectorAll<HTMLButtonElement>('#btn-docs, #btn-docs2').forEach((b) => (b.onclick = () => showDocs()));
 $('#btn-help').onclick = () => {
   const el = $('#help-view'); el.classList.remove('hidden');
   el.innerHTML = `<div class="rv-head"><b>${tt('Help: datums and tolerances with datum')}</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 ${tt('Start training')}</button><button class="btn" id="hv-close">✕</button></div>
@@ -1708,7 +1779,7 @@ $('#btn-help').onclick = () => {
 const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left button</b>: rotate · <b>middle button</b> (wheel pressed) or right button: pan · <b>mouse wheel</b>: zoom.</li>
 <li>Brush tools and Click &amp; grow: the <b>mouse wheel changes the brush radius / analysis area</b> (shown live), <b>Ctrl+wheel</b> zooms.</li>
 <li>Circle/slot/line by click with auxiliary plane: hover preview – <b style="color:#2f7de1">blue</b> auxiliary plane, <b style="color:#ff8c1a">orange</b> wall points.</li><li>Touch: one finger rotates, two fingers zoom/pan.</li>
-<li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the bottom panel of the 3D view. The Dialog shows the object selected in the tree or 3D view.</li></ul>
+<li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the Action Bar (bottom of the 3D view). The Dialog shows the object selected in the tree or 3D view.</li></ul>
 <h3>Assign a datum (ISO 5459)</h3><ol><li>Select a feature (plane, cylinder/hole, circle, cone, slot, torus, sphere, line).</li>
 <li>Dialog › <b>Datum</b>: choose a letter › <b>Assign datum</b> – or right-click/long-press in the tree › “Set as datum …”.</li>
 <li>Rename: choose another letter; if it is taken, the letters are <b>swapped</b>. Controls refer to the feature and follow.</li>
@@ -1799,7 +1870,7 @@ function planeSteps(name: string, p: Vec3, dir: [number, number, number] | null,
       world: () => worldToScreen(p),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); if (state.mode?.kind !== 'fit' || state.mode.type !== 'Ebene') startFitMode('Ebene'); dir ? viewer.viewDir(dir) : viewer.view('iso'); },
       check: () => !!findF(pred) || pv(nPred)() },
-    { auto: () => ensureFeature('Ebene', p, n, pred), title: tt('Create'), text: tt('Check the values (points, RMS, flatness) in the bottom panel and tap <b>✓</b>.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(pred) },
+    { auto: () => ensureFeature('Ebene', p, n, pred), title: tt('Create'), text: tt('Check the values (points, RMS, flatness) in the Action Bar and tap <b>✓</b>.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(pred) },
   ];
 }
 function startTraining() {
@@ -1810,7 +1881,7 @@ function startTraining() {
     { title: tt('Load sample part'), text: tt('In the <b>Home</b> ribbon tap <b>Load sample</b> – the training loads the standard sample part directly. (A running project is replaced – save it first if needed.)'),
       auto: ensureSample, target: () => document.querySelector('#btn-sample'), enter: () => { lc0 = loadCount; tab('start')(); if (isPhone()) document.body.classList.remove('show-tree', 'show-dialog', 'show-table'); },
       check: () => (loadCount > lc0 || state.features.length > 0) && !!state.data?.name.startsWith('beispielteil') },
-    { auto: async () => tab('merkmale')(), title: tt('Features ribbon'), text: tt('Open the <b>Features</b> ribbon at the top.'), target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
+    { auto: async () => tab('merkmale')(), title: tt('Start ribbon'), text: tt('Open the <b>Start</b> ribbon at the top (features, coordinate systems, mesh editing).'), target: () => document.querySelector('.tab[data-tab="merkmale"]'), check: () => !!document.querySelector('.tab.active[data-tab="merkmale"]') },
     { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Ebene'); }, title: tt('Feature type Plane'), text: tt('Choose <b>Plane</b>. Only a plane will be fitted.'), target: () => document.querySelector('[data-ftype="Ebene"]'), check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Ebene') || !!findF(isTop) },
     ...planeSteps(tt('top face'), [70, 50, 20], null, isTop, (m) => m.type === 'Ebene' && m.normal[2] > 0.99),
     datumSteps('A', isTop, tt('The top face (primary datum: defines the orientation)')),
@@ -1818,11 +1889,11 @@ function startTraining() {
     datumSteps('B', isFront, tt('The front face (secondary datum: direction in A and origin in Y)')),
     ...planeSteps(tt('left face'), [0, 30, 10], [-1, -1.2, 0.9], isLeft, (m) => m.type === 'Ebene' && Math.abs(m.normal[0]) > 0.99, [-1, 0, 0]),
     datumSteps('C', isLeft, tt('The left face (tertiary datum: origin in X)')),
-    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Zylinder'); }, title: tt('Feature type Cylinder'), text: tt('In the Features ribbon choose the type <b>Cylinder</b>.'), target: () => document.querySelector('[data-ftype="Zylinder"]'),
+    { auto: async () => { await ensureSample(); tab('merkmale')(); startFitMode('Zylinder'); }, title: tt('Feature type Cylinder'), text: tt('In the Start ribbon choose the type <b>Cylinder</b>.'), target: () => document.querySelector('[data-ftype="Zylinder"]'),
       enter: () => { if (isPhone()) togglePanel('dialog', false); tab('merkmale')(); viewer.view('iso'); }, check: () => (state.mode?.kind === 'fit' && state.mode.type === 'Zylinder') || !!findF(isHole) },
     { auto: () => ensurePreview('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: tt('Tap the Ø12 hole'), text: tt('Tap the <b>wall of the hole</b> (yellow ring).'), world: () => worldToScreen([20, 26.04, 15]), enter: () => viewer.view('iso'),
       check: () => !!findF(isHole) || pv((m) => m.type === 'Zylinder' && Math.abs(m.diameter! - 12.08) < 0.3)() },
-    { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: tt('Create'), text: tt('Tap <b>✓</b> in the bottom panel.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(isHole) },
+    { auto: () => ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole), title: tt('Create'), text: tt('Tap <b>✓</b> in the Action Bar.'), target: () => document.querySelector('#cp-ok'), check: () => !!findF(isHole) },
     { auto: async () => { await ensureFeature('Zylinder', TRAIN_FEATS.H[1], TRAIN_FEATS.H[2], isHole); const f = findF(isHole)!; f.fp ??= defaultFp(); if (!f.fp.nf.on) { f.fp.nf.on = true; await refitFeature(f); } },
       title: tt('Normal direction filter'), text: tt('The selection often contains points of <b>edges and chamfers</b>. Their surface normal does not match the hole wall. The <b>normal direction filter</b> discards points whose normal deviates by more than the set <b>angle</b> – worst first, but at most the set <b>percentage</b>.<br>In the Dialog under <b>⚙ Fit parameters</b> tick <b>Normal direction filter</b>. The feature is refitted immediately; you can change angle and % afterwards.'),
       target: () => document.querySelector('#fp-nf')?.closest('.row') ?? null,
@@ -2304,7 +2375,7 @@ function renderCurveDialog(d: HTMLElement) {
 initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data });
 
 
-// ------------------------------------------------------------------ Coordinate systems (3-2-1 alignments)
+// ------------------------------------------------------------------ Coordinate systems (3-2-1)
 // Definitions reference features; the frame is recomputed from the current features on every use (dependency recompute).
 // Only one system is active; all coordinate outputs (feature X/Y/Z/IJK, position, angle and distance components,
 // annotations, report) are expressed in it. Data are never transformed.
@@ -2327,7 +2398,7 @@ function csActivate(id: number | null) {
 function csNew() {
   if (!state.data) { toast(tt('Import a model and create features first.')); return; }
   stopMode();
-  const cs = newCSys(state.nextCs, tt('Alignment {0}', state.nextCs));
+  const cs = newCSys(state.nextCs, tt('Coordinate System {0}', state.nextCs));
   // prefill: selected features (first = primary, second = secondary)
   const fm = featMap(); const sel = state.sel.map((i) => fm.get(i)!).filter(Boolean);
   if (sel[0] && usableAs(sel[0].type, 'primary')) cs.primary.fid = sel[0].id;
@@ -2347,8 +2418,8 @@ function csPick(fid: number) {
   const step = e.field === 'p' ? 'primary' : e.field === 's' ? 'secondary' : 'origin';
   if (!usableAs(f.type, step)) { toast(tt('{0} cannot be used as {1}.', typeName(f.type), csFieldName(e.field))); return; }
   const d = e.draft;
-  if (e.field === 'p') d.primary.fid = fid; else if (e.field === 's') d.secondary.fid = fid; else d.origin[e.field].fid = fid;
-  suggestOrigin(d, featMap());
+  if (e.field === 'p') d.primary.fid = fid; else if (e.field === 's') d.secondary.fid = fid; else d.origin[e.field] = { ...d.origin[e.field], fid, auto: undefined };
+  if (e.field === 'p' || e.field === 's') suggestOrigin(d, featMap()); // auto-fill only after primary/secondary, never after an origin pick
   const order: CsField[] = ['p', 's', 'X', 'Y', 'Z'];
   const next = order.slice(order.indexOf(e.field) + 1).find((k) => (k === 'p' ? d.primary.fid : k === 's' ? d.secondary.fid : d.origin[k].fid) == null);
   e.field = next ?? null;
@@ -2395,8 +2466,8 @@ function renderCsEdit(d: HTMLElement) {
     ${row('s', tt('Feature'), `<select id="cs-s">${featOptions('secondary', cs.secondary.fid)}</select>${axisSel('cs-sa', cs.secondary.axis, cs.secondary.flip)}`)}
     <p class="note">${tt('Projected into the primary plane. Circle/sphere/point: direction from the origin feature to its center. Locks 1 rotation.')}</p>
     <h4>3 · ${tt('Origin')}</h4>
-    ${(['X', 'Y', 'Z'] as Axis[]).map((a) => row(a, a, `<select id="cs-o${a}">${featOptions('origin', cs.origin[a].fid)}</select><input id="cs-off${a}" class="cs-off" type="text" inputmode="decimal" value="${cs.origin[a].off}" title="${tt('Offset [mm]')}">`)).join('')}
-    <p class="note">${tt('Each axis from one feature (+ offset in mm). Plane: along its normal · circle/cylinder: the two other axes.')}</p>
+    ${(['X', 'Y', 'Z'] as Axis[]).map((a) => row(a, a, `<select id="cs-o${a}">${featOptions('origin', cs.origin[a].fid)}</select><input id="cs-off${a}" class="cs-off" type="text" inputmode="decimal" value="${cs.origin[a].off}" title="${tt('Offset [mm]')}">${cs.origin[a].auto ? `<small class="cs-auto" title="${tt('Auto-filled – pick another feature or choose “—” to override')}">auto: ${tt(cs.origin[a].auto!)}</small>` : ''}`)).join('')}
+    <p class="note">${tt('Each axis from one feature (+ offset in mm). Plane: along its normal · circle/cylinder: the two other axes. Entries marked “auto” were filled from steps 1–2 and can be overridden.')} <a href="#" id="cs-help">${tt('Why?')}</a></p>
     <div class="row"><label><input type="checkbox" id="cs-act" ${e.activate ? 'checked' : ''}> ${tt('Activate after creation')}</label></div>
     <div class="row"><button class="btn primary" id="cs-ok" ${r.error ? 'disabled' : ''}>✓ ${e.orig ? tt('Apply') : tt('Create')}</button><button class="btn" id="cs-cancel">✕ ${tt('Cancel')}</button></div>`;
   const q = <T extends HTMLElement>(sel: string) => d.querySelector<T>(sel)!;
@@ -2408,7 +2479,8 @@ function renderCsEdit(d: HTMLElement) {
   q<HTMLSelectElement>('#cs-pa').onchange = (ev) => { [cs.primary.axis, cs.primary.flip] = ax((ev.target as HTMLSelectElement).value); renderAll(); };
   q<HTMLSelectElement>('#cs-sa').onchange = (ev) => { [cs.secondary.axis, cs.secondary.flip] = ax((ev.target as HTMLSelectElement).value); renderAll(); };
   for (const a of ['X', 'Y', 'Z'] as Axis[]) {
-    q<HTMLSelectElement>('#cs-o' + a).onchange = (ev) => { cs.origin[a].fid = fid((ev.target as HTMLSelectElement).value); renderAll(); };
+    q<HTMLSelectElement>('#cs-o' + a).onchange = (ev) => { cs.origin[a].fid = fid((ev.target as HTMLSelectElement).value); cs.origin[a].auto = undefined; renderAll(); };
+    d.querySelector('#cs-help')?.addEventListener('click', (ev) => { ev.preventDefault(); showDocs('csys'); });
     q<HTMLInputElement>('#cs-off' + a).onchange = (ev) => { const v = Number((ev.target as HTMLInputElement).value.replace(',', '.')); if (isFinite(v)) cs.origin[a].off = v; renderAll(); };
   }
   d.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => (b.onclick = () => { e.field = e.field === b.dataset.pick ? null : (b.dataset.pick as CsField); renderAll(); if (isPhone() && e.field) togglePanel('dialog', false); }));
@@ -2594,12 +2666,67 @@ function conSpec(m: ConMode): CtxSpec {
   };
 }
 /** Method choice shown at the top of the create dialogs. */
-function methodSeg(out: GeomType | 'auto', cur: 'mesh' | 'con') {
-  const can = out !== 'auto' && constructionsFor(out as GeomType).length > 0, mesh = out !== 'Winkel';
-  return `<div class="row method-seg"><span class="cp-seg seg" role="radiogroup"><button data-meth="mesh" class="${cur === 'mesh' ? 'on' : ''}" ${mesh ? '' : 'disabled'}>${tt('From polygon model')}</button><button data-meth="con" class="${cur === 'con' ? 'on' : ''}" ${can ? '' : 'disabled'}>🔗 ${tt('Construction')}</button></span></div>`;
+/** Method choice shown at the top of the create dialogs: From polygon model | Construction | Anchor | From CAD reference (later). */
+function methodSeg(out: GeomType | 'auto' | 'Abstand', cur: 'mesh' | 'con' | 'anchor') {
+  const con = out !== 'auto' && out !== 'Abstand' && constructionsFor(out as GeomType).length > 0, mesh = out !== 'Winkel' && out !== 'Abstand' || out === 'Abstand', anc = ANCHOR_N[out as GeomType] != null;
+  const meshLbl = out === 'Abstand' ? tt('Between features') : tt('From polygon model');
+  return `<div class="row method-seg"><span class="cp-seg seg" role="radiogroup">`
+    + `<button data-meth="mesh" class="${cur === 'mesh' ? 'on' : ''}" ${mesh ? '' : 'disabled'} title="${out === 'Abstand' ? tt('Distance between two existing features') : tt('Fit the feature to mesh points (click & grow or brush)')}">${meshLbl}</button>`
+    + `<button data-meth="con" class="${cur === 'con' ? 'on' : ''}" ${con ? '' : 'disabled'} title="${tt('Construct from other features (intersection, axis, mid plane …)')}">🔗 ${tt('Construction')}</button>`
+    + `<button data-meth="anchor" class="${cur === 'anchor' ? 'on' : ''}" ${anc ? '' : 'disabled'} title="${anc ? tt('Pick the minimum number of points on the mesh: {0}', ANCHOR_N[out as GeomType]!) : tt('Not available for this type')}">📍 ${tt('Anchor')}</button>`
+    + `<button data-meth="cad" disabled title="${tt('From CAD reference – coming later')}">${tt('From CAD reference')}</button></span></div>`;
 }
-function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto') {
-  d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => { if (b.dataset.meth === 'con') startConstruct(out as GeomType); else startFitMode(out === 'Winkel' ? 'auto' : out); }));
+function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto' | 'Abstand') {
+  d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => {
+    const k = b.dataset.meth;
+    if (k === 'con') startConstruct(out as GeomType); else if (k === 'anchor') startAnchor(out as GeomType | 'Abstand');
+    else if (out === 'Abstand') startDistanceMode(); else startFitMode(out === 'Winkel' ? 'auto' : out);
+  }));
+}
+function startAnchor(out: GeomType | 'Abstand') {
+  if (!state.data) { status('Please load a polygon model first.'); return; }
+  pe.tool = null; state.mode = { kind: 'anchor', out, pts: [], nrm: [] }; state.preview = null; clearBrush(); renderAll();
+  if (isPhone()) togglePanel('dialog', false);
+}
+function anchorPick(h: Hit) {
+  const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!;
+  if (m.pts.length >= N) { m.pts = []; m.nrm = []; }
+  m.pts.push([...h.point] as Vec3); m.nrm.push([...h.normal] as Vec3); updateAnchorPreview(); renderAll();
+}
+let anchorError = '';
+function updateAnchorPreview() {
+  const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!; anchorError = ''; state.preview = null;
+  if (m.pts.length < N || m.out === 'Abstand') return;
+  try { const fit = fitType(m.out, m.pts, m.nrm, false); if (!fit || !fit.center.every(isFinite)) throw new Error('Points do not define the element – pick other points.');
+    state.preview = { fit, indices: new Uint32Array(0), candidates: [], method: 'Anker' as any }; }
+  catch (e: any) { anchorError = tt(e.message); }
+}
+function anchorCommit() {
+  const m = state.mode as AnchorMode;
+  if (m.out === 'Abstand') {
+    if (m.pts.length < 2) return;
+    const ids = m.pts.map((p, i) => { state.mode = { kind: 'anchor', out: 'Punkt', pts: [p], nrm: [m.nrm[i]] }; updateAnchorPreview(); commitPreview(); return state.features[state.features.length - 1].id; });
+    state.mode = { kind: 'dist', a: ids[0], b: ids[1], slot: 1, comp: '3D' }; updateDistancePreview(); commitPreview();
+    state.mode = { kind: 'anchor', out: 'Abstand', pts: [], nrm: [] }; renderAll(); return;
+  }
+  commitPreview(); state.mode = { ...m, pts: [], nrm: [] }; renderAll();
+}
+function anchorSpec(): CtxSpec {
+  const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!;
+  return { title: `📍 ${tt('Anchor')}: ${m.out === 'Abstand' ? tt('Distance') : typeName(m.out)} · <b>${m.pts.length}/${N}</b> ${tt('pts')}`,
+    stats: state.preview ? conStats(state.preview.fit) : anchorError ? `<span class="err">⚠ ${anchorError}</span>` : '',
+    ok: { run: anchorCommit, disabled: m.out === 'Abstand' ? m.pts.length < 2 : !state.preview, title: tt('Create feature (Enter)') },
+    undo: { run: () => { m.pts.pop(); m.nrm.pop(); updateAnchorPreview(); renderAll(); }, disabled: !m.pts.length, title: tt('Remove last point') },
+    cancel: { run: stopMode, title: tt('Exit (Esc)') } };
+}
+function renderAnchorDialog(d: HTMLElement) {
+  const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!, p = state.preview;
+  d.innerHTML = `<h3>${ICON[m.out === 'Abstand' ? 'Abstand 3D' : m.out] ?? ''} ${tt('Create feature')}: ${m.out === 'Abstand' ? tt('Distance') : typeName(m.out)}</h3>${methodSeg(m.out, 'anchor')}
+    <p class="note">${m.out === 'Abstand' ? tt('Click two points on the mesh; two anchor points and their distance are created.') : tt('Click {0} points on the mesh – the mathematical minimum for this element. The element passes exactly through them (no form deviation).', N)}</p>
+    ${m.pts.map((q, i) => `<div class="cs-row"><label>${i + 1}</label><span style="flex:1">${q.map((v) => fmt(v, 3)).join(' ')}</span></div>`).join('')}
+    ${anchorError ? `<div class="cs-dof err">⚠ ${anchorError}</div>` : ''}
+    ${p ? `<h4>${tt('Preview')}</h4>${kv(conRows(p.fit))}` : ''}`;
+  bindMethodSeg(d, m.out);
 }
 function renderConDialog(d: HTMLElement) {
   const m = state.mode as ConMode, c = conByKey(m.key)!, p = state.preview;
@@ -2641,10 +2768,11 @@ function bindConDefinition(d: HTMLElement, f: FeatureView) {
 }
 {
   const g = document.querySelector('#ribbon [data-tab="merkmale"] #btn-distance')?.parentElement;
-  if (g) for (const o of CON_OUTS) {
+  // ONE feature list: construction-only types (angle, bolt circle) join the type buttons; other constructions via the dialog method buttons
+  if (g) for (const o of CON_OUTS.filter((o) => o.out === 'Winkel' || o.key === 'bc-pattern')) {
     const b = document.createElement('button'); b.className = 'big'; b.dataset.con = o.key ?? o.out;
     b.innerHTML = `<span class="ico">${o.key === 'bc-pattern' ? '✲' : ICON[o.out] ?? ''}</span>${tt(o.label)}`; b.title = tt('Construct {0} from other features', tt(o.label));
-    b.onclick = () => startConstruct(o.out, o.key); g.appendChild(b);
+    b.onclick = () => startConstruct(o.out, o.key); typeBtns.appendChild(b);
   }
 }
 Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS });

@@ -63,6 +63,13 @@ export function cadPaint() {
     const g = ghosts[f.id]; if (g) g.visible = f.visible && cad.showRemoved;
   }
 }
+let snapFirst = false;
+/** Screen distance (px) from (x,y) to the first polyline vertex is below 14 → snap/close. */
+function nearFirst(x: number, y: number) {
+  if (cad.tool !== 'cut' || cad.draft.length < 3) return false;
+  const r = X.viewer.renderer.domElement.getBoundingClientRect(), p = new THREE.Vector3(...cad.draft[0]).project(X.viewer.camera);
+  return Math.hypot(r.left + (p.x + 1) / 2 * r.width - x, r.top + (1 - p.y) / 2 * r.height - y) < 14;
+}
 function drawOverlay(extra?: V3) {
   for (const c of [...overlay.children]) { overlay.remove(c); (c as any).geometry?.dispose?.(); }
   const pts = extra ? [...cad.draft, extra] : cad.draft; if (!pts.length) return;
@@ -70,7 +77,7 @@ function drawOverlay(extra?: V3) {
   if ((cad.tool === 'circle' || cad.tool === 'rect') && pts.length >= 2) line = outline(cad.tool, pts[0], pts[1]);
   const mk = (p: V3[], color: number) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(p.map((q) => new THREE.Vector3(...q))), new THREE.LineBasicMaterial({ color, depthTest: false, linewidth: 2 })); l.renderOrder = 20; overlay.add(l); };
   mk(line, 0xff1744);
-  for (const p of cad.draft) { const s = new THREE.Mesh(new THREE.SphereGeometry(X.viewer.radius / 150, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff1744, depthTest: false })); s.position.set(...p); s.renderOrder = 21; overlay.add(s); }
+  cad.draft.forEach((p, i) => { const big = i === 0 && snapFirst; const s = new THREE.Mesh(new THREE.SphereGeometry(X.viewer.radius / (big ? 70 : 150), 12, 10), new THREE.MeshBasicMaterial({ color: big ? 0x00c853 : 0xff1744, depthTest: false })); s.position.set(...p); s.renderOrder = 21; overlay.add(s); });
 }
 function viewBasis() { const v = X.viewer; const D = new THREE.Vector3(); v.camera.getWorldDirection(D); const U = v.camera.up.clone().applyQuaternion(new THREE.Quaternion()).projectOnPlane(D).normalize(); const yAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(v.camera.quaternion); return { D, U: yAxis.lengthSq() ? yAxis : U }; }
 function outline(kind: 'circle' | 'rect', a: V3, b: V3): V3[] {
@@ -135,6 +142,7 @@ async function cadTap(x: number, y: number, add: boolean) {
   if (t === 'cut') {
     if (cutStage === 'side') { const h = pickFace(x, y); if (!h) { X.toast('Tap the side on the face.'); return; } const { D } = viewBasis();
       cutStage = 'draw'; const pts = cad.draft; cad.draft = []; drawOverlay(); await pushOp({ kind: 'cut', faces: [...cad.sel], pts, dir: D.toArray() as V3, remove: h.p }); return; }
+    if (nearFirst(x, y)) { closeLine(); return; }
     cad.draft.push(worldAt(x, y)); drawOverlay(); X.renderDialog(); return;
   }
   if (t === 'circle' || t === 'rect') {
@@ -147,6 +155,12 @@ async function cadTap(x: number, y: number, add: boolean) {
   else if (add || X.isPhone()) { cad.sel.has(h.id) ? cad.sel.delete(h.id) : cad.sel.add(h.id); }
   else { const only = cad.sel.size === 1 && cad.sel.has(h.id); cad.sel.clear(); if (!only) cad.sel.add(h.id); }
   cadPaint(); X.renderTree(); X.renderDialog(); document.querySelector(`[data-cadf="${h?.id}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+/** Close the polygon (last → first) when it has ≥ 3 points, then go to the keep/remove (side) step. */
+function closeLine() {
+  const d = cad.draft; snapFirst = false;
+  if (d.length >= 3 && (d[0][0] !== d[d.length - 1][0] || d[0][1] !== d[d.length - 1][1] || d[0][2] !== d[d.length - 1][2])) d.push([...d[0]] as V3);
+  drawOverlay(); finishLine();
 }
 function finishLine() { if (cad.draft.length < 2) { X.toast('At least two points.'); return; } cutStage = 'side'; X.toast('Now tap the side to remove.'); X.renderDialog(); }
 export const cadActive = () => cad.faces.length > 0 && (!!cad.tool || !!document.querySelector('.tab.active[data-tab="nuetz"]') || !X.hasMesh());
@@ -201,7 +215,7 @@ export function cadDialog(d: HTMLElement): boolean {
   if (t === 'offset') h += `<h4>Boundary offset</h4><p class="note">Offset the boundary of the selected face(s) inwards by the distance (spatial distance to the boundary edge, on the face). Shared edges of several selected faces are kept.</p>
     <div class="row"><input type="range" id="cad-d-r" min="0.1" max="10" step="0.1" value="${cad.offsetD}" style="flex:1"><input type="number" id="cad-d" min="0.01" max="100" step="0.1" value="${cad.offsetD}" style="width:5em"> mm</div>
     <div class="row"><button class="btn primary" id="cad-off-ok" ${sel.length ? '' : 'disabled'} ${b}>✔ Apply to ${sel.length} face(s)</button>${cad.opSel >= 0 && cad.ops[cad.opSel]?.kind === 'offset' ? `<button class="btn" id="cad-off-upd" ${b}>Change selected operation</button>` : ''}</div>`;
-  else if (t === 'cut') h += `<h4>Cut line</h4><p class="note">${cutStage === 'side' ? '<b>Tap the side</b> to remove.' : 'Tap points in the view (2 = straight line, more = polyline). The line is projected onto the face along the view direction.'}</p>
+  else if (t === 'cut') h += `<h4>Cut line</h4><p class="note">${cutStage === 'side' ? '<b>Tap the side</b> to remove.' : 'Tap points in the view (2 = straight line, more = polyline). Tap the first point (green when snapped), right-click or ✓ to close the polygon. The line is projected onto the face along the view direction.'}</p>
     <div class="row"><b>${cad.draft.length}</b>&nbsp;points</div><div class="row"><button class="btn primary" id="cad-cut-ok" ${cad.draft.length > 1 && cutStage === 'draw' ? '' : 'disabled'}>Done → choose side</button><button class="btn" id="cad-cut-back" ${cad.draft.length ? '' : 'disabled'}>↶ Point</button></div>`;
   else if (t === 'circle' || t === 'rect') h += `<h4>Island ${t === 'circle' ? 'circle' : 'rectangle'}</h4><p class="note">Tap ${t === 'circle' ? 'the center, then a boundary point' : 'the first corner, then the opposite corner'} – the hole is cut along the view direction.</p><div class="row"><b>${cad.draft.length}</b>/2 points</div>`;
   else if (t === 'export') h += `<h4>Export</h4><div class="row"><label><input type="radio" name="cad-ex" value="sel" ${cad.exportAll ? '' : 'checked'} ${cad.sel.size ? '' : 'disabled'}> selected (${cad.sel.size})</label><label><input type="radio" name="cad-ex" value="all" ${cad.exportAll || !cad.sel.size ? 'checked' : ''}> all visible</label></div>
@@ -221,7 +235,7 @@ export function cadDialog(d: HTMLElement): boolean {
   if (di && dr) { di.oninput = () => { const v = parseFloat(di.value); if (v > 0) { cad.offsetD = v; dr.value = String(Math.min(10, v)); } }; dr.oninput = () => { cad.offsetD = parseFloat(dr.value); di.value = dr.value; }; }
   on('#cad-off-ok', () => pushOp({ kind: 'offset', faces: [...cad.sel], d: cad.offsetD }));
   on('#cad-off-upd', async () => { snapshot(); const o = cad.ops[cad.opSel] as any; o.d = cad.offsetD; await apply(); });
-  on('#cad-cut-ok', finishLine); on('#cad-cut-back', () => { cad.draft.pop(); drawOverlay(); X.renderDialog(); });
+  on('#cad-cut-ok', closeLine); on('#cad-cut-back', () => { cad.draft.pop(); drawOverlay(); X.renderDialog(); });
   on('#cad-ex-go', () => cadExport(cad.exportFmt)); d.querySelectorAll<HTMLButtonElement>('[data-exfmt]').forEach((x) => (x.onclick = () => { cad.exportFmt = x.dataset.exfmt as 'step' | 'iges'; X.renderDialog(); }));
   d.querySelectorAll<HTMLInputElement>('[name="cad-ex"]').forEach((r) => (r.onchange = () => (cad.exportAll = r.value === 'all')));
   on('#cad-undo', () => cadUndo()); on('#cad-redo', () => cadRedo()); on('#cad-close', () => setTool(null));
@@ -234,7 +248,7 @@ export function initCad(ctx: CadCtx) {
   canvas.addEventListener('pointerdown', (e) => { if (!cadActive()) return; down = { x: e.clientX, y: e.clientY, t: performance.now() }; }, true);
   canvas.addEventListener('pointermove', (e) => {
     if (!cadActive() || e.pointerType !== 'mouse' || e.buttons) return;
-    if (cad.tool && cad.tool !== 'offset' && cad.tool !== 'export' && cad.draft.length && cutStage === 'draw') drawOverlay(worldAt(e.clientX, e.clientY));
+    if (cad.tool && cad.tool !== 'offset' && cad.tool !== 'export' && cad.draft.length && cutStage === 'draw') { const sn = nearFirst(e.clientX, e.clientY); if (sn !== snapFirst) { snapFirst = sn; X.viewer.renderer.domElement.style.cursor = sn ? 'pointer' : ''; } drawOverlay(sn ? cad.draft[0] : worldAt(e.clientX, e.clientY)); }
     const h = pickFace(e.clientX, e.clientY); const id = h?.id ?? -1; if (id !== cad.hover) { cad.hover = id; cadPaint(); canvas.style.cursor = id >= 0 ? 'pointer' : ''; }
   });
   window.addEventListener('pointerup', (e) => {
@@ -242,8 +256,8 @@ export function initCad(ctx: CadCtx) {
     if (Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 8 || performance.now() - d0.t > 700) return;
     (e as any).cadHandled = true; cadTap(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || e.metaKey);
   }, true);
-  window.addEventListener('mw-rclick', () => { if (cadActive() && cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) finishLine(); });
-  canvas.addEventListener('dblclick', (e) => { if (cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) { e.preventDefault(); finishLine(); } });
+  window.addEventListener('mw-rclick', () => { if (cadActive() && cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) closeLine(); });
+  canvas.addEventListener('dblclick', (e) => { if (cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) { e.preventDefault(); closeLine(); } });
   window.addEventListener('keydown', (e) => {
     if (!cadActive() || (e.target as HTMLElement).tagName === 'INPUT') return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.stopImmediatePropagation(); e.shiftKey ? cadRedo() : cadUndo(); }

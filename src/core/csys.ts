@@ -1,4 +1,4 @@
-// Local coordinate systems (alignments) from features, 3-2-1 principle ("Level – Rotate – Origin").
+// Local coordinate systems (output frames for XYZ values; not an alignment) from features, 3-2-1 principle ("Level – Rotate – Origin").
 // Primary locks 2 rotations (axis from plane normal / cylinder, cone, line axis), secondary locks the rotation about it
 // (direction projected into the primary plane), origin X/Y/Z each from a feature (+ offset). Recomputed from the
 // features whenever they change; data are never transformed – only outputs are expressed in the active system.
@@ -7,7 +7,8 @@ import { Vec3, add, cross, dot, norm, scale, sub, unit } from './linalg';
 
 export type Axis = 'X' | 'Y' | 'Z';
 export interface AxisRef { fid: number | null; axis: Axis; flip: boolean }
-export interface OriginRef { fid: number | null; off: number }
+/** auto: reason text when the entry was auto-filled by suggestOrigin (cleared when the user picks/changes it). */
+export interface OriginRef { fid: number | null; off: number; auto?: string }
 export interface CSys {
   id: number; name: string;
   primary: AxisRef;          // default +Z
@@ -93,7 +94,13 @@ export const dirLocal = (fr: Frame, v: Vec3): Vec3 => [dot(fr.R[0], v), dot(fr.R
 export function suggestOrigin(cs: CSys, feats: Map<number, Feature>) {
   const p = cs.primary.fid != null ? feats.get(cs.primary.fid) : undefined, s = cs.secondary.fid != null ? feats.get(cs.secondary.fid) : undefined;
   const ip = cs.primary.axis, is = cs.secondary.axis, it = AX.find((a) => a !== ip && a !== is)!;
-  if (p && cs.origin[ip].fid == null && (p.type === 'Ebene')) cs.origin[ip].fid = p.id;
-  if (p && AXIS_TYPES.concat('Kreis').includes(p.type)) { if (cs.origin[is].fid == null) cs.origin[is].fid = p.id; if (cs.origin[it].fid == null) cs.origin[it].fid = p.id; }
-  if (s && s.type === 'Ebene' && cs.origin[is].fid == null) cs.origin[is].fid = s.id;
+  const set = (a: Axis, f: Feature, why: string) => { if (cs.origin[a].fid == null) cs.origin[a] = { ...cs.origin[a], fid: f.id, auto: why }; };
+  // primary plane: its surface is the zero of the primary axis (the plane fixes this translation)
+  if (p && p.type === 'Ebene') set(ip, p, 'primary plane fixes the ' + ip + ' translation');
+  // primary axis (cylinder/cone/line/torus/circle): the axis passes through the origin → it fixes BOTH other translations
+  if (p && AXIS_TYPES.concat('Kreis').includes(p.type)) { set(is, p, 'primary axis passes through the origin'); set(it, p, 'primary axis passes through the origin'); }
+  // secondary plane: zero of the secondary axis
+  if (s && s.type === 'Ebene') set(is, s, 'secondary plane fixes the ' + is + ' translation');
+  // secondary axis (line/cylinder …) lying in the primary plane: it passes through the origin → fixes the third translation
+  if (s && AXIS_TYPES.includes(s.type)) set(it, s, 'secondary axis passes through the origin');
 }

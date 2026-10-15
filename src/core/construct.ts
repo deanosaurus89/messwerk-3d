@@ -16,7 +16,7 @@ export function classesOf(t: GeomType): Cls[] {
     case 'Zylinder': return ['cyl', 'line', 'point', 'any'];
     case 'Kegel': return ['cone', 'line', 'point', 'any'];
     case 'Kugel': return ['sphere', 'point', 'any'];
-    case 'Langloch': return ['slot', 'point', 'any'];
+    case 'Langloch': return ['slot', 'point', 'line', 'any'];
     case 'Torus': return ['torus', 'line', 'point', 'any'];
     case 'Abstand': case 'Winkel': case 'Freiformfläche': return [];
   }
@@ -87,7 +87,7 @@ export const CONSTRUCTIONS: Construction[] = [
   { key: 'ln-axis', out: 'Linie', label: 'Axis of cylinder, cone or torus', slots: [S('Feature', 'cyl', 'cone', 'torus')], compute: ([f]) => L(f.center, f.normal, f.length ?? 0) },
   { key: 'ln-slot', out: 'Linie', label: 'Slot center line', slots: [S('Slot', 'slot')], compute: ([f]) => L(f.center, f.direction ?? f.normal, Math.max(0, (f.length ?? 0) - (f.width ?? 0))) },
   { key: 'ln-normal', out: 'Linie', label: 'Circle normal (axis through center)', slots: [S('Circle', 'circle')], compute: ([f]) => L(f.center, f.normal, f.diameter ?? 0) },
-  { key: 'ln-2pts', out: 'Linie', label: 'Line through 2 points', slots: [S('Point 1', 'point'), S('Point 2', 'point')],
+  { key: 'ln-2pts', out: 'Linie', label: 'Line through 2 points or centers (circle, slot, sphere, cylinder …)', slots: [S('Point 1', 'point'), S('Point 2', 'point')],
     compute: ([a, b]) => { const d = sub(pt(b), pt(a)); if (norm(d) < 1e-9) throw new Error('Points coincide'); return L(scale(add(pt(a), pt(b)), 0.5), d, norm(d)); } },
   { key: 'ln-fit', out: 'Linie', label: 'Best-fit line (straightness)', slots: [], multi: { min: 3, slot: S('Point / center', 'point') }, compute: (fs) => { const r = fitLine(center(fs)); delete r.residuals; return r; } },
   { key: 'ln-proj', out: 'Linie', label: 'Projection of a line onto a plane', slots: [S('Line / axis', 'line'), S('Plane', 'plane')],
@@ -143,7 +143,7 @@ export const CONSTRUCTIONS: Construction[] = [
       return { ...c, pattern: { n, angles: order.map(([a]) => +a.toFixed(4)), pitch, pitchDev, radialDev: c.form } };
     } },
   // ---------------- angle
-  { key: 'an-2', out: 'Winkel', label: 'Angle between 2 features (lines, axes, planes)', slots: [S('Feature 1', 'line', 'plane'), S('Feature 2', 'line', 'plane')],
+  { key: 'an-2', out: 'Winkel', label: 'Angle between 2 features (lines, planes, cylinder/cone axes, slots, circle normals)', slots: [S('Feature 1', 'line', 'plane'), S('Feature 2', 'line', 'plane')],
     compute: ([a, b]) => {
       const da = a.type === 'Ebene' ? a.normal : dirOf(a), db = b.type === 'Ebene' ? b.normal : dirOf(b);
       let t = Math.acos(Math.min(1, Math.abs(dot(unit(da), unit(db))))) * 180 / Math.PI;

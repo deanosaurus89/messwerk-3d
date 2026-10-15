@@ -77,7 +77,7 @@ export type Req =
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
-  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult }
+  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number } }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult };
 
@@ -176,7 +176,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       }
     } else if (req.op === 'aux') {
       if (!topo) throw new Error('The auxiliary plane needs a polygon model (triangles).');
-      const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane);
+      const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane, Infinity, req.ring);
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
     } else if (req.op === 'dev') {
       // Abweichungen der Merkmalspunkte zum Ausgleichselement (Farbkarte/Whisker der Analyse)

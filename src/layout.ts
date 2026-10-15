@@ -28,7 +28,7 @@ export function initLayout() {
     const pane = document.querySelector<HTMLElement>(sel)!; const h = document.createElement('div'); h.className = 'splitter splitter-' + p; h.title = 'Drag to resize';
     pane.appendChild(h);
     const title = pane.querySelector('.pane-title'); if (title && !title.querySelector('.pane-x')) {
-      const x = document.createElement('button'); x.className = 'pane-x'; x.textContent = '✕'; x.title = 'Close panel (View ribbon reopens it)';
+      const x = document.createElement('button'); x.className = 'pane-x'; x.textContent = '✕'; x.title = 'Close panel (☰ panels menu in the 3D view or View ribbon reopens it)';
       x.onclick = () => setPaneOpen(p, false); title.insertBefore(x, title.firstChild); }
     h.addEventListener('pointerdown', (e) => {
       e.preventDefault(); h.setPointerCapture(e.pointerId); const x0 = e.clientX, y0 = e.clientY, s0 = st.size[p]; document.body.classList.add('resizing');
@@ -41,4 +41,20 @@ export function initLayout() {
   }
   document.querySelectorAll<HTMLElement>('[data-pane-toggle]').forEach((b) => (b.onclick = () => setPaneOpen(b.dataset.paneToggle as PaneId, !st.open[b.dataset.paneToggle as PaneId])));
   apply();
+}
+const NAMES: Record<PaneId, string> = { tree: 'Tree', dialog: 'Dialog', table: 'Controls table' };
+/** New project: all panels visible (sizes kept). */
+export function showAllPanes() { st.open = { tree: true, dialog: true, table: true }; save(); apply(); }
+/** ☰ panels menu in the top-right corner of the 3D view: checklist of all panels; ticking restores a pane with its previous size. */
+export function initPanelsMenu(host: HTMLElement, tr: (s: string) => string = (s) => s, onSet?: (p: PaneId, on: boolean) => void) {
+  const b = document.createElement('button'); b.id = 'panels-btn'; b.textContent = '☰'; b.title = tr('Panels: show or restore closed panels');
+  const m = document.createElement('div'); m.id = 'panels-menu'; m.className = 'hidden';
+  const draw = () => { m.innerHTML = `<b>${tr('Panels')}</b>` + (Object.keys(NAMES) as PaneId[]).map((p) => `<label><input type="checkbox" data-pp="${p}" ${st.open[p] ? 'checked' : ''}> ${tr(NAMES[p])}</label>`).join('')
+    + `<button data-pp-all>${tr('Show all')}</button>`;
+    m.querySelectorAll<HTMLInputElement>('[data-pp]').forEach((i) => (i.onchange = () => { setPaneOpen(i.dataset.pp as PaneId, i.checked); onSet?.(i.dataset.pp as PaneId, i.checked); }));
+    m.querySelector<HTMLButtonElement>('[data-pp-all]')!.onclick = () => { showAllPanes(); draw(); }; };
+  b.onclick = (e) => { e.stopPropagation(); draw(); m.classList.toggle('hidden'); };
+  document.addEventListener('pointerdown', (e) => { if (!m.contains(e.target as Node) && e.target !== b) m.classList.add('hidden'); });
+  onLayoutChange(() => { if (!m.classList.contains('hidden')) draw(); });
+  host.append(b, m);
 }

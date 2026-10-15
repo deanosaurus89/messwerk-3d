@@ -125,6 +125,13 @@ describe('Automatik: Ebene vs. Hilfsebene vs. Wand, Torus', () => {
     expect(run([20, 26.04, 10], [0, -1, 0]).fit.type).toBe('Zylinder');
     const k = run([20, 26.04, 19.3], [0, -1, 0]); expect(k.fit.type).toBe('Kreis'); expect(k.aux).toBeDefined(); expect(k.fit.center[2]).toBeCloseTo(20, 2);
   });
+  it.each([0, 3, 6])('Rim click (~45°, between aux plane and wall) at %i×45° -> circle in the top plane', (a) => {
+    const g = a * Math.PI / 4, c = Math.cos(g), s = Math.sin(g), pt: Vec3 = [20 + 5.99 * c, 20 + 5.99 * s, 19.95];
+    const p = mesh.positions, f = mesh.indices, fn = mesh.faceNormals!; let t0 = -1, bd = Infinity; const nn = [-c, -s, 0.2];
+    for (let t = 0; t < f.length / 3; t++) { if (fn[3 * t] * nn[0] + fn[3 * t + 1] * nn[1] + fn[3 * t + 2] * nn[2] < 0.3) continue; let d = 0; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; d += (p[3 * v] - pt[0]) ** 2 + (p[3 * v + 1] - pt[1]) ** 2 + (p[3 * v + 2] - pt[2]) ** 2; } if (d < bd) { bd = d; t0 = t; } }
+    const r = autoExtract(mesh, topo, t0, pt, { maxAngleDeg: 20, radius: 0 }, 120);
+    expect(r.fit.type).toBe('Kreis'); expect(r.fit.diameter!).toBeCloseTo(12.08, 1); expect(r.fit.center[2]).toBeCloseTo(20, 2);
+  });
   it('Langlochwand -> Langloch mit Hilfsebene', () => {
     const r = run([20, 50, 10], [0, -1, 0]); expect(r.fit.type).toBe('Langloch'); expect(r.aux).toBeDefined();
   });
