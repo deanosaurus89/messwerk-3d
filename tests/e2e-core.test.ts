@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // End-to-End (Kern): Beispiel-STL laden, Merkmale per "Klick" (Saatdreieck) extrahieren, Prüfen.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -7,7 +8,7 @@ import { autoFit, fitType, GeomType } from '../src/core/fit';
 import type { Vec3 } from '../src/core/linalg';
 import { evaluate, Feature, Control, computeDistance } from '../src/core/features';
 
-const buf = readFileSync(new URL('../public/samples/beispielteil.stl', import.meta.url));
+const buf = readFileSync(samplePath('beispielteil.stl'));
 const mesh = parseSTL(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), 'beispielteil');
 const topo = new MeshTopology(mesh);
 

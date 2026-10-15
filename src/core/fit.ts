@@ -389,6 +389,15 @@ export function fitType(type: GeomType, p: Vec3[], n: Vec3[], robustFit: boolean
   return k > 0 && type !== 'Punkt' ? robust(run, p, n, k) : run(p, n);
 }
 
+/** Anchor fit: element exactly through the mathematical minimum of picked points
+ *  (point 1, line 2, plane 3, circle 3 – its plane from the points, sphere 4, cylinder 5, cone 6). */
+export const ANCHOR_MIN: Partial<Record<GeomType, number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6 };
+export function anchorFit(type: GeomType, p: Vec3[], n: Vec3[]): FitResult {
+  const need = ANCHOR_MIN[type]; if (need == null) throw new Error('Anchor not available for this type');
+  if (p.length < need) throw new Error(`At least ${need} points`);
+  if (type === 'Kreis') { const c = fitCircle3D(p); return c; }
+  return fitType(type, p, n, false);
+}
 /** Flächennormale des gefitteten Elements am Punkt p (Vorzeichen egal). */
 export function modelNormal(f: FitResult, p: Vec3): Vec3 {
   const a = f.normal;

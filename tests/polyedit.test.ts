@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // Polygonbearbeitung: Toleranz der Reduktion/Unterteilung/Glättung, geschlossene Füllung des magischen Radierers.
 import { appendFileSync, readFileSync } from 'node:fs';
 const log = (s: string) => { try { appendFileSync('/tmp/pe-numbers.txt', s + '\n'); } catch { /* */ } };
@@ -6,8 +7,8 @@ import { parseByName } from '../src/core/io';
 import { boundaryEdges, compareToOriginal, decimate, eraseAndFill, signedDistances, smooth, subdivide } from '../src/core/polyedit';
 
 function load(key: string) {
-  const nom = JSON.parse(readFileSync(new URL(`../public/samples/${key}.json`, import.meta.url), 'utf8'));
-  const buf = readFileSync(new URL(`../public/samples/${nom.file}`, import.meta.url));
+  const nom = JSON.parse(readFileSync(samplePath(`${key}.json`), 'utf8'));
+  const buf = readFileSync(samplePath(`${nom.file}`));
   const m = parseByName(nom.file, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
   return { positions: m.positions, indices: m.indices };
 }

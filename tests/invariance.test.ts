@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // Rotations-/Translationsinvarianz des Regionenwachstums: gleiche Saat-Dreiecke im gedrehten/verschobenen Netz
 // müssen dieselbe Dreiecksmenge und dieselbe Geometrie (Typ, RMS, Durchmesser) liefern.
 import { existsSync, readFileSync } from 'node:fs';
@@ -22,10 +23,10 @@ function transformSTL(buf: Uint8Array, R: number[][], T: number[]): ArrayBuffer 
       for (let k = 0; k < 3; k++) dv.setFloat32(a + 4 * k, R[k][0] * v[0] + R[k][1] * v[1] + R[k][2] * v[2] + (j ? T[k] : 0), true); } }
   return out;
 }
-const files: [string, string][] = [['beispielteil', 'public/samples/beispielteil.stl'], ['pruefplatte', 'public/samples/pruefplatte.stl.gz'], ['flansch', 'public/samples/flansch.stl.gz'],
+const files: [string, string][] = [['beispielteil', samplePath('beispielteil.stl')], ['pruefplatte', samplePath('pruefplatte.stl.gz')], ['flansch', samplePath('flansch.stl.gz')],
   ['scan1', 'tests/fixtures/real/scan1.stl'], ['scan2', 'tests/fixtures/real/scan2.stl'], ['scan3', 'tests/fixtures/real/scan3.stl']];
 for (const [name, path] of files) {
-  const url = new URL('../' + path, import.meta.url);
+  const url = path.startsWith('/') ? path : new URL('../' + path, import.meta.url);
   describe.skipIf(!existsSync(url))(`Invarianz ${name}`, () => {
     it('gedreht + verschoben -> identische Regionen und Fits', () => {
       let raw = new Uint8Array(readFileSync(url)); if (path.endsWith('.gz')) raw = new Uint8Array(gunzipSync(raw));

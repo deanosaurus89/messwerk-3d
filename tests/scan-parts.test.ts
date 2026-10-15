@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // Scan-ähnliche Demo-Teile: automatische Extraktion an den Prüfpunkten (probe) gegen die dokumentierte Soll-Geometrie (samples/*.json).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -7,8 +8,8 @@ import { autoExtract } from '../src/core/aux';
 import type { Vec3 } from '../src/core/linalg';
 
 function load(key: string) {
-  const nom = JSON.parse(readFileSync(new URL(`../public/samples/${key}.json`, import.meta.url), 'utf8'));
-  const buf = readFileSync(new URL(`../public/samples/${nom.file}`, import.meta.url));
+  const nom = JSON.parse(readFileSync(samplePath(`${key}.json`), 'utf8'));
+  const buf = readFileSync(samplePath(`${nom.file}`));
   const mesh = parseByName(nom.file, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
   return { nom, mesh, topo: new MeshTopology(mesh) };
 }

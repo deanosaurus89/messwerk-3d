@@ -3,12 +3,13 @@
 import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
 import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
 import { docsHtml } from './docs';
+import { provenanceOf } from './core/provenance';
 import { t as tt, typeName, kindName, methodName } from './i18n';
 import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
 import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
 import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
-import { FitResult, GeomType, fitType } from './core/fit';
+import { FitResult, GeomType, anchorFit } from './core/fit';
 import {
   Control, ControlKind, Feature, availableControls, computeDistance, controlLabel, controlsCSV,
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
@@ -189,11 +190,11 @@ $('#file').onchange = async (e) => {
   (e.target as HTMLInputElement).value = '';
 };
 // ---------- Beispielteile (Auswahl mit Vorschaubild)
-interface SampleInfo { key: string; name: string; file: string; description: string; triangles: number; bytes: number; thumb: string; kind: string }
+interface SampleInfo { key: string; name: string; file: string; description: string; triangles: number; bytes: number; thumb: string; kind: string; hidden?: boolean; default?: boolean }
 let samples: SampleInfo[] | null = null;
 async function loadSample(s: SampleInfo) {
   $('#sample-dialog').classList.add('hidden');
-  status(`Loading ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
+  status(`${tt('Loading')} ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
   try {
     const r = await fetch('./samples/' + s.file); if (!r.ok) throw new Error('HTTP ' + r.status);
     await loadBuffer(s.file, await r.arrayBuffer());
@@ -205,7 +206,7 @@ async function openSamples() {
   const std = samples!.find((s) => s.key === 'beispielteil');
   if (tour && std) { loadSample(std); return; } // Trainingsmodus: immer das Standard-Beispielteil direkt laden
   d.innerHTML = `<div class="rv-head"><b>${tt('Load sample part')}</b><span class="note">${tt('Demo measurement data (scan/CT-like) – nominal geometry in samples/*.json')}</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
-    <div class="sd-grid">${samples!.map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
+    <div class="sd-grid">${samples!.filter((s) => !s.hidden).map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
       <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k ${tt('triangles')} · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
   d.classList.remove('hidden');
   ($('#sd-close') as HTMLButtonElement).onclick = () => d.classList.add('hidden');
@@ -266,7 +267,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale
     loadCount++; storeMeshForAutosave(r.name); $('#restore-bar').classList.add('hidden');
     state.opts.brush = +(r.bounds.diag / 25).toFixed(1);
     $('#projname').textContent = r.name;
-    status(`${name} geladen in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
+    status(tt('{0} loaded in {1} s.', name, ((performance.now() - t0) / 1000).toFixed(1)));
     $('#stats').textContent = `${r.vertexCount.toLocaleString('en-US')} points · ${r.triCount.toLocaleString('en-US')} triangles`; showBBoxInfo(r.bounds);
     renderAll();
   } catch (e: any) { status('Import error: ' + e.message); }
@@ -1223,7 +1224,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label></div>
-    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}
+    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}
     <h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}
@@ -1743,10 +1744,14 @@ async function restoreLast() {
 (async () => {
   try {
     const p = await idbGet('project');
+    if (!p && !state.data && !new URLSearchParams(location.search).has('nodemo')) {
+      // first start / no saved project: load the default demo model (formdemo)
+      try { samples ??= await (await fetch('./samples/index.json')).json(); const d = samples!.find((s) => s.default); if (d && !state.data) await loadSample(d); } catch { /* offline */ }
+    }
     if (p && !state.data) {
       const bar = $('#restore-bar');
-      bar.innerHTML = `<span>Letztes Projekt vom ${new Date(p.savedAt).toLocaleString('de-DE')} (${p.json.mesh.name}, ${p.features} Merkmale)</span>
-        <button class="btn primary" id="rb-restore">Letztes Projekt wiederherstellen</button><button class="btn" id="rb-discard">Verwerfen</button>`;
+      bar.innerHTML = `<span>${tt('Last project from {0} ({1}, {2} features)', new Date(p.savedAt).toLocaleString(), p.json.mesh.name, p.features)}</span>
+        <button class="btn primary" id="rb-restore">${tt('Restore last project')}</button><button class="btn" id="rb-discard">${tt('Discard')}</button>`;
       bar.classList.remove('hidden');
       ($('#rb-restore') as HTMLButtonElement).onclick = () => restoreLast();
       ($('#rb-discard') as HTMLButtonElement).onclick = async () => { await idbDel('project'); await idbDel('mesh'); bar.classList.add('hidden'); };
@@ -2697,7 +2702,7 @@ let anchorError = '';
 function updateAnchorPreview() {
   const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!; anchorError = ''; state.preview = null;
   if (m.pts.length < N || m.out === 'Abstand') return;
-  try { const fit = fitType(m.out, m.pts, m.nrm, false); if (!fit || !fit.center.every(isFinite)) throw new Error('Points do not define the element – pick other points.');
+  try { const fit = anchorFit(m.out, m.pts, m.nrm); if (!fit || !fit.center.every(isFinite)) throw new Error('Points do not define the element – pick other points.');
     state.preview = { fit, indices: new Uint32Array(0), candidates: [], method: 'Anker' as any }; }
   catch (e: any) { anchorError = tt(e.message); }
 }
@@ -2705,11 +2710,12 @@ function anchorCommit() {
   const m = state.mode as AnchorMode;
   if (m.out === 'Abstand') {
     if (m.pts.length < 2) return;
-    const ids = m.pts.map((p, i) => { state.mode = { kind: 'anchor', out: 'Punkt', pts: [p], nrm: [m.nrm[i]] }; updateAnchorPreview(); commitPreview(); return state.features[state.features.length - 1].id; });
+    const ids = m.pts.map((p, i) => { state.mode = { kind: 'anchor', out: 'Punkt', pts: [p], nrm: [m.nrm[i]] }; updateAnchorPreview(); commitPreview(); const nf = state.features[state.features.length - 1]; nf.anchor = { pts: [p], nrm: [m.nrm[i]] }; return nf.id; });
     state.mode = { kind: 'dist', a: ids[0], b: ids[1], slot: 1, comp: '3D' }; updateDistancePreview(); commitPreview();
     state.mode = { kind: 'anchor', out: 'Abstand', pts: [], nrm: [] }; renderAll(); return;
   }
-  commitPreview(); state.mode = { ...m, pts: [], nrm: [] }; renderAll();
+  commitPreview(); const nf = state.features[state.features.length - 1]; if (nf?.method === 'Anker') nf.anchor = { pts: m.pts.map((q) => [...q] as Vec3), nrm: m.nrm.map((q) => [...q] as Vec3) };
+  state.mode = { ...m, pts: [], nrm: [] }; renderAll();
 }
 function anchorSpec(): CtxSpec {
   const m = state.mode as AnchorMode, N = ANCHOR_N[m.out]!;
@@ -2754,6 +2760,18 @@ function conRows(fit: FitResult): [string, string][] {
   if (fit.pattern) rows.push([tt('Holes'), String(fit.pattern.n)], [tt('Nominal pitch [°]'), fmt(fit.pattern.pitch, 3)], [tt('Pitch deviation [°]'), fmt(fit.pattern.pitchDev, 4)], [tt('Angles [°]'), fit.pattern.angles.map((a) => a.toFixed(2)).join(', ')]);
   if (fit.type !== 'Winkel') rows.push(...fitRows(fit, 0).filter(([k]) => k !== tt('Points') && k !== 'Max. +' && k !== 'Max. −' && k !== tt('Std. dev. (RMS)')));
   return rows;
+}
+/** Provenance (how the feature was created) – one structure for all methods (core/provenance). */
+function provenanceHTML(f: FeatureView): string {
+  const p = provenanceOf(f, { seed: f.hit?.point as Vec3 | undefined, params: f.fp as any });
+  const rows: [string, string][] = [];
+  if (p.kind === 'mesh') { rows.push([tt('Method'), methodName(p.method)], [tt('Points'), String(p.points)]);
+    if (p.seed) rows.push([tt('Seed point'), p.seed.map((v) => fmt(v, 3)).join(' ')]);
+    if (p.params) rows.push([tt('Max. angle'), fmt(p.params.maxAngleDeg ?? 0, 1) + '°'], [tt('Area r'), p.params.radius ? fmt(p.params.radius, 2) + ' mm' : tt('unlimited')]);
+    if (p.aux) rows.push([tt('Auxiliary plane'), `${p.aux.source} (${p.aux.points} ${tt('pts')})`]); }
+  else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }
+  else return '';
+  return `<h4>${tt('Provenance')}</h4>${kv(rows)}`;
 }
 /** Feature dialog part for constructed features: definition, parameters (editable → recompute). */
 function conDefinitionHTML(f: FeatureView): string {

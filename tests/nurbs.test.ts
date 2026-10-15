@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // B-Spline-Flächenrückführung gegen die bekannte Freiformfläche des Freiform-Demoteils.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -27,7 +28,7 @@ describe('Freiformfläche (B-Spline)', () => {
     expect(f.rms).toBeLessThan(0.01); expect(e.max).toBeLessThan(0.02);
   });
   it('Scan-Netz des Freiform-Demoteils (Regionenwachstum ab Flächenmitte)', () => {
-    const buf = readFileSync(new URL('../public/samples/freiform.stl.gz', import.meta.url));
+    const buf = readFileSync(samplePath('freiform.stl.gz'));
     const mesh = parseByName('freiform.stl.gz', buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
     const topo = new MeshTopology(mesh);
     const pt: Vec3 = [35, 40, Z(35, 40)]; const P = mesh.positions, F = mesh.indices; let best = 0, bd = Infinity;

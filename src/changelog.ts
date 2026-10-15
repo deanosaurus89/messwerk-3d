@@ -6,6 +6,10 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.9', date: '2026-10-15', items: [
+    'New default demo model: form deviation demo (loads on first start). Sample gallery: form deviation demo and shaft/flange.',
+    'Feature dialog shows the provenance (method, seed point, extraction parameters, aux plane, anchor points). Anchor circle from exactly 3 points.',
+  ] },
   { version: '2026.0.8', date: '2026-10-15', items: [
     'Options moved into the Home tab; new Help › Documentation with workflows and demo-part images.',
     'Auto-detect: clicks on a rim between a face and a hole wall segment the neighbourhood into plane + cylinder (fewer misdetections).',

@@ -18,6 +18,8 @@ export interface Feature {
   datum?: string;            // Bezugsbuchstabe (A, B, C …)
   /** constructed feature: construction key, parents (also in refs) and parameters */
   cons?: { key: string; refs: number[]; params?: Record<string, number>; error?: string };
+  /** anchor feature: the picked points (mathematical minimum) and their surface normals */
+  anchor?: { pts: Vec3[]; nrm: Vec3[] };
 }
 
 /** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */

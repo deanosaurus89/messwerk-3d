@@ -1,3 +1,4 @@
+import { samplePath } from './samplePath';
 // Kurvennetz: Erkennung scharfer Kanten und Tangentenlinien, B-Spline auf dem Netz, Graph/Patch-Aufteilung.
 import { readFileSync, appendFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -73,8 +74,8 @@ describe('Kurvennetz', () => {
     const j = joinCurves(g, bvh, sp[0], sp[1]); expect(Math.abs(j.length - c.length)).toBeLessThan(2);
   });
   it('Prüfplatte: Erkennung, T-Stöße, Patch-Aufteilung, Benutzerkurve', () => {
-    const nom = JSON.parse(readFileSync(new URL('../public/samples/pruefplatte.json', import.meta.url), 'utf8'));
-    const buf = readFileSync(new URL(`../public/samples/${nom.file}`, import.meta.url));
+    const nom = JSON.parse(readFileSync(samplePath('pruefplatte.json'), 'utf8'));
+    const buf = readFileSync(samplePath(`${nom.file}`));
     const m = parseByName(nom.file, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
     const t0 = performance.now(); const g = new EdgeGraph(m); const bvh = buildBVH(m);
     const cs = detectCurves(m, {}, g, bvh); const lay = layout(g, cs);
@@ -90,8 +91,8 @@ describe('Kurvennetz', () => {
 
 describe('Kurvennetz Demoteile (Statistik)', () => {
   for (const key of ['pruefplatte', 'flansch', 'freiform']) it(key, () => {
-    const nom = JSON.parse(readFileSync(new URL(`../public/samples/${key}.json`, import.meta.url), 'utf8'));
-    const buf = readFileSync(new URL(`../public/samples/${nom.file}`, import.meta.url));
+    const nom = JSON.parse(readFileSync(samplePath(`${key}.json`), 'utf8'));
+    const buf = readFileSync(samplePath(`${nom.file}`));
     const m = parseByName(nom.file, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
     const g = new EdgeGraph(m); const bvh = buildBVH(m); const cs = detectCurves(m, {}, g, bvh); const L = layout(g, cs);
     const L2 = layout(g, [...cs, ...L.suggestions]);

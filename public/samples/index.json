@@ -1,27 +1,18 @@
 [
  {
-  "key": "beispielteil",
-  "name": "Beispielteil (Standard)",
-  "file": "beispielteil.stl",
-  "kind": "CAD-Tessellierung + Rauschen",
-  "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
-  "triangles": 284227,
-  "bytes": 14211434,
-  "thumb": "thumb-beispielteil.jpg"
- },
- {
-  "key": "pruefplatte",
-  "name": "Prüfplatte",
-  "file": "pruefplatte.stl.gz",
-  "kind": "Scan-ähnlich (isotropes Netz)",
-  "description": "Platte 140 × 90 × 16 mit Teilkreis 6 × Ø8 auf Ø60, Mittelbohrung Ø30, zwei Langlöchern, Tasche, Kugel und Kegel; Ecken R6, Fase 1 × 45°.",
-  "triangles": 334838,
-  "bytes": 13044627,
-  "thumb": "thumb-pruefplatte.jpg"
+  "key": "formdemo",
+  "name": "Form deviation demo (default)",
+  "file": "formdemo.stl.gz",
+  "kind": "Measured scan with large form deviations",
+  "description": "Validation part with clearly visible form deviations – ideal for Analyze (color map, arrows, zones) and extraction.",
+  "triangles": 297828,
+  "bytes": 8964070,
+  "thumb": "thumb-formdemo.jpg",
+  "default": true
  },
  {
   "key": "flansch",
-  "name": "Flansch/Welle",
+  "name": "Shaft/flange",
   "file": "flansch.stl.gz",
   "kind": "Scan-ähnlich (isotropes Netz)",
   "description": "Rotationsteil: Flansch Ø110 × 16 mit Teilkreis 6 × Ø10 auf Ø85, Welle Ø50 mit Torus-Einstich, Absatz Ø36, Kegel 53,13°, Zapfen Ø24, Bohrung Ø16 – alle koaxial zur Z-Achse.",
@@ -30,13 +21,14 @@
   "thumb": "thumb-flansch.jpg"
  },
  {
-  "key": "freiform",
-  "name": "Freiform-Demoteil",
-  "file": "freiform.stl.gz",
-  "kind": "Scan-ähnlich (isotropes Netz)",
-  "description": "Block 130 × 80 × 20 mit glatter Freiformfläche (B-Spline, bis +22,5 mm) links und Regelgeometrie rechts: Bohrung Ø14, Bolzen Ø18, Halbkugel Ø16, Kegel.",
-  "triangles": 363132,
-  "bytes": 13734626,
-  "thumb": "thumb-freiform.jpg"
+  "key": "beispielteil",
+  "name": "Training part",
+  "file": "beispielteil.stl",
+  "kind": "CAD-Tessellierung + Rauschen",
+  "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
+  "triangles": 284227,
+  "bytes": 14211434,
+  "thumb": "thumb-beispielteil.jpg",
+  "hidden": true
  }
 ]
