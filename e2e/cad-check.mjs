@@ -37,12 +37,12 @@ for (const [file, key] of [[FX + '/motordeckel.stp', 'stp'], [FX + '/deviated-co
   const L = await S(() => window.__app.cad.lastLoad);
   ok(L.faces > 0, `${key}: ${L.faces} Flächen ${JSON.stringify(L.types)} · gesamt ${((Date.now() - t0) / 1000).toFixed(1)} s (WASM-Init ${(L.ms.init / 1000).toFixed(1)} s, Lesen ${(L.ms.read / 1000).toFixed(1)} s, Tessellieren ${(L.ms.tess / 1000).toFixed(1)} s, ${L.tris} Dreiecke)`);
   if (PH) await S(() => document.body.classList.remove('show-tree', 'show-dialog'));
-  await page.screenshot({ path: `docs/cad-${key}-geladen${SUF}.png` });
+  await page.screenshot({ path: `${process.env.SHOT_DIR || "/workspace/private-shots"}/cad-${key}-geladen${SUF}.png` });
   if (key === 'igs') {
     await frontal('any'); await sleep(400); const s = await spot('any'); await tap(s.x, s.y); ok(await S((id) => window.__app.cad.sel.has(id), s.id), `igs: Fläche ${s.id + 1} gewählt (${s.type})`);
     await S(() => window.__app.cadSetTool('offset')); await panel(true); await page.fill('#cad-d', '3'); await page.dispatchEvent('#cad-d', 'input'); await page.click('#cad-off-ok'); await panel(false); await idle();
     const a1 = await areaOf(s.id); ok(a1 < s.area, `igs: Rand-Offset 3 mm ${s.area.toFixed(1)} → ${a1.toFixed(1)} mm²`);
-    await page.screenshot({ path: `docs/cad-igs-offset${SUF}.png` });
+    await page.screenshot({ path: `${process.env.SHOT_DIR || "/workspace/private-shots"}/cad-igs-offset${SUF}.png` });
     break;
   }
   // 1) Hover + Auswahl
@@ -57,7 +57,7 @@ for (const [file, key] of [[FX + '/motordeckel.stp', 'stp'], [FX + '/deviated-co
   await page.click('[data-cadtool="offset"]').catch(async () => S(() => window.__app.cadSetTool('offset'))); await panel(true);
   await page.fill('#cad-d', '3'); await page.dispatchEvent('#cad-d', 'input'); await page.click('#cad-off-ok'); await panel(false); await idle();
   const a1 = await areaOf(s.id); ok(a1 < s.area && a1 > 0, `Rand-Offset 3 mm: ${s.area.toFixed(1)} → ${a1.toFixed(1)} mm²`);
-  await page.screenshot({ path: `docs/cad-offset${SUF}.png` });
+  await page.screenshot({ path: `${process.env.SHOT_DIR || "/workspace/private-shots"}/cad-offset${SUF}.png` });
   // 3) Insel Kreis in der Flächenmitte
   await S(() => window.__app.cadSetTool('circle')); await panel(false); await tap(s.x, s.y); await tap(s.x + 18, s.y); await idle();
   console.log('dbg', JSON.stringify(await S(() => [window.__app.cad.tool, window.__app.cad.draft.length, window.__app.cad.ops.map((o) => o.kind)])));
@@ -72,7 +72,7 @@ for (const [file, key] of [[FX + '/motordeckel.stp', 'stp'], [FX + '/deviated-co
   const a4 = await areaOf(s.id); ok(a4 < a3, `Schnittlinie: ${a3.toFixed(1)} → ${a4.toFixed(1)} mm²`);
   const nops = await S(() => window.__app.cad.ops.length); ok(nops === 4, `${nops} Operationen in der Liste, Fehler: ${JSON.stringify(await S(() => window.__app.cad.errors))}`);
   await S(() => window.__app.cadSetTool(null)); await sleep(300);
-  await page.screenshot({ path: `docs/cad-beschnitte${SUF}.png` });
+  await page.screenshot({ path: `${process.env.SHOT_DIR || "/workspace/private-shots"}/cad-beschnitte${SUF}.png` });
   // 6) Rückgängig
   await S(() => window.__app.cadUndo()); await idle(); ok(Math.abs(await areaOf(s.id) - a3) < 0.01, 'Rückgängig stellt Fläche vor dem Schnitt wieder her');
   // 7) Export STEP und IGES der gewählten Fläche
@@ -82,7 +82,7 @@ for (const [file, key] of [[FX + '/motordeckel.stp', 'stp'], [FX + '/deviated-co
     const E = await S(() => window.__app.cad.lastExport);
     ok(E.valid && Math.abs(E.area - a3) / a3 < 0.005 && fs.statSync(p).size > 500, `Export ${fmt.toUpperCase()} ${dl.suggestedFilename()} (${(fs.statSync(p).size / 1024).toFixed(0)} kB): wieder eingelesen ${E.faces} Fläche(n), ${E.area.toFixed(1)} mm² (soll ${a3.toFixed(1)}), gültig ${E.valid}`);
   }
-  if (PH) { await S(() => window.__app.cadSetTool('export')); await sleep(400); await page.screenshot({ path: `docs/cad-export${SUF}.png` }); await panel(false); await S(() => window.__app.cadSetTool(null)); }
+  if (PH) { await S(() => window.__app.cadSetTool('export')); await sleep(400); await page.screenshot({ path: `${process.env.SHOT_DIR || "/workspace/private-shots"}/cad-export${SUF}.png` }); await panel(false); await S(() => window.__app.cadSetTool(null)); }
 }
 const vis = await S(() => { const r = window.__app.viewer.renderer.domElement.getBoundingClientRect(); return r.width * r.height / (innerWidth * innerHeight); });
 ok(vis > 0.3, `3D-Ansicht sichtbar (${(vis * 100).toFixed(0)} %)`);
