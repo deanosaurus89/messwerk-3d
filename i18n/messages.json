@@ -471,6 +471,7 @@
  "Start training": {},
  "Std. dev. (RMS)": {},
  "Std. dev. σ": {},
+ "Steps can be filled in any order (e.g. origin first); automatic origin entries follow the current primary/secondary.": {},
  "Strength λ": {},
  "Subdivision": {},
  "Surface normal must agree with the geometry normal within this angle": {},

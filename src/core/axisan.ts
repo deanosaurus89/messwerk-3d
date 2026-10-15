@@ -9,6 +9,8 @@
 //  - straightness of the median line: same as orientation, but with the fitted direction.
 import { FitResult, fitCircle2D } from './fit';
 import { Vec3, add, basis, dot, norm, scale, sub, unit } from './linalg';
+import { buildDRF } from './datum';
+import type { Feature } from './features';
 
 export interface AxisAnalysis {
   dir: Vec3; origin: Vec3;              // nominal axis (direction, point on it)
@@ -74,4 +76,20 @@ export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal?: { dir: Vec3; 
 export function exaggerate(an: AxisAnalysis, p: Vec3, exag: number): Vec3 {
   const q = sub(p, an.origin), along = dot(q, an.dir), r = orth(q, an.dir);
   return add(an.origin, add(scale(an.dir, along), scale(r, exag)));
+}
+/** Nominal axis for a control: Position → through the basic dimensions in the full DRF (A|B|C), direction = the
+ *  DRF axis closest to the actual axis; orientation → direction only (zone floats); coaxiality → datum axis. */
+export function axisNominal(kind: string, DS: Feature[], basic: Vec3 | undefined, a: Vec3): { dir: Vec3; point?: Vec3 } | undefined {
+  const D = DS[0]?.measured; if (!D) return undefined;
+  const g = D.normal;
+  if (kind === 'Position') {
+    const F = buildDRF(DS), al = [F.x, F.y, F.z], k = [0, 1, 2].reduce((q, i) => (Math.abs(dot(a, al[i])) > Math.abs(dot(a, al[q])) ? i : q), 0);
+    const b = basic ?? [0, 0, 0];
+    return { dir: al[k], point: add(F.o, add(scale(F.x, b[0]), add(scale(F.y, b[1]), scale(F.z, b[2])))) };
+  }
+  if (D.type === 'Ebene') {
+    if (kind === 'Parallelität') { const pr = sub(a, scale(g, dot(a, g))); return { dir: norm(pr) > 1e-9 ? pr : a }; }
+    return { dir: g }; // perpendicularity / angularity to a plane: nominal ⟂ plane (floating)
+  }
+  return { dir: g, point: kind === 'Koaxialität' ? D.center : undefined };
 }

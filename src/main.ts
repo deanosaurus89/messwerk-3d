@@ -4,9 +4,10 @@ import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
 import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
 import { docsHtml } from './docs';
 import { provenanceOf, hardParentsOf, dependentsOf } from './core/provenance';
-import { AxisAnalysis, analyzeAxis } from './core/axisan';
+import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
+import { sideView } from './ui/axisview';
 import { TRIM_TYPES, trimmedSurface, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
-import { REEX_DEFAULT, ReexParams, SearchRegion, buildRegion, reextract } from './core/reextract';
+import { REEX_TYPES, bindReex, initReexUI, reexHTML, reexPreview } from './ui/reexui';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
 const curveCache = new Map<number, { key: string; seg: Float32Array | null }>();
@@ -109,6 +110,8 @@ const state = {
   curves: [] as CurveView[], nextCurve: 1, curveSel: null as number | null, showLayout: false,
   layout: null as null | { nodes: { p: number[]; degree: number; v: number }[]; corners: { v: number; kind: string; p: number[] }[]; suggestions: (CurveView & { reason: string; region: number })[]; regions: { faces: number; sides: number; loops: number; area: number; center: number[] }[]; regionOf: Int32Array; tJunctions: number; foursided: number },
 };
+initReexUI({ geometry: () => viewer.model?.geometry, renderAll: () => renderAll(), toast: (t) => toast(t), invalidate: (id) => { ptsCache.delete(id); trimCache.delete(id); curveCache.delete(id); },
+  recompute: () => recomputeDistances(), autosave: () => scheduleAutosave() });
 (window as any).__app = { state, viewer, engine, refitFeature: (...a: any[]) => (refitFeature as any)(...a) };
 type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve' | 'curveopts';
 const PE_NAME: Record<PeTool, string> = { curveopts: 'Curve network options', curve: 'Draw curve', reduce: 'Triangle reduction', subdiv: 'Triangle subdivision', smooth: 'Smoothing', erase: 'Magic eraser' };
@@ -800,19 +803,7 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
       const c = state.controls.find((c) => c.featureIds[0] === f.id && ['Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Position', 'Koaxialität'].includes(c.kind) && c.datumIds?.length);
       // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C)
       const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
-      const D = DS[0]?.measured;
-      let nominal: { dir: Vec3; point?: Vec3 } | undefined; const a = f.measured!.normal;
-      if (c && D) {
-        const g = D.normal;
-        if (c.kind === 'Position') {
-          const F = buildDRF(DS), al = [F.x, F.y, F.z], k = [0, 1, 2].reduce((q, i) => (Math.abs(dot(a, al[i])) > Math.abs(dot(a, al[q])) ? i : q), 0);
-          const b = (c.basic ?? [0, 0, 0]) as Vec3;
-          nominal = { dir: al[k], point: add(F.o, add(scale(F.x, b[0]), add(scale(F.y, b[1]), scale(F.z, b[2])))) };
-        } else if (D.type === 'Ebene') {
-          if (c.kind === 'Parallelität') { const pr = sub(a, scale(g, dot(a, g))); nominal = { dir: norm(pr) > 1e-9 ? pr : a }; }
-          else nominal = { dir: g }; // perpendicularity to a plane: nominal axis ⟂ plane (floating)
-        } else { nominal = { dir: g, point: c.kind === 'Koaxialität' ? D.center : undefined }; }
-      }
+      const nominal = c && DS.length ? axisNominal(c.kind, DS, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
       return analyzeAxis(f.measured!, pts, nominal, c && c.tolUp > 0 ? c.tolUp : null, 0,
         `${f.name}${c ? ` · ${kindName(c.kind)} → ${c.datumIds!.map(nameOf).join('|')}` : ` · ${tt('vs. fitted axis')}`}`);
     });
@@ -832,16 +823,8 @@ async function analyze(kind: AnKind) {
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
   if (!r) return;
   state.an.kind = kind; state.an.res = r; state.an.on = true; pe.cmp = false;
-  if (kind === 'axis' && r.axes?.length) sideView(r.axes);
+  if (kind === 'axis' && r.axes?.length) sideView(viewer, r.axes);
   renderAll();
-}
-/** Axis analysis: look from the side (⟂ nominal axis), so tilt and the median line are visible at once. */
-function sideView(ax: AxisAnalysis[]) {
-  const x = ax[0], d = x.dir, c = viewer.getCamera(); const v: Vec3 = [c.position[0] - c.target[0], c.position[1] - c.target[1], c.position[2] - c.target[2]];
-  let w = sub(v, scale(d, dot(v, d))); if (norm(w) < 1e-6) w = basis(d)[0];
-  // prefer the side in which the tilt shows (actual axis deviates in the view plane)
-  const t = sub(x.actualDir, scale(d, dot(x.actualDir, d))); if (norm(t) > 1e-9) { const s = cross(d, unit(t)); w = dot(s, w) < 0 ? scale(s, -1) : s; }
-  const mid = scale(add(x.actualTop, x.actualBot), 0.5); viewer.focus(mid as [number, number, number], Math.max(x.length / 2, x.radius) * 1.2, w as [number, number, number]);
 }
 function analyzeOff() { state.an.on = false; state.an.res = null; viewer.setModelOpacity(1); renderAll(); }
 /** Form tolerance t of a single analysed feature (Form control), else null. */
@@ -1557,7 +1540,7 @@ function renderScene() {
   viewer.clearPrims();
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
-  if (reexPrev && state.features.some((x) => x.id === reexPrev!.id)) viewer.addRegion(reexPrev.R);
+  { const R = reexPreview((id) => state.features.some((x) => x.id === id)); if (R) viewer.addRegion(R); }
   if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res));
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
@@ -2883,44 +2866,6 @@ function conRows(fit: FitResult): [string, string][] {
   if (fit.pattern) rows.push([tt('Holes'), String(fit.pattern.n)], [tt('Nominal pitch [°]'), fmt(fit.pattern.pitch, 3)], [tt('Pitch deviation [°]'), fmt(fit.pattern.pitchDev, 4)], [tt('Angles [°]'), fit.pattern.angles.map((a) => a.toFixed(2)).join(', ')]);
   if (fit.type !== 'Winkel') rows.push(...fitRows(fit, 0).filter(([k]) => k !== tt('Points') && k !== 'Max. +' && k !== 'Max. −' && k !== tt('Std. dev. (RMS)')));
   return rows;
-}
-const REEX_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Kreis', 'Linie', 'Torus'];
-let reexP: ReexParams = { ...REEX_DEFAULT };
-/** Search-region preview (transparent body) shown before running the re-extraction. */
-let reexPrev: { id: number; R: SearchRegion } | null = null;
-function reexHTML(f: FeatureView): string {
-  if (f.cons || !REEX_TYPES.includes(f.type) || !f.measured) return '';
-  const p = f.reex ? { ...reexP, ...f.reex } : reexP;
-  const inp = (k: string, lbl: string, v: number, tip: string) => `<div class="row" title="${tip}"><label>${lbl}</label><input data-rx="${k}" value="${v}" inputmode="decimal"></div>`;
-  return `<details class="reex" ${f.reex ? 'open' : ''}><summary>🔁 ${tt('Extraction (re-extract)')}</summary>
-    <p class="note">${tt('Uses the current actual geometry as start and re-collects scan points. Overwrites the actual geometry; the initial method stays in the provenance.')}</p>
-    ${inp('maxDist', tt('Max. distance [mm]'), p.maxDist, tt('Points farther from the geometry are ignored'))}
-    ${inp('sigma', tt('σ filter (n·σ)'), p.sigma, tt('Remove points deviating more than n standard deviations from the mean'))}
-    ${inp('maxAngleDeg', tt('Max. normal angle [°]'), p.maxAngleDeg, tt('Surface normal must agree with the geometry normal within this angle'))}
-    ${inp('margin', tt('Search margin [mm]'), p.margin, tt('Search region follows the geometry (trimmed contour / shell / band) and is widened at its edges by this margin'))}
-    <div class="row"><button class="btn" id="rx-show">👁 ${tt('Show search region')}</button><button class="btn primary" id="rx-run">🔁 ${f.reex ? tt('Re-run extraction') : tt('Run extraction')}</button></div></details>`;
-}
-function bindReex(d: HTMLElement, f: FeatureView) {
-  d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) (reexP as any)[i.dataset.rx!] = v; }));
-  d.querySelector('#rx-show')?.addEventListener('click', () => previewRegion(f));
-  d.querySelector('#rx-run')?.addEventListener('click', () => runReextract(f));
-}
-function previewRegion(f: FeatureView) {
-  const g = viewer.model?.geometry; if (!g || !f.measured) return;
-  try { reexPrev = { id: f.id, R: buildRegion(f.measured, g.getAttribute('position').array as Float32Array, f.indices, reexP, f.anchor?.pts ?? []) }; renderAll();
-    toast(tt('Search region shown (transparent). Check it, then run the extraction.')); }
-  catch (e: any) { toast(tt('Re-extraction failed: {0}', tt(e.message))); }
-}
-function runReextract(f: FeatureView) {
-  const g = viewer.model?.geometry; if (!g || !f.measured) return;
-  try {
-    const before = f.indices.length;
-    const r = reextract(f.measured, g.getAttribute('position').array as Float32Array, (g.getAttribute('normal')?.array as Float32Array) ?? null, f.indices, reexP, f.anchor?.pts ?? []);
-    f.measured = { ...r.fit, type: f.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length; f.dev = undefined; f.hit = undefined; ptsCache.delete(f.id); trimCache.delete(f.id);
-    f.reex = { ...reexP, points: r.indices.length, removed: r.removedSigma, before }; reexPrev = null;
-    recomputeDistances(); renderAll(); scheduleAutosave();
-    toast(tt('{0}: re-extracted {1} points ({2} removed by σ filter, {3} iterations)', f.name, r.indices.length, r.removedSigma, r.iterations));
-  } catch (e: any) { toast(tt('Re-extraction failed: {0}', tt(e.message))); }
 }
 /** Provenance (how the feature was created) – one structure for all methods (core/provenance). */
 function provenanceHTML(f: FeatureView): string {

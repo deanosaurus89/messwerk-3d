@@ -28,3 +28,14 @@ describe('axis analysis', () => {
   });
   it('minCircle', () => { const c = minCircle([[0, 0], [2, 0], [1, 0.2], [1, -0.5]]); expect(c.r).toBeCloseTo(1, 6); expect(c.x).toBeCloseTo(1, 6); });
 });
+
+import { axisNominal } from '../src/core/axisan';
+describe('nominal axis from the full DRF', () => {
+  const F = (id: number, type: any, center: number[], normal: number[], datum: string) => ({ id, name: datum, type, datum, pointCount: 9, measured: { type, center, normal } } as any);
+  const A = F(1, 'Ebene', [5, 5, 0], [0, 0, 1], 'A'), B = F(2, 'Ebene', [0, 5, 5], [1, 0, 0], 'B'), C = F(3, 'Ebene', [5, 0, 5], [0, 1, 0], 'C');
+  it('position: through basic X/Y from B and C, direction ⟂ A', () => {
+    const n = axisNominal('Position', [A, B, C], [20, 30, 0], [0.01, 0, 1])!;
+    expect(Math.abs(n.dir[2])).toBeCloseTo(1, 9); expect(n.point![0]).toBeCloseTo(20, 9); expect(n.point![1]).toBeCloseTo(30, 9);
+  });
+  it('perpendicularity: direction only', () => { const n = axisNominal('Rechtwinkligkeit', [A], undefined, [0, 0, 1])!; expect(n.point).toBeUndefined(); });
+});

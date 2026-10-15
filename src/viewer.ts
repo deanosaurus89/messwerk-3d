@@ -202,6 +202,8 @@ export class Viewer {
       case 'shell': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)), H = R.t1 - R.t0, mid = V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2);
         const ta = R.type === 'Kegel' ? Math.tan(R.fit.halfAngle ?? 0) : 0, rr = (t: number) => Math.max(1e-3, R.fit.radius! + t * ta);
         for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(rr(R.t1) + s, rr(R.t0) + s, H, 48, 1, true), q, mid); break; }
+      case 'torus': { const f = R.fit, q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), V(f.normal).normalize());
+        for (const s of [-R.d, R.d]) add(new THREE.TorusGeometry(f.radius!, Math.max(1e-3, (f.minorRadius ?? 0) + s), 16, 64), q, V(f.center)); break; }
       case 'sphere': for (const s of [-R.d, R.d]) add(new THREE.SphereGeometry(Math.max(1e-3, R.r + s), 32, 20), undefined, V(R.c)); break;
       case 'band': { const f = R.fit, a = V(f.normal).normalize(), q = new THREE.Quaternion().setFromUnitVectors(up, a), H = R.t1 - R.t0, mid = V(f.center).addScaledVector(a, (R.t0 + R.t1) / 2);
         if (R.type === 'Kreis') { for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(f.radius! + s, f.radius! + s, H, 64, 1, true), q, mid); }

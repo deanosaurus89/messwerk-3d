@@ -20,6 +20,7 @@ export type SearchRegion =
   | { kind: 'box'; o: Vec3; n: Vec3; u: Vec3; v: Vec3; u0: number; u1: number; v0: number; v1: number; d: number }
   | { kind: 'shell'; type: 'Zylinder' | 'Kegel'; c: Vec3; a: Vec3; t0: number; t1: number; d: number; fit: FitResult }
   | { kind: 'sphere'; c: Vec3; r: number; d: number }
+  | { kind: 'torus'; fit: FitResult; d: number }   // toroidal shell (tube radius ± d)
   | { kind: 'band'; type: 'Kreis' | 'Langloch'; fit: FitResult; t0: number; t1: number; d: number }
   | { kind: 'tube'; c: Vec3; a: Vec3; t0: number; t1: number; d: number };
 
@@ -58,6 +59,7 @@ export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uin
     }
     case 'Zylinder': case 'Kegel': { const [t0, t1] = along(pos, current, c, n, seedPts); return { kind: 'shell', type: fit.type, c, a: n, t0: t0 - m, t1: t1 + m, d, fit }; }
     case 'Kugel': return { kind: 'sphere', c, r: fit.radius!, d };
+    case 'Torus': return { kind: 'torus', fit, d };
     case 'Kreis': case 'Langloch': { const [t0, t1] = along(pos, current, c, n, seedPts); return { kind: 'band', type: fit.type, fit, t0: t0 - m, t1: t1 + m, d }; }
     case 'Linie': { const a = unit(fit.direction ?? n), L = (fit.length || 0) / 2; const [t0, t1] = current.length ? along(pos, current, c, a, seedPts) : [-L, L]; return { kind: 'tube', c, a, t0: t0 - m, t1: t1 + m, d }; }
     default: throw new Error('Re-extraction not available for this type');
@@ -69,6 +71,7 @@ export function inRegion(R: SearchRegion, q: Vec3): boolean {
     case 'box': { const w = sub(q, R.o), a = dot(w, R.u), b = dot(w, R.v); return Math.abs(dot(w, R.n)) <= R.d && a >= R.u0 && a <= R.u1 && b >= R.v0 && b <= R.v1; }
     case 'shell': { const t = dot(sub(q, R.c), R.a); return t >= R.t0 && t <= R.t1 && Math.abs(signedDistance(R.fit, q)) <= R.d; }
     case 'sphere': return Math.abs(norm(sub(q, R.c)) - R.r) <= R.d;
+    case 'torus': return Math.abs(signedDistance(R.fit, q)) <= R.d;
     case 'band': { const f = R.fit, a = unit(f.normal), w = sub(q, f.center), t = dot(w, a); if (t < R.t0 || t > R.t1) return false;
       const r = sub(w, scale(a, t));
       if (R.type === 'Kreis') return Math.abs(norm(r) - f.radius!) <= R.d;

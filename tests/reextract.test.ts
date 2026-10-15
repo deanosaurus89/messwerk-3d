@@ -37,3 +37,10 @@ describe('search regions from geometry', () => {
     expect(B.kind).toBe('box'); expect(inRegion(B, [5, 5, 0.05])).toBe(true); expect(inRegion(B, [12, 5, 0])).toBe(false);
   });
 });
+describe('torus region', () => {
+  it('toroidal shell', () => {
+    const T: any = { type: 'Torus', center: [0, 0, 0], normal: [0, 0, 1], radius: 10, minorRadius: 2 };
+    const R = buildRegion(T, Float32Array.from([12, 0, 0]), Uint32Array.from([0]), { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0.5 });
+    expect(inRegion(R, [12.05, 0, 0])).toBe(true); expect(inRegion(R, [11, 0, 0])).toBe(false); expect(inRegion(R, [0, 10, 2.02])).toBe(true);
+  });
+});
