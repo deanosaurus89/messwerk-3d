@@ -52,3 +52,14 @@ describe('Bezugssystem A|B|C', () => {
     expect(r.measured!).toBeCloseTo(2 * Math.hypot(0.03, 0.02), 2);
   });
 });
+
+describe('Position from the derived median line', () => {
+  it('uses the section centres when points are available (bent axis → larger than from end points)', () => {
+    // cylinder axis through (20,20) straight, but bowed by 0.03 mm in the middle
+    const P: Vec3[] = []; for (let i = 0; i < 4000; i++) { const z = (20 * i) / 4000, a = i * 0.37, bow = 0.03 * (1 - ((z - 10) / 10) ** 2); P.push([20 + bow + 6 * Math.cos(a), 20 + 6 * Math.sin(a), z]); }
+    const Zs = F(9, 'Z', 'Zylinder', fit('Zylinder', [20, 20, 10], [0, 0, 1], { radius: 6, diameter: 12, length: 20 }));
+    const m = new Map([A, B, C, Zs].map((f) => [f.id, f])), c = ctl('Position', [1, 2, 3], { basic: [20, 20, 0] }); c.featureIds = [9];
+    const noPts = evaluate(c, m), withPts = evaluate(c, m, { points: (id: number) => (id === 9 ? P : null) } as any);
+    expect(noPts.measured!).toBeLessThan(1e-6); expect(withPts.measured!).toBeGreaterThan(0.05); expect(withPts.measured!).toBeLessThan(0.062); expect(withPts.detail).toContain("median line");
+  });
+});

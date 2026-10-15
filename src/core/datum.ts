@@ -10,6 +10,7 @@
 import type { Control, Feature } from './features';
 import type { GeomType } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
+import { medianLine } from './median';
 
 export type DatumKind = 'plane' | 'axis' | 'point';
 export const datumKind = (t: GeomType): DatumKind | null =>
@@ -135,10 +136,15 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         // Soll-Achse: durch das theoretisch genaue Maß, Richtung = nächstliegende DRF-Achse; ganze Ist-Achse (Endpunkte) muss in Ø-Zone
         const a = unit(dirLocal(F, dirOf(f))), ax = [0, 1, 2].reduce((q, k) => (Math.abs(a[k]) > Math.abs(a[q]) ? k : q), 0);
         const g: Vec3 = [0, 0, 0]; g[ax] = 1;
+        // cylinder/cone with points: derived median line (section centres, ISO 12180-1) must lie in the Ø zone
+        const P = f.type === 'Zylinder' || f.type === 'Kegel' ? pts() : null;
+        const ML = P && P.length >= 64 ? medianLine(m, P) : [];
+        if (ML.length >= 2) { let mx = 0; for (const q of ML) mx = Math.max(mx, norm(orth(sub(toLocal(F, q), b), g)));
+          return { value: 2 * mx, detail: `derived median line (${ML.length} sections) in Ø zone around nominal axis ∥ ${'XYZ'[ax]} (DRF ${F.text})` }; }
         const L = f.type === 'Zylinder' || f.type === 'Kegel' ? m.length || 0 : 0;
         let mx = 0;
         for (const s of [-0.5, 0.5]) { const e = add(loc, scale(a, s * L)); mx = Math.max(mx, norm(orth(sub(e, b), g))); }
-        return { value: 2 * mx, detail: `zylindrische Zone um Soll-Achse ∥ ${'XYZ'[ax]} (DRF ${F.text})` };
+        return { value: 2 * mx, detail: `zylindrische Zone um Soll-Achse ∥ ${'XYZ'[ax]} (DRF ${F.text}, axis end points – no points)` };
       }
       return { value: 2 * norm(d), detail: `spherical zone SØ (DRF ${F.text})` };
     }

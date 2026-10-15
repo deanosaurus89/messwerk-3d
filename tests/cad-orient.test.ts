@@ -4,8 +4,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import * as C from '../src/cad/occcore';
+import { gunzipSync } from 'fflate';
 const FX = 'tests/fixtures/cad/';
-const files = (fs.existsSync(FX) ? fs.readdirSync(FX).filter((f) => /\.(stp|step|igs|iges)$/i.test(f)) : []).filter((f) => !process.env.CADF || f.includes(process.env.CADF));
+// public CAD sample (always available) + private fixtures
+const SAMPLE = 'public/samples/cad-sample.igs.gz';
+const files = (fs.existsSync(FX) ? fs.readdirSync(FX).filter((f) => /\.(stp|step|igs|iges)$/i.test(f)) : []).filter((f) => !process.env.CADF || f.includes(process.env.CADF)).map((f) => FX + f);
+if (!process.env.CADF || SAMPLE.includes(process.env.CADF)) files.unshift(SAMPLE);
 let oc: any;
 beforeAll(async () => { oc = await (await import('opencascade.js/dist/node.js' as any)).default(); }, 120000);
 
@@ -40,9 +44,9 @@ describe('Orientierung synthetisch', () => {
 for (const name of files) {
   describe.skipIf(!files.length)(`Orientierung ${name}`, () => {
     it('Normalen nach Beschnitt + Export + Wiedereinlesen identisch (STEP und IGES)', () => {
-      const sh = C.readCAD(oc, new Uint8Array(fs.readFileSync(FX + name)), name); const orig = C.faces(oc, sh);
+      const raw = new Uint8Array(fs.readFileSync(name)), sh = C.readCAD(oc, name.endsWith('.gz') ? gunzipSync(raw) : raw, name.replace(/\.gz$/, '')); const orig = C.faces(oc, sh);
       // jede 4. Fläche: Rand-Offset 0,5 mm (beschnittene Flächen), Rest unverändert
-      const sel = orig.map((_, i) => i).filter((i) => i % 4 === 0);
+      const sel = name === SAMPLE ? [0, 10, 22, 30, 50, 60] : orig.map((_, i) => i).filter((i) => i % 4 === 0); // sample: faces with few boundary edges (offset cost grows with edge count)
       const { result } = C.applyOps(oc, orig, [{ kind: 'offset', faces: sel, d: 0.5 } as any]);
       const diag = C.bboxDiag(oc, sh); const defl = diag / 800, cell = diag / 150;
       const O = triSet(C.tessellate(oc, sh, defl), cell);

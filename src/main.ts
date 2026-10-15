@@ -1,3 +1,4 @@
+import { gunzipSync } from 'fflate';
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
 import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
@@ -36,7 +37,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
+import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
@@ -229,14 +230,17 @@ $('#file').onchange = async (e) => {
   (e.target as HTMLInputElement).value = '';
 };
 // ---------- Beispielteile (Auswahl mit Vorschaubild)
-interface SampleInfo { key: string; name: string; file: string; description: string; triangles: number; bytes: number; thumb: string; kind: string; hidden?: boolean; default?: boolean }
+interface SampleInfo { key: string; name: string; file: string; description: string; triangles: number; bytes: number; thumb: string; kind: string; hidden?: boolean; default?: boolean; cad?: boolean }
 let samples: SampleInfo[] | null = null;
 async function loadSample(s: SampleInfo) {
   $('#sample-dialog').classList.add('hidden');
   status(`${tt('Loading')} ${s.name} (${(s.bytes / 1048576).toFixed(1)} MB) …`); $('#busy').classList.remove('hidden');
   try {
     const r = await fetch('./samples/' + s.file); if (!r.ok) throw new Error('HTTP ' + r.status);
-    await loadBuffer(s.file, await r.arrayBuffer());
+    if (s.cad) { // CAD sample: gzip → IGES/STEP into the CAD trimming module
+      let b = new Uint8Array(await r.arrayBuffer()); if (b[0] === 0x1f && b[1] === 0x8b) b = gunzipSync(b);
+      await cadOpen(new File([b as any], s.file.replace(/\.gz$/, ''))); document.querySelector<HTMLElement>('.tab[data-tab="nuetz"]')?.click();
+    } else await loadBuffer(s.file, await r.arrayBuffer());
   } catch (e: any) { toast('Sample could not be loaded: ' + e.message); } finally { $('#busy').classList.add('hidden'); }
 }
 async function openSamples() {

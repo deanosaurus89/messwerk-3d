@@ -91,19 +91,32 @@ export function edgeTube(oc: OC, e: any, d: number): any | null {
  * Rand-Offset: alles näher als d am Rand der Fläche(n) entfernen (Minkowski-Band aus Kantenrohren + Eckkugeln);
  * Kanten, die zwei gewählte Flächen gemeinsam haben, und Nahtkanten (Zylinder) bleiben unberücksichtigt.
  */
-export function offsetBoundary(oc: OC, sh: any, d: number, shared: any[] = []): any {
-  const tools: any[] = []; const seen: any[] = []; const verts: number[][] = [];
+export function offsetBoundary(oc: OC, sh: any, d: number, shared: any[] = [], opt: { batch?: number; smoothSkip?: boolean } = {}): any {
+  const batch = opt.batch ?? OFFSET_BATCH, smoothSkip = opt.smoothSkip ?? true;
+  const tools: any[] = []; const seen: any[] = []; const verts: { p: number[]; t: number[][] }[] = [];
   for (const f of faces(oc, sh)) for (const e of edgesOf(oc, f)) {
     if (oc.BRep_Tool.Degenerated(e) || oc.BRep_Tool.IsClosed_2(e, f)) continue;
     if (seen.some((s) => s.IsSame(e)) || shared.some((s) => s.IsSame(e))) continue; seen.push(e);
     const t = edgeTube(oc, e, d); if (t) tools.push(t);
-    for (const vx of [oc.TopExp.FirstVertex(e, false), oc.TopExp.LastVertex(e, false)]) { const q = oc.BRep_Tool.Pnt(vx); const pt = [q.X(), q.Y(), q.Z()]; if (!verts.some((w) => Math.hypot(w[0] - pt[0], w[1] - pt[1], w[2] - pt[2]) < 1e-6)) verts.push(pt); }
+    // end vertices with the edge tangent there (pointing into the edge) – a corner sphere is only needed where the
+    // boundary turns; at tangent (G1) joints the two tubes already cover the vertex neighbourhood
+    const ca = new oc.BRepAdaptor_Curve_2(e), u0 = ca.FirstParameter(), u1 = ca.LastParameter();
+    for (const [u, sg] of [[u0, 1], [u1, -1]] as const) { const q = new oc.gp_Pnt_1(), v = new oc.gp_Vec_1(); ca.D1(u, q, v); const m = v.Magnitude() || 1; const tg = [sg * v.X() / m, sg * v.Y() / m, sg * v.Z() / m];
+      const pt = [q.X(), q.Y(), q.Z()]; const w = verts.find((w) => Math.hypot(w.p[0] - pt[0], w.p[1] - pt[1], w.p[2] - pt[2]) < 1e-6); if (w) w.t.push(tg); else verts.push({ p: pt, t: [tg] }); }
+    ca.delete();
   }
-  for (const v of verts) tools.push(new oc.BRepPrimAPI_MakeSphere_5(P(oc, v), d).Shape());
+  for (const v of verts) {
+    // two edges meeting tangentially: directions into the edges are opposite (dot ≈ −1)
+    const smooth = smoothSkip && v.t.length === 2 && v.t[0][0] * v.t[1][0] + v.t[0][1] * v.t[1][1] + v.t[0][2] * v.t[1][2] < -0.9998;
+    if (!smooth) tools.push(new oc.BRepPrimAPI_MakeSphere_5(P(oc, v.p), d).Shape());
+  }
   if (!tools.length) return sh;
   // nacheinander schneiden: viele kleine Boolesche Operationen sind deutlich schneller als eine mit allen Werkzeugen
-  let r = sh; for (const tl of tools) { if (!faces(oc, r).length) break; r = boolCut(oc, r, [tl]); } return r;
+  let r = sh; for (let i = 0; i < tools.length; i += batch) { if (!faces(oc, r).length) break; r = boolCut(oc, r, tools.slice(i, i + batch)); } return r;
 }
+/** tools per Boolean cut in the boundary offset (1 = one by one; measured on the CAD sample) */
+export let OFFSET_BATCH = 1;
+export const setOffsetBatch = (n: number) => { OFFSET_BATCH = Math.max(1, n); };
 /** Senkrechte Ausdehnung entlang der Blickrichtung, damit Werkzeuge das Teil sicher durchdringen. */
 function sweepRange(oc: OC, sh: any, pts: number[][], dir: number[]) { const L = bboxDiag(oc, sh) * 2 + 10; return { L, base: pts.map((p) => add(p, dir, -L)) }; }
 function polyWire(oc: OC, pts: number[][], closed: boolean): any {

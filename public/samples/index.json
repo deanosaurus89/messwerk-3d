@@ -21,6 +21,17 @@
   "thumb": "thumb-flansch.jpg"
  },
  {
+  "key": "cadsample",
+  "name": "CAD surface model (IGES)",
+  "file": "cad-sample.igs.gz",
+  "kind": "CAD (IGES, trimmed NURBS surfaces)",
+  "description": "Surface model with 138 faces – for CAD trimming (cut line/polygon, islands, boundary offset) and STEP/IGES export.",
+  "triangles": 0,
+  "bytes": 1034575,
+  "thumb": "thumb-cadsample.jpg",
+  "cad": true
+ },
+ {
   "key": "beispielteil",
   "name": "Training part",
   "file": "beispielteil.stl",

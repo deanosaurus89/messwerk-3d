@@ -143,7 +143,9 @@ async function cadTap(x: number, y: number, add: boolean) {
     if (cutStage === 'side') { const h = pickFace(x, y); if (!h) { X.toast('Tap the side on the face.'); return; } const { D } = viewBasis();
       cutStage = 'draw'; const pts = cad.draft; cad.draft = []; drawOverlay(); await pushOp({ kind: 'cut', faces: [...cad.sel], pts, dir: D.toArray() as V3, remove: h.p }); return; }
     if (nearFirst(x, y)) { closeLine(); return; }
-    cad.draft.push(worldAt(x, y)); drawOverlay(); X.renderDialog(); return;
+    const w = worldAt(x, y), last = cad.draft[cad.draft.length - 1];
+    if (last && Math.hypot(w[0] - last[0], w[1] - last[1], w[2] - last[2]) < 1e-6 * Math.max(1, X.viewer.radius)) return; // double-click / double tap: no duplicate vertex
+    cad.draft.push(w); drawOverlay(); X.renderDialog(); return;
   }
   if (t === 'circle' || t === 'rect') {
     cad.draft.push(worldAt(x, y)); drawOverlay();
@@ -158,7 +160,10 @@ async function cadTap(x: number, y: number, add: boolean) {
 }
 /** Close the polygon (last → first) when it has ≥ 3 points, then go to the keep/remove (side) step. */
 function closeLine() {
-  const d = cad.draft; snapFirst = false;
+  snapFirst = false;
+  // drop consecutive duplicates (zero-length edges break the cut sheet)
+  const eq = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6 * Math.max(1, X.viewer.radius);
+  cad.draft = cad.draft.filter((p, i, A) => i === 0 || !eq(p, A[i - 1])); const d = cad.draft;
   if (d.length >= 3 && (d[0][0] !== d[d.length - 1][0] || d[0][1] !== d[d.length - 1][1] || d[0][2] !== d[d.length - 1][2])) d.push([...d[0]] as V3);
   drawOverlay(); finishLine();
 }
@@ -245,7 +250,7 @@ export function cadDialog(d: HTMLElement): boolean {
 export function initCad(ctx: CadCtx) {
   X = ctx; ctx.viewer.scene.add(group); ctx.viewer.scene.add(overlay);
   const canvas = ctx.viewer.renderer.domElement; let down: { x: number; y: number; t: number } | null = null;
-  canvas.addEventListener('pointerdown', (e) => { if (!cadActive()) return; down = { x: e.clientX, y: e.clientY, t: performance.now() }; }, true);
+  canvas.addEventListener('pointerdown', (e) => { if (!cadActive() || e.button !== 0) { down = null; return; } down = { x: e.clientX, y: e.clientY, t: performance.now() }; }, true);
   canvas.addEventListener('pointermove', (e) => {
     if (!cadActive() || e.pointerType !== 'mouse' || e.buttons) return;
     if (cad.tool && cad.tool !== 'offset' && cad.tool !== 'export' && cad.draft.length && cutStage === 'draw') { const sn = nearFirst(e.clientX, e.clientY); if (sn !== snapFirst) { snapFirst = sn; X.viewer.renderer.domElement.style.cursor = sn ? 'pointer' : ''; } drawOverlay(sn ? cad.draft[0] : worldAt(e.clientX, e.clientY)); }
@@ -262,7 +267,7 @@ export function initCad(ctx: CadCtx) {
     if (!cadActive() || (e.target as HTMLElement).tagName === 'INPUT') return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.stopImmediatePropagation(); e.shiftKey ? cadRedo() : cadUndo(); }
     else if (e.key === 'Escape') { e.stopImmediatePropagation(); if (cad.draft.length) { cad.draft = []; cutStage = 'draw'; drawOverlay(); X.renderDialog(); } else setTool(null); }
-    else if (e.key === 'Enter' && cad.tool === 'cut') finishLine();
+    else if (e.key === 'Enter' && cad.tool === 'cut' && cutStage === 'draw') closeLine(); // same as ✓ / right-click
   }, true);
   const inp = $('#cad-file') as HTMLInputElement; inp.onchange = () => { const f = inp.files?.[0]; if (f) cadOpen(f); inp.value = ''; };
   document.querySelectorAll<HTMLButtonElement>('[data-cadtool]').forEach((b) => (b.onclick = () => { if (!cad.faces.length) { X.toast('Open a STEP or IGES file first.'); return; } cutStage = 'draw'; setTool(b.dataset.cadtool as Tool); }));
