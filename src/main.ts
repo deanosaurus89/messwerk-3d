@@ -34,7 +34,7 @@ import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
-import { type Vec3, sub, scale, dot, norm } from './core/linalg';
+import { type Vec3, sub, scale, dot, norm, add, basis, cross, unit } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
 import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
@@ -791,17 +791,23 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
       const pts: Vec3[] = []; const st = Math.max(1, Math.floor(f.indices.length / 20000));
       for (let i = 0; i < f.indices.length; i += st) { const v = f.indices[i]; pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); }
       const c = state.controls.find((c) => c.featureIds[0] === f.id && ['Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Position', 'Koaxialität'].includes(c.kind) && c.datumIds?.length);
-      const D = c ? state.features.find((x) => x.id === c.datumIds![0])?.measured : undefined;
+      // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C)
+      const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
+      const D = DS[0]?.measured;
       let nominal: { dir: Vec3; point?: Vec3 } | undefined; const a = f.measured!.normal;
       if (c && D) {
         const g = D.normal;
-        if (D.type === 'Ebene') {
+        if (c.kind === 'Position') {
+          const F = buildDRF(DS), al = [F.x, F.y, F.z], k = [0, 1, 2].reduce((q, i) => (Math.abs(dot(a, al[i])) > Math.abs(dot(a, al[q])) ? i : q), 0);
+          const b = (c.basic ?? [0, 0, 0]) as Vec3;
+          nominal = { dir: al[k], point: add(F.o, add(scale(F.x, b[0]), add(scale(F.y, b[1]), scale(F.z, b[2])))) };
+        } else if (D.type === 'Ebene') {
           if (c.kind === 'Parallelität') { const pr = sub(a, scale(g, dot(a, g))); nominal = { dir: norm(pr) > 1e-9 ? pr : a }; }
-          else nominal = { dir: g }; // perpendicularity / position to a plane: nominal axis ⟂ plane
+          else nominal = { dir: g }; // perpendicularity to a plane: nominal axis ⟂ plane (floating)
         } else { nominal = { dir: g, point: c.kind === 'Koaxialität' ? D.center : undefined }; }
       }
-      return analyzeAxis(f.measured!, pts, nominal, c && c.tolUp > 0 ? c.tolUp : null, 8,
-        `${f.name}${c ? ` · ${kindName(c.kind)} → ${nameOf(c.datumIds![0])}` : ` · ${tt('vs. fitted axis')}`}`);
+      return analyzeAxis(f.measured!, pts, nominal, c && c.tolUp > 0 ? c.tolUp : null, 0,
+        `${f.name}${c ? ` · ${kindName(c.kind)} → ${c.datumIds!.map(nameOf).join('|')}` : ` · ${tt('vs. fitted axis')}`}`);
     });
     state.an.ids = fs.map((f) => f.id);
     return { idx: new Uint32Array(0), dev: new Float32Array(0), axes, label: tt('Axis analysis') };
@@ -819,7 +825,16 @@ async function analyze(kind: AnKind) {
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
   if (!r) return;
   state.an.kind = kind; state.an.res = r; state.an.on = true; pe.cmp = false;
+  if (kind === 'axis' && r.axes?.length) sideView(r.axes);
   renderAll();
+}
+/** Axis analysis: look from the side (⟂ nominal axis), so tilt and the median line are visible at once. */
+function sideView(ax: AxisAnalysis[]) {
+  const x = ax[0], d = x.dir, c = viewer.getCamera(); const v: Vec3 = [c.position[0] - c.target[0], c.position[1] - c.target[1], c.position[2] - c.target[2]];
+  let w = sub(v, scale(d, dot(v, d))); if (norm(w) < 1e-6) w = basis(d)[0];
+  // prefer the side in which the tilt shows (actual axis deviates in the view plane)
+  const t = sub(x.actualDir, scale(d, dot(x.actualDir, d))); if (norm(t) > 1e-9) { const s = cross(d, unit(t)); w = dot(s, w) < 0 ? scale(s, -1) : s; }
+  const mid = scale(add(x.actualTop, x.actualBot), 0.5); viewer.focus(mid as [number, number, number], Math.max(x.length / 2, x.radius) * 1.2, w as [number, number, number]);
 }
 function analyzeOff() { state.an.on = false; state.an.res = null; viewer.setModelOpacity(1); renderAll(); }
 /** Form tolerance t of a single analysed feature (Form control), else null. */
@@ -851,7 +866,7 @@ function paintAnalysis(): boolean {
   if (r.axes) {
     viewer.setModelOpacity(a.trans ? 0.35 : 1);
     let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
-    el.innerHTML = `<b>${r.label} · × ${axisExag(r)}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}</small>`).join('')
+    el.innerHTML = `<b>${r.label} · × ${axisExag(r)}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}<br>${tt('median line: {0} sections · straightness Ø {1}', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
       + `<small><span style="color:#777">━</span> ${tt('nominal')} · <span style="color:#e53935">━</span> ${tt('actual axis')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('envelope')}</small>`;
     return true;
   }
