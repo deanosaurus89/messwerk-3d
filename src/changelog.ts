@@ -6,6 +6,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.12', date: '2026-10-16', items: [
+    'New sample: CAD surface model (IGES, 138 faces) – opens directly in CAD trimming.',
+    'CAD trimming fixes: right-click no longer adds an extra point before closing the polygon; double-click/tap no longer creates duplicate points; Enter closes the polygon like ✓; boundary offset faster on faces with many edges (no corner spheres at smooth joints).',
+    'Control table: Position of cylinders/cones is now evaluated on the derived median line (section centres) instead of the axis end points.',
+  ] },
   { version: '2026.0.11', date: '2026-10-15', items: [
     'Re-extraction: the search region now follows the geometry (prism over a plane’s contour, shell for cylinder/cone/sphere/torus, band for circle/slot, tube for line) and can be shown as a transparent body before running.',
     'Axis analysis: derived median line (sections ⟂ fitted axis), floating zone for orientation, position against the full datum reference frame incl. basic dimensions, median-line straightness; side view by default.',
