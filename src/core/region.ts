@@ -151,7 +151,7 @@ export class MeshTopology {
     if (L && L.length >= 3) {
       const h = this.localEdge(seedTri);
       let a = 0; const fa = this.mesh.faceAreas!; for (const t of L) a += fa[t];
-      const r = a < 0.01 * this.totalArea ? 0 : this.regionRms(L, 0.3 * h);
+      const r = a < 0.01 * this.totalArea ? 0 : this.regionRms(L, 0.3 * h, fitInfo?.model === 'Ebene');
       if (r !== null && r < 0.3 * h) { this.lastGrow = { model: 'keins', h, sigma: r, tol: 0.3 * h, angDeg: o.maxAngleDeg, seedTris: 0, refits: 0, capped: false, legacy: true }; return L; }
     }
     this.lastGrow = fitInfo; return o.strict ? new Uint32Array(0) : F;
@@ -163,7 +163,7 @@ export class MeshTopology {
     return el[el.length >> 1] || 1;
   }
   /** RMS der besten Regelgeometrie (autoFit) an eine Dreiecksmenge, null wenn nicht bestimmbar. */
-  regionRms(tris: ArrayLike<number>, lim = 0): number | null {
+  regionRms(tris: ArrayLike<number>, lim = 0, planeOnly = false): number | null {
     const f = this.mesh.indices, p = this.mesh.positions, sn = this.smoothN; const seen = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = [];
     const step = Math.max(1, Math.floor(tris.length / 400));
     for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seen.has(v)) continue; seen.add(v); P.push([p[3 * v], p[3 * v + 1], p[3 * v + 2]]); N.push([sn[3 * t], sn[3 * t + 1], sn[3 * t + 2]]); } }
@@ -172,6 +172,7 @@ export class MeshTopology {
       // prismatisch (Zylinder, Langloch, beliebige Wand): alle Normalen ⟂ einer Achse
       const ax = axisFromNormals(N).axis; const d = N.map((q) => Math.abs(q[0] * ax[0] + q[1] * ax[1] + q[2] * ax[2])).sort((x, y) => x - y);
       if (d[Math.floor(d.length * 0.95)] < 0.05) return 0;
+      if (planeOnly && tris.length > 0.1 * this.mesh.indices.length / 3) return null; // ebene Saat, sehr große Region: Region muss Ebene oder prismatische Wand sein (keine teuren Fits)
       for (const ty of ['Zylinder', 'Kugel', 'Kegel'] as GeomType[]) { try { const c = fitType(ty, P, N); if (c.rms < lim) return c.rms; } catch { /* weiter */ } }
       const r = autoFit(P, N); const c = [r.best, ...r.candidates].filter((x) => x && x.type !== 'Freiformfläche' && isFinite(x.rms)).map((x) => x.rms); return c.length ? Math.min(...c) : null; } catch { return null; }
   }
