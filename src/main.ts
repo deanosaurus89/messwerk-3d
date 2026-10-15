@@ -145,13 +145,13 @@ function startDistanceMode() {
   if (isPhone()) togglePanel('dialog', true);
 }
 function stopMode() {
-  state.mode = null; state.preview = null; clearBrush();
+  state.mode = null; state.preview = null; clearBrush(); clearAuxHover();
   viewer.controls.enabled = true; viewer.showCursor(null, 1); renderAll();
 }
 
 $('#file').onchange = async (e) => {
   const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
-  await loadBuffer(f.name, await f.arrayBuffer());
+  await loadBuffer(f.name, await f.arrayBuffer(), true);
   (e.target as HTMLInputElement).value = '';
 };
 // ---------- Beispielteile (Auswahl mit Vorschaubild)
@@ -195,10 +195,31 @@ function download(name: string, text: string, type = 'text/csv;charset=utf-8') {
   status(`${name} exportiert.`);
 }
 
-async function loadBuffer(name: string, buf: ArrayBuffer) {
+const UNITS: { id: string; label: string; f: number }[] = [{ id: 'mm', label: 'mm', f: 1 }, { id: 'cm', label: 'cm', f: 10 }, { id: 'm', label: 'm', f: 1000 }, { id: 'in', label: 'Zoll (inch)', f: 25.4 }];
+/** Einheit wählen: Bounding-Box in Datei-Einheiten, Vorschlag aus der Größe, Plausibilität (typisch 5 mm … 2 m). */
+function unitDialog(b: { min: number[]; max: number[] }): Promise<number> {
+  const d = [0, 1, 2].map((k) => b.max[k] - b.min[k]); const big = Math.max(...d);
+  const guess = big < 2 ? 'm' : big < 40 ? 'cm' : 'mm';
+  return new Promise((res) => {
+    const el = document.createElement('div'); el.id = 'unit-dlg';
+    const draw = (u: string) => { const f = UNITS.find((x) => x.id === u)!.f; const mm = d.map((x) => x * f); const mx = Math.max(...mm);
+      const ok = mx >= 5 && mx <= 2000;
+      el.innerHTML = `<div class="ud-box"><h3>Einheit der Datei</h3>
+        <p class="note">Bounding-Box in Datei-Einheiten: <b>${d.map((x) => fmt(x, 3)).join(' × ')}</b></p>
+        <div class="seg">${UNITS.map((x) => `<button data-u="${x.id}" class="${x.id === u ? 'on' : ''}">${x.label}</button>`).join('')}</div>
+        <p>Ergibt <b>${mm.map((x) => fmt(x, 1)).join(' × ')} mm</b>${u === guess ? ' <span class="note">(Vorschlag)</span>' : ''}</p>
+        <p class="${ok ? 'ud-ok' : 'ud-warn'}">${ok ? '✓ Plausible Bauteilgröße.' : mx < 5 ? '⚠ Sehr klein (< 5 mm) – stimmt die Einheit?' : '⚠ Sehr groß (> 2 m) – stimmt die Einheit?'}</p>
+        <div class="row"><button class="btn primary" data-ok>Übernehmen</button></div></div>`;
+      el.querySelectorAll<HTMLButtonElement>('[data-u]').forEach((x) => (x.onclick = () => draw(x.dataset.u!)));
+      el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => { el.remove(); res(f); }; };
+    draw(guess); document.body.appendChild(el);
+  });
+}
+async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale = 1): Promise<void> {
   try {
-    const t0 = performance.now();
-    const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf }, [buf]));
+    const t0 = performance.now(); const keep = askUnit ? buf.slice(0) : null;
+    const r = await busy(engine.call<any>({ op: 'load', name, buffer: buf, scale } as any, [buf]));
+    if (keep) { const f = await unitDialog(r.bounds); if (f !== 1) return loadBuffer(name, keep, false, f); }
     viewer.setModel(r.positions, r.indices, r.normals); peReset(); curvesReset();
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     state.features = []; state.controls = []; state.sel = []; state.mode = null; state.preview = null;
@@ -233,12 +254,57 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (cv.drag) { curveDragMove(e.clientX, e.clientY); return; }
   if (e.pointerType === 'mouse' && !e.buttons) curveHover(e.clientX, e.clientY);
-  if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); viewer.showCursor(h, pe.radius); if (painting && h) pePaint(h); return; }
+  const desk = e.pointerType === 'mouse';
+  if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); lastHit = h; viewer.showCursor(h, pe.radius, desk); if (painting && h) pePaint(h); return; }
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && desk && !e.buttons) {
+    const h = viewer.pick(e.clientX, e.clientY); lastHit = h;
+    // Klick + Wachstum mit Suchradius: Saatbereich als Kreis zeigen
+    viewer.showCursor(state.opts.radius > 0 ? h : null, state.opts.radius, true);
+    scheduleAuxHover(h); return;
+  }
   if (state.mode?.kind !== 'fit' || state.mode.method !== 'Pinsel') return;
-  const h = viewer.pick(e.clientX, e.clientY);
-  viewer.showCursor(h, state.opts.brush);
+  const h = viewer.pick(e.clientX, e.clientY); lastHit = h;
+  viewer.showCursor(h, state.opts.brush, desk);
   if (painting && h) brushAt(h);
 });
+canvas.addEventListener('pointerleave', () => { if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
+let lastHit: Hit | null = null;
+/** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
+const brushActive = () => pe.tool === 'erase' || (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel');
+function setBrushRadius(v: number) {
+  v = +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 2).toFixed(v < 1 ? 2 : 1);
+  if (pe.tool === 'erase') { pe.radius = v; for (const id of ['#pe-rad-n', '#pe-rad-r']) { const el = document.querySelector<HTMLInputElement>(id); if (el) el.value = String(v); } }
+  else { state.opts.brush = v; const el = document.querySelector<HTMLInputElement>('#d-brush'); if (el) el.value = String(v); const mb = document.querySelector('#mb-brush-r'); if (mb) mb.textContent = String(v); }
+  if (lastHit) viewer.showCursor(lastHit, v, true);
+  status(`Pinselradius ${v} mm (Mausrad; Strg+Mausrad = Zoom).`);
+}
+canvas.parentElement!.addEventListener('wheel', (e) => {
+  if (!brushActive() || e.ctrlKey || e.metaKey) return; // Strg/⌘ + Rad: normal zoomen
+  e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+  const cur = pe.tool === 'erase' ? pe.radius : state.opts.brush;
+  setBrushRadius(cur * Math.pow(1.1, e.deltaY > 0 ? -1 : 1));
+}, { capture: true, passive: false });
+// Ctrl+Rad soll im Pinselmodus zoomen statt die Seite zu skalieren: OrbitControls übernimmt (preventDefault dort)
+// ---- Live-Vorschau Hilfsebene (Kreis/Langloch per Klick): Ebenenpunkte blau, Wandpunkte orange
+let auxT = 0, auxSeq = 0, auxBusy = false;
+function clearAuxHover() { clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); }
+function scheduleAuxHover(h: Hit | null) {
+  clearTimeout(auxT); const m = state.mode as FitMode | null;
+  if (!h || !m || m.kind !== 'fit' || !usesAux(m.type) || state.preview) { if (!h) viewer.showHoverSets([]); return; }
+  const seq = ++auxSeq;
+  auxT = window.setTimeout(async () => {
+    if (seq !== auxSeq) return;
+    if (auxBusy) { scheduleAuxHover(h); return; } // höchstens eine Vorschau-Rechnung gleichzeitig
+    auxBusy = true;
+    const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
+    try {
+      const r = await engine.call<any>({ op: 'aux', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, type: m.type as 'Kreis' | 'Langloch', plane: ref?.measured });
+      if (seq !== auxSeq || state.preview) return;
+      viewer.showHoverSets([{ idx: r.aux.indices, color: 0x2f7de1 }, { idx: r.indices, color: 0xff8c1a }]);
+      status(`Vorschau beim Überfahren: ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Hilfsebenen-Punkte (blau) – Klick übernimmt.`);
+    } catch (err: any) { if (seq === auxSeq) { viewer.showHoverSets([]); status("Vorschau: " + err.message); } } finally { auxBusy = false; }
+  }, 220);
+}
 window.addEventListener('pointerup', async (e) => {
   if ((e as any).cadHandled) { down = null; return; }
   if (painting) { painting = false; viewer.controls.enabled = true; down = null; return; }
@@ -251,7 +317,7 @@ window.addEventListener('pointerup', async (e) => {
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) return;
   if (pe.tool === 'curve') curveAddPoint(h);
-  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') await previewByClick(h);
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h); }
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
   else { const f = featureAtHit(h); if (f) selectFeature(f.id); }
 });
@@ -306,7 +372,7 @@ function clearSelectionAll() {
 }
 function setMethod(m: 'Klick' | 'Pinsel') {
   if (state.mode?.kind !== 'fit') return;
-  state.mode.method = m; state.preview = null; clearBrush(); brushErase = false; viewer.showCursor(null, 1); renderAll();
+  state.mode.method = m; state.preview = null; clearBrush(); brushErase = false; viewer.showCursor(null, 1); clearAuxHover(); renderAll();
 }
 /** Immer sichtbare Modusanzeige über der 3D-Ansicht (aktives Werkzeug + Aktionen). */
 const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
@@ -332,7 +398,7 @@ function renderModeBar() {
   let html = '';
   if (m.kind === 'dist') html = `<span class="mb-tool">↔ Abstand</span><button data-a="exit">✕ Beenden (Esc)</button>`;
   else if (m.method === 'Klick') html = `<span class="mb-tool">👆 Klick + Wachstum · ${m.type === 'auto' ? 'Automatisch' : m.type}</span><button data-a="brush">🖌 Pinsel</button><button data-a="exit">✕ Beenden (Esc)</button>`;
-  else html = `<span class="mb-tool ${brushErase ? 'erase' : 'paint'}">${brushErase ? '🧽 Radierer' : '🖌 Pinsel'} · ${m.type === 'auto' ? 'Automatisch' : m.type} · <b>${state.brushCount}</b> Punkte</span>
+  else html = `<span class="mb-tool ${brushErase ? 'erase' : 'paint'}">${brushErase ? '🧽 Radierer' : '🖌 Pinsel'} · ${m.type === 'auto' ? 'Automatisch' : m.type} · <b>${state.brushCount}</b> Punkte · r <b id="mb-brush-r">${state.opts.brush}</b> mm <small class="desk-only">(Mausrad)</small></span>
     <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 Malen</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="Radierer (oder Shift beim Malen)">🧽 Radieren</button>
     <button data-a="undo" title="Strg+Z">↶ Rückgängig</button><button data-a="clear" class="warn">🗑 Auswahl löschen</button>
     <button data-a="fit" class="primary" ${state.brushCount ? '' : 'disabled'}>Fitten</button><button data-a="click">👆 Zurück zu Klick</button>`;
@@ -1296,7 +1362,10 @@ $('#btn-help').onclick = () => {
   ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
 };
-const HELP_HTML = `<h3>Bezug zuweisen (ISO 5459)</h3><ol><li>Merkmal wählen (Ebene, Zylinder/Bohrung, Kreis, Kegel, Langloch, Torus, Kugel).</li>
+const HELP_HTML = `<h3>Navigation (Maus)</h3><ul><li><b>Linke Taste</b> ziehen: drehen · <b>mittlere Taste</b> (Rad gedrückt) oder rechte Taste ziehen: verschieben in der Bildebene · <b>Mausrad</b>: zoomen.</li>
+<li>Pinsel aktiv (Fit-Pinsel, Polygon-Radierer): <b>Mausrad ändert den Pinselradius</b> (Kreis und erfasste Dreiecke werden live angezeigt), <b>Strg+Mausrad</b> zoomt.</li>
+<li>Kreis/Langloch per Klick mit Hilfsebene: beim Überfahren Vorschau – <b style="color:#2f7de1">blau</b> Hilfsebene, <b style="color:#ff8c1a">orange</b> Wandpunkte.</li><li>Touch: ein Finger drehen, zwei Finger zoomen/verschieben.</li></ul>
+<h3>Bezug zuweisen (ISO 5459)</h3><ol><li>Merkmal wählen (Ebene, Zylinder/Bohrung, Kreis, Kegel, Langloch, Torus, Kugel).</li>
 <li>Dialog › <b>Bezug</b>: Buchstaben wählen › <b>Bezug zuweisen</b> – oder Rechtsklick/langes Tippen im Baum › „Als Bezug … festlegen“.</li>
 <li>Umbenennen: anderen Buchstaben wählen; ist er vergeben, werden die Buchstaben <b>getauscht</b>. Prüfmerkmale verweisen auf das Merkmal und passen sich an.</li>
 <li>Entfernen: Prüfmerkmale, die den Bezug nutzen, bleiben erhalten und werden mit ⚠ „Bezug entfernt“ markiert, bis ein Bezug wieder zugewiesen wird.</li></ol>

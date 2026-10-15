@@ -12,6 +12,7 @@ export class Engine {
       e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result);
     };
   }
+  get idle() { return this.pending.size === 0; }
   call<T = any>(req: Req, transfer: Transferable[] = []): Promise<T> {
     const id = ++this.seq;
     return new Promise((res, rej) => { this.pending.set(id, { res, rej }); this.w.postMessage({ id, req }, transfer); });

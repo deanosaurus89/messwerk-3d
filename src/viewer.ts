@@ -42,6 +42,8 @@ export class Viewer {
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    // Maus: links drehen, mittlere Taste gedrückt = verschieben in der Bildebene, Rad = zoomen, rechts = verschieben
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
     // Hintergrund-Verlauf wie in typischer Messsoftware
     const cv = document.createElement('canvas'); cv.width = 2; cv.height = 256;
     const g = cv.getContext('2d')!, gr = g.createLinearGradient(0, 0, 0, 256);
@@ -212,12 +214,40 @@ export class Viewer {
     return { tri: h.faceIndex ?? -1, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
   }
 
-  showCursor(hit: Hit | null, radius: number) {
+  private brushHi: THREE.Mesh | null = null;
+  private hoverPts: THREE.Points[] = [];
+  /** Pinsel-Cursor: Kreis auf der Fläche, optional die Dreiecke markieren, die ein Strich erfassen würde (Kugel um den Treffer, zugewandt). */
+  showCursor(hit: Hit | null, radius: number, highlight = false) {
+    if (this.brushHi) { this.scene.remove(this.brushHi); this.brushHi.geometry.dispose(); this.brushHi = null; }
     if (!hit) { this.cursor.visible = false; return; }
+    const bt = (this.model?.geometry as any)?.boundsTree;
+    if (highlight && bt) {
+      const c = new THREE.Vector3(...hit.point), n = new THREE.Vector3(...hit.normal), sph = new THREE.Sphere(c, radius); const out: number[] = [];
+      const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fnrm = new THREE.Vector3();
+      bt.shapecast({ intersectsBounds: (box: THREE.Box3) => box.intersectsSphere(sph),
+        intersectsTriangle: (t: any) => { if (out.length > 9 * 60000) return true;
+          if (t.a.distanceTo(c) > radius && t.b.distanceTo(c) > radius && t.c.distanceTo(c) > radius) return false;
+          fnrm.crossVectors(e1.subVectors(t.b, t.a), e2.subVectors(t.c, t.a)); if (fnrm.dot(n) <= 0) return false;
+          out.push(t.a.x, t.a.y, t.a.z, t.b.x, t.b.y, t.b.z, t.c.x, t.c.y, t.c.z); return false; } });
+      if (out.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+        this.brushHi = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
+        this.brushHi.renderOrder = 9; this.scene.add(this.brushHi); }
+    }
     this.cursor.visible = true;
     this.cursor.position.set(...hit.point);
     this.cursor.scale.setScalar(radius);
     this.cursor.lookAt(new THREE.Vector3(...hit.point).add(new THREE.Vector3(...hit.normal)));
+  }
+
+  /** Live-Vorschau (Hover): Punkte zweier Mengen in zwei Farben (z. B. Hilfsebene blau, Wand orange). */
+  showHoverSets(sets: { idx: Uint32Array; color: number }[]) {
+    for (const p of this.hoverPts) { this.scene.remove(p); p.geometry.dispose(); } this.hoverPts = [];
+    const pos = this.model?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined; if (!pos) return;
+    for (const s of sets) { const step = Math.max(1, Math.floor(s.idx.length / 40000)); const a = new Float32Array(3 * Math.ceil(s.idx.length / step)); let k = 0;
+      for (let i = 0; i < s.idx.length; i += step) { const v = s.idx[i]; a[k++] = pos.getX(v); a[k++] = pos.getY(v); a[k++] = pos.getZ(v); }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(a.subarray(0, k), 3));
+      const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: s.color, size: 3, sizeAttenuation: false, depthTest: true, transparent: true, opacity: 0.95 }));
+      pts.renderOrder = 8; this.scene.add(pts); this.hoverPts.push(pts); }
   }
 
   clearPrims() { for (const c of [...this.prims.children]) { this.prims.remove(c); (c as any).geometry?.dispose?.(); } }

@@ -112,7 +112,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
   try {
     let result: any, transfer: Transferable[] = [];
     if (req.op === 'load' || req.op === 'loadRaw') {
-      if (req.op === 'load') mesh = parseByName(req.name, req.buffer);
+      if (req.op === 'load') { mesh = parseByName(req.name, req.buffer); const sc = (req as any).scale ?? 1; if (sc !== 1) { for (let i = 0; i < mesh.positions.length; i++) mesh.positions[i] *= sc; if (mesh.indices.length) computeNormals(mesh); } }
       else { mesh = { name: req.name, positions: req.positions, indices: req.indices }; if (mesh.indices.length) computeNormals(mesh); }
       topo = mesh.indices.length ? new MeshTopology(mesh) : null;
       orig = { positions: mesh.positions.slice(), indices: mesh.indices.slice() }; origBVH = null; eg = null; ebvh = null;

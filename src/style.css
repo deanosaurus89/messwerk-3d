@@ -254,3 +254,9 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 .pe-tol input[type=range]{width:100%}
 .pe-tol input[type=number]{width:90px}
 .pe-live{margin:8px 0;padding:6px 8px;background:#eef3fa;border:1px solid #c9d6e8;border-radius:5px;font-size:12px}
+
+#unit-dlg { position:fixed; inset:0; z-index:50; background:rgba(20,30,40,.35); display:flex; align-items:center; justify-content:center; }
+#unit-dlg .ud-box { background:#fff; border-radius:8px; padding:14px 18px; max-width:min(420px,94vw); box-shadow:0 8px 30px rgba(0,0,0,.3); font-size:13px; }
+#unit-dlg h3 { margin:0 0 6px; font-size:15px; } #unit-dlg .seg { display:flex; gap:4px; flex-wrap:wrap; }
+#unit-dlg .seg button { padding:6px 10px; border:1px solid #9aa8b8; background:#f3f5f8; border-radius:4px; } #unit-dlg .seg button.on { background:#1f6fd1; color:#fff; border-color:#1f6fd1; }
+.ud-ok { color:#1d7a32; } .ud-warn { color:#b25b00; font-weight:600; }
