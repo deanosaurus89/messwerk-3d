@@ -223,7 +223,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
   const maxE2 = o.maxEdge ? o.maxEdge * o.maxEdge : 0, minSin = o.minAngleDeg ? Math.sin((o.minAngleDeg * Math.PI) / 180) : 0;
   // wiederverwendete Puffer
   let MV = new Int32Array(64); const SH = new Int32Array(2); let PTS = new Int32Array(256), ASG = new Int32Array(256); let NN = new Float64Array(192);
-  const heap0 = heap.size; const cosPlanar = Math.cos((2 * Math.PI) / 180), band = o.tol / 4;
+  const cosPlanar = Math.cos((2 * Math.PI) / 180), band = o.tol / 4;
   while (heap.size && tris > minTris) {
     heap.pop(); const u = heap.pu, v = heap.pv, s = heap.ps;
     if (s !== stamp[u] || !vf[u].length || !vf[v].length) continue;
@@ -293,7 +293,7 @@ export function decimate(m: RawMesh, o: DecimateOptions): DecimateResult {
     vf[u] = []; tris -= 2; collapses++;
     for (let i = 0; i < 10; i++) Q[10 * v + i] += Q[10 * u + i];
     pushV(v); { const [b, k] = neighInto(v, NB); NB = b; const cp = b.slice(0, k); for (let j = 0; j < k; j++) pushV(cp[j]); }
-    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses, { frac: Math.min(0.99, 1 - heap.size / Math.max(1, heap0)), label: `Reduktion: ${tris.toLocaleString('de-DE')} Dreiecke` });
+    if (o.onProgress && collapses % every === 0) o.onProgress(tris, collapses, { frac: Math.min(0.99, (nt - tris) / (0.9 * nt)), label: `Reduktion: ${tris.toLocaleString('de-DE')} △` });
   }
   const r = compact(P, F, (t) => !!alive[t], nt);
   return { ...r, before: nt, after: tris, maxDev: NaN, collapses, rejects: rej, noiseDeg };
