@@ -1,5 +1,6 @@
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
+import { initActionBar, setActions } from './actionbar';
 import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType } from './core/fit';
@@ -267,6 +268,12 @@ canvas.addEventListener('pointermove', (e) => {
   viewer.showCursor(h, state.opts.brush, desk);
   if (painting && h) brushAt(h);
 });
+// Rechtsklick (ohne Ziehen) = Polylinie/Kurve abschließen; Rechts-Ziehen bleibt Verschieben
+let rdown: { x: number; y: number } | null = null;
+canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 2) rdown = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerup', (e) => { if (e.button !== 2 || !rdown) return; const d = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y); rdown = null;
+  if (d > 6) return; if (pe.tool === 'curve' && curveDraft.length > 1) { curveFinish(); return; } window.dispatchEvent(new CustomEvent('mw-rclick')); });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerleave', () => { if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
 /** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
@@ -376,8 +383,19 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 }
 /** Immer sichtbare Modusanzeige über der 3D-Ansicht (aktives Werkzeug + Aktionen). */
 const modeBar = document.createElement('div'); modeBar.id = 'mode-bar'; viewer.el.appendChild(modeBar);
+initActionBar(viewer.el);
 modeBar.addEventListener('pointerdown', (e) => e.stopPropagation());
 function renderModeBar() {
+  renderModeBarInner();
+  const q = (sel: string) => modeBar.classList.contains('hidden') ? null : modeBar.querySelector<HTMLButtonElement>(sel);
+  setActions('mesh', { label: modeBar.querySelector('.mb-tool')?.textContent?.split('·')[0].trim(), undo: q('[data-a="undo"],[data-a="pe-sundo"]'), redo: null,
+    ok: q('[data-a="ok"],[data-a="pe-go"],[data-a="fit"]'), cancel: q('[data-a="exit"],[data-a="pe-exit"]') });
+}
+function syncPreviewActions() {
+  const pc = document.querySelector('#preview-card:not(.hidden)');
+  setActions('preview', pc ? { label: 'Vorschau', ok: pc.querySelector<HTMLButtonElement>('#pc-create'), cancel: pc.querySelector<HTMLButtonElement>('#pc-discard'), okTitle: 'Merkmal erzeugen' } : null);
+}
+function renderModeBarInner() {
   if (state.data && pe.tool === 'curve') {
     modeBar.className = '';
     modeBar.innerHTML = `<span class="mb-tool">〰 Kurve zeichnen · <b>${curveDraft.length}</b> Pkt</span><button data-a="ok" class="primary" ${curveDraft.length > 1 ? '' : 'disabled'}>✔ Erzeugen</button><button data-a="undo" ${curveDraft.length ? '' : 'disabled'}>↶</button><button data-a="exit">✕ Beenden</button>`;
@@ -722,7 +740,7 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 }
 
 // ------------------------------------------------------------------ Darstellung
-function renderAll() { renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
+function renderAll() { renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderPreviewCard(); syncPreviewActions(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',

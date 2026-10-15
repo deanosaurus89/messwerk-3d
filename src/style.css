@@ -260,3 +260,11 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #viewcube, body.thumb #l
 #unit-dlg h3 { margin:0 0 6px; font-size:15px; } #unit-dlg .seg { display:flex; gap:4px; flex-wrap:wrap; }
 #unit-dlg .seg button { padding:6px 10px; border:1px solid #9aa8b8; background:#f3f5f8; border-radius:4px; } #unit-dlg .seg button.on { background:#1f6fd1; color:#fff; border-color:#1f6fd1; }
 .ud-ok { color:#1d7a32; } .ud-warn { color:#b25b00; font-weight:600; }
+#action-bar { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:7; display:flex; gap:6px; align-items:center; background:rgba(255,255,255,.94); border:1px solid #9fb2c8; border-radius:22px; padding:4px 6px 4px 12px; box-shadow:0 3px 12px rgba(0,0,0,.22); font:600 12.5px system-ui; color:#1e3a5c; max-width:calc(100% - 220px); }
+#action-bar.hidden { display:none; }
+#action-bar button { min-width:40px; height:36px; border-radius:18px; border:1px solid #9fb2c8; background:#f3f6fa; font-size:18px; cursor:pointer; color:#1e3a5c; }
+#action-bar button:disabled { opacity:.4; cursor:default; }
+#action-bar .ab-ok { background:#2e9d3a; border-color:#2e9d3a; color:#fff; font-size:20px; min-width:52px; }
+#action-bar .ab-x { color:#b23; }
+#action-bar .ab-l { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
+@media (max-width:700px){ #action-bar { bottom:8px; max-width:calc(100% - 110px); left:auto; right:8px; transform:none; } #action-bar .ab-l { display:none; } }

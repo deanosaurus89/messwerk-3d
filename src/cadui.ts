@@ -1,4 +1,5 @@
 // Register „Nützliche Funktionen": CAD-Flächen (STEP/IGES) anzeigen, wählen, nicht-destruktiv beschneiden und exportieren.
+import { setActions } from './actionbar';
 import * as THREE from 'three';
 import type { Viewer } from './viewer';
 import type { CadReq } from './cadworker';
@@ -184,6 +185,7 @@ export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEve
 }
 /** Dialogbereich für das Register; true, wenn gerendert. */
 export function cadDialog(d: HTMLElement): boolean {
+  setActions('cad', null);
   if (!cad.faces.length && !cad.busy) { if (!document.querySelector('.tab.active[data-tab="nuetz"]')) return false; d.innerHTML = `<h3>📐 CAD-Flächen beschneiden</h3><p class="note">STEP- oder IGES-Datei öffnen (z. B. aus PolyWorks exportierte Flächen). Flächen wählen, mit Rand-Offset, Schnittlinie oder Inseln beschneiden und als STEP/IGES exportieren – das Original bleibt erhalten.</p>`; return true; }
   if (!cadActive() && !cad.sel.size) return false;
   const sel = [...cad.sel].map((i) => cad.faces[i]); const t = cad.tool; const b = cad.busy ? 'disabled' : '';
@@ -204,6 +206,8 @@ export function cadDialog(d: HTMLElement): boolean {
   h += `<div class="row"><button class="btn" id="cad-undo" ${cad.undo.length ? '' : 'disabled'} ${b}>↶ Rückgängig</button><button class="btn" id="cad-redo" ${cad.redo.length ? '' : 'disabled'} ${b}>↷</button>${t ? '<button class="btn" id="cad-close">Schließen</button>' : ''}</div>`;
   if (cad.busy) h += `<p class="note">⏳ Rechne … (${$('#status')?.textContent ?? ''})</p>`;
   d.innerHTML = h;
+  { const q = (id: string) => d.querySelector<HTMLButtonElement>(id); const drawing = t === 'cut' || t === 'circle' || t === 'rect';
+    setActions('cad', t && t !== 'export' ? { label: t === 'cut' ? (cutStage === 'side' ? 'Seite wählen' : 'Schnittlinie') : t === 'offset' ? 'Rand-Offset' : 'Insel', undo: drawing && cad.draft.length ? (q('#cad-cut-back') ?? q('#cad-undo')) : q('#cad-undo'), redo: q('#cad-redo'), ok: t === 'cut' ? q('#cad-cut-ok') : t === 'offset' ? q('#cad-off-ok') : null, cancel: q('#cad-close') } : null); }
   const on = (id: string, f: () => void) => d.querySelector(id)?.addEventListener('click', f);
   const di = d.querySelector<HTMLInputElement>('#cad-d'), dr = d.querySelector<HTMLInputElement>('#cad-d-r');
   if (di && dr) { di.oninput = () => { const v = parseFloat(di.value); if (v > 0) { cad.offsetD = v; dr.value = String(Math.min(10, v)); } }; dr.oninput = () => { cad.offsetD = parseFloat(dr.value); di.value = dr.value; }; }
@@ -230,6 +234,7 @@ export function initCad(ctx: CadCtx) {
     if (Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 8 || performance.now() - d0.t > 700) return;
     (e as any).cadHandled = true; cadTap(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || e.metaKey);
   }, true);
+  window.addEventListener('mw-rclick', () => { if (cadActive() && cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) finishLine(); });
   canvas.addEventListener('dblclick', (e) => { if (cad.tool === 'cut' && cutStage === 'draw' && cad.draft.length >= 2) { e.preventDefault(); finishLine(); } });
   window.addEventListener('keydown', (e) => {
     if (!cadActive() || (e.target as HTMLElement).tagName === 'INPUT') return;
