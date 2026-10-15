@@ -70,3 +70,22 @@ describe('Unterteilung / Glättung / Radierer (Prüfplatte)', () => {
     expect(Math.max(cmp.maxPos, -cmp.maxNeg)).toBeLessThan(0.05); expect(r.surfaces[0]).toContain('Ebene');
   });
 });
+
+describe('Kantenlänge / Mindestwinkel', () => {
+  it('splitLongEdges: alle Kanten ≤ maxEdge, konform (geschlossen bleibt geschlossen)', async () => {
+    const { splitLongEdges, boundaryEdges } = await import('../src/core/polyedit');
+    // Tetraeder, Kantenlänge ~10
+    const P = [0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10], F = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+    const r = splitLongEdges(P, F, 2);
+    for (let t = 0; t < r.F.length; t += 3) for (let k = 0; k < 3; k++) { const a = r.F[t + k], b = r.F[t + (k + 1) % 3]; expect(Math.hypot(r.P[3 * a] - r.P[3 * b], r.P[3 * a + 1] - r.P[3 * b + 1], r.P[3 * a + 2] - r.P[3 * b + 2])).toBeLessThanOrEqual(2 + 1e-9); }
+    expect(boundaryEdges(r.F, r.P.length / 3).count).toBe(0);
+  });
+  it('decimate: maxEdge und minAngleDeg werden eingehalten', async () => {
+    const { decimate } = await import('../src/core/polyedit');
+    const n = 40, P: number[] = [], F: number[] = []; for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) P.push(i * 0.5, j * 0.5, 0);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const a = j * (n + 1) + i; F.push(a, a + 1, a + n + 2, a, a + n + 2, a + n + 1); }
+    const r = decimate({ positions: new Float32Array(P), indices: new Uint32Array(F) }, { tol: 0.05, maxEdge: 3, minAngleDeg: 10 });
+    expect(r.after).toBeLessThan(F.length / 3 / 4);
+    const p = r.positions, I = r.indices; for (let t = 0; t < I.length; t += 3) { const L = [0, 1, 2].map((k) => { const a = I[t + k], b = I[t + (k + 1) % 3]; return Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1]); }); expect(Math.max(...L)).toBeLessThanOrEqual(3 + 1e-6); }
+  });
+});

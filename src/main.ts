@@ -68,7 +68,7 @@ type PeTool = 'reduce' | 'subdiv' | 'smooth' | 'erase' | 'curve' | 'curveopts';
 const PE_NAME: Record<PeTool, string> = { curveopts: 'Kurvennetz-Optionen', curve: 'Kurve zeichnen', reduce: 'Dreiecksreduktion', subdiv: 'Dreiecksunterteilung', smooth: 'Glättung', erase: 'Magischer Radierer' };
 const pe = {
   tool: null as PeTool | null,
-  tol: 0.02, normalDeg: 10, featureDeg: 30, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
+  tol: 0.02, normalDeg: 10, featureDeg: 30, maxEdge: 0, minAngle: 0, levels: 1, iters: 5, lambda: 0.5, smoothTol: 0.02, radius: 3,
   cmp: false, scale: 0, dev: null as Float32Array | null, devStats: null as null | { maxPos: number; maxNeg: number },
   undo: [] as { positions: Float32Array; indices: Uint32Array; label: string }[], edits: [] as string[],
   live: '', running: false, origTris: 0,
@@ -1615,10 +1615,13 @@ function renderPolyDialog(d: HTMLElement) {
     ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
     <div class="row"><label title="Krümmungsadaptiv: neue Dreiecke dürfen höchstens so stark von den Originalnormalen abweichen">Max. Normalenabw.</label><input type="number" id="pe-nd" value="${pe.normalDeg}" min="1" max="45" step="1"><span class="unit">°</span></div>
     <div class="row"><label title="Kanten mit größerem Flächenwinkel bleiben als Kante erhalten (Ecken fest)">Kantenwinkel</label><input type="number" id="pe-fd" value="${pe.featureDeg}" min="5" max="90" step="1"><span class="unit">°</span></div>
+    <div class="row"><label title="Begrenzt die Dreiecksgröße (0 = ohne)">Max. Kantenlänge</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
+    <div class="row"><label title="Keine spitzeren Dreiecke als dieser Winkel (0 = ohne; sinnvoll bis ~15°)">Min. Winkel</label><input type="number" id="pe-ma" value="${pe.minAngle}" min="0" max="30" step="1"><span class="unit">°</span></div>
     <div class="row">${run}</div>`;
   else if (t === 'subdiv') body = `<p class="note">Teilt jedes Dreieck in vier (Loop). Neue Punkte werden geglättet, aber höchstens um die Toleranz von der ursprünglichen Fläche verschoben.</p>
     ${tolRow('pe-tol', 'Max. Abweichung', pe.tol)}
     <div class="row"><label>Stufen</label><select id="pe-lv">${[1, 2].map((x) => `<option ${x === pe.levels ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="row"><label title="Begrenzt die Dreiecksgröße (0 = ohne)">Max. Kantenlänge</label><input type="number" id="pe-me" value="${pe.maxEdge}" min="0" step="0.5"><span class="unit">mm</span></div>
     <div class="row"><span class="note">Ergebnis: ≈ ${(tris * 4 ** pe.levels).toLocaleString('de-DE')} Dreiecke${tris * 4 ** pe.levels > 3e6 ? ' – über 3 Mio., wird begrenzt' : ''}</span></div><div class="row">${run}</div>`;
   else if (t === 'smooth') body = `<p class="note">Taubin-Glättung (schrumpft nicht). Rauschen wird reduziert; jeder Punkt bewegt sich höchstens um die Toleranz (0 = unbegrenzt). Ränder bleiben fest.</p>
     <div class="row"><label>Stärke λ</label><input type="number" id="pe-lam" value="${pe.lambda}" min="0.05" max="0.9" step="0.05"></div>
@@ -1651,6 +1654,8 @@ function renderPolyDialog(d: HTMLElement) {
   }
   d.querySelector<HTMLSelectElement>('#pe-lv')?.addEventListener('change', (e) => { pe.levels = +(e.target as HTMLSelectElement).value; renderDialog(); });
   d.querySelector<HTMLInputElement>('#pe-scale')?.addEventListener('change', (e) => { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); pe.scale = isFinite(v) && v > 0 ? v : 0; renderScene(); });
+  d.querySelector<HTMLInputElement>('#pe-me')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v >= 0) pe.maxEdge = v; });
+  d.querySelector<HTMLInputElement>('#pe-ma')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v >= 0) pe.minAngle = v; });
   d.querySelector<HTMLInputElement>('#pe-nd')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v > 0) pe.normalDeg = v; });
   d.querySelector<HTMLInputElement>('#pe-fd')?.addEventListener('change', (e) => { const v = +(e.target as HTMLInputElement).value; if (v > 0) pe.featureDeg = v; });
   d.querySelector('#pe-go')?.addEventListener('click', () => peErase());
@@ -1667,7 +1672,7 @@ function setLive(html: string) { pe.live = html; const e = document.getElementBy
 async function peRun() {
   if (!state.data || pe.running) return;
   const t = pe.tool!, before = state.data.triCount, t0 = performance.now();
-  const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol, normalDeg: pe.normalDeg, featureDeg: pe.featureDeg } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels }
+  const req: any = t === 'reduce' ? { op: 'decimate', tol: pe.tol, normalDeg: pe.normalDeg, featureDeg: pe.featureDeg, maxEdge: pe.maxEdge || undefined, minAngle: pe.minAngle || undefined } : t === 'subdiv' ? { op: 'subdivide', tol: pe.tol, levels: pe.levels, maxEdge: pe.maxEdge || undefined }
     : { op: 'smooth', iterations: pe.iters, lambda: pe.lambda, tol: pe.smoothTol };
   req.mesh = curMesh();
   pe.running = true; setLive(`Läuft … <b>${before.toLocaleString('de-DE')}</b> Dreiecke`); renderDialog(); status(`${PE_NAME[t]} läuft …`);
