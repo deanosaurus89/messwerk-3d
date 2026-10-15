@@ -56,13 +56,13 @@ export function bboxDiag(oc: OC, sh: any): number {
   const b = new oc.Bnd_Box_1(); oc.BRepBndLib.Add(sh, b, true); const p = b.CornerMin(), q = b.CornerMax(); const d = p.Distance(q); b.delete(); return d;
 }
 /** Tessellation einer Fläche bzw. eines Verbunds (Netz wird bei Bedarf erzeugt). */
-export function tessellate(oc: OC, sh: any, defl: number): Tess {
+export function tessellate(oc: OC, sh: any, defl: number, natural = false): Tess {
   new oc.BRepMesh_IncrementalMesh_2(sh, defl, false, 0.35, false);
   const pos: number[] = [], idx: number[] = [], nor: number[] = [];
   for (const f of faces(oc, sh)) {
     const loc = new oc.TopLoc_Location_1(); const h = oc.BRep_Tool.Triangulation(f, loc, 0); if (h.IsNull()) continue;
     const T = h.get(); const tr = loc.Transformation(); const base = pos.length / 3; const n = T.NbNodes();
-    const rev = f.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+    const rev = !natural && f.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED; // natural: Normale der Fläche ohne Orientierungs-Flag
     for (let i = 1; i <= n; i++) { const p = T.Node(i).Transformed(tr); pos.push(p.X(), p.Y(), p.Z()); nor.push(0, 0, 0); }
     for (let i = 1; i <= T.NbTriangles(); i++) { const t = T.Triangle(i); let a = t.Value(1), b = t.Value(2); const c = t.Value(3); if (rev) [a, b] = [b, a]; idx.push(base + a - 1, base + b - 1, base + c - 1); }
     loc.delete();
@@ -186,9 +186,29 @@ export function applyOne(oc: OC, sh: any, op: TrimOp, orig: any[]): any {
   if (op.kind === 'cut') return cutByLine(oc, sh, op.pts, op.dir, op.remove);
   return cutIsland(oc, sh, op.shape, op.pts, op.dir, op.up);
 }
+/**
+ * Fläche „direkt" machen: bei REVERSED-Orientierung Fläche mit umgekehrter Parametrisierung (u gespiegelt) neu aufbauen,
+ * damit die natürliche Flächennormale der Flächennormale (Materialseite) entspricht und die Fläche FORWARD ist.
+ * Wichtig für IGES 144 (Orientierung implizit über die Flächennormale) und Systeme, die das STEP-Flag same_sense ignorieren.
+ */
+export function directFace(oc: OC, f: any): any {
+  if (f.Orientation_1() !== oc.TopAbs_Orientation.TopAbs_REVERSED) return f;
+  try {
+    // in B-Spline umwandeln: dort ist die Parameterumkehr eine echte Orientierungsumkehr (Elementarflächen würden linkshändig)
+    const nc = new oc.BRepBuilderAPI_NurbsConvert_2(f, true); const fn = oc.TopoDS.Face_1(nc.Shape());
+    f = fn; const S = oc.BRep_Tool.Surface_2(fn); const S2 = S.get().UReversed();
+    const nf = new oc.TopoDS_Face(); const B = new oc.BRep_Builder(); B.MakeFace_2(nf, S2, oc.BRep_Tool.Tolerance_1(f));
+    const ex = new oc.TopExp_Explorer_2(f, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+    for (; ex.More(); ex.Next()) B.Add(nf, ex.Current()); ex.delete();
+    const fix = new oc.ShapeFix_Face_2(nf); fix.Perform(); let r = oc.TopoDS.Face_1(fix.Face());
+    if (r.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED) return f; // Neuaufbau nicht eindeutig: Original (Flag) behalten
+    return r;
+  } catch { return f; }
+}
 /** Export: STEP AP214 bzw. IGES (Flächenmodus → getrimmte Flächen, Typ 144). */
 export function writeCAD(oc: OC, list: any[], fmt: 'step' | 'iges'): Uint8Array {
-  const sh = compound(oc, list.flatMap((s) => faces(oc, s)));
+  // STEP: Orientierung über ADVANCED_FACE.same_sense (Standard) – Flächen unverändert; IGES 144: Normale implizit -> direkte Flächen
+  const sh = compound(oc, list.flatMap((s) => faces(oc, s)).map((f) => (fmt === 'iges' ? directFace(oc, f) : f)));
   if (fmt === 'step') {
     oc.Interface_Static.SetCVal('write.step.schema', 'AP214IS'); oc.Interface_Static.SetCVal('write.step.unit', 'MM');
     const w = new oc.STEPControl_Writer_1(); const st = w.Transfer(sh, oc.STEPControl_StepModelType.STEPControl_AsIs, true, pr(oc));
