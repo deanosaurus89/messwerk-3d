@@ -326,3 +326,7 @@ body.thumb #cs-ind { display:none !important; }
 .cs-row .cs-off { width:56px; } .cs-row .cs-pick { padding:3px 8px; } .cs-row .cs-pick.on { background:#1d64c8; color:#fff; }
 .cs-dof { margin:6px 0; padding:4px 6px; border-radius:4px; background:#f3f6fa; } .cs-dof.ok { background:#e5f6e8; color:#1a7a32; } .cs-dof.err { background:#fdeaea; color:#b23; }
 .cs-dot { cursor:pointer; margin-right:3px; color:#1d64c8; }
+/* ---------- Constructed features ---------- */
+.method-seg { margin:4px 0 8px; } .method-seg .seg button { padding:4px 10px; }
+.con-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; } .con-item { font-size:12.5px; cursor:pointer; }
+.chain { font-size:11px; margin-left:3px; }

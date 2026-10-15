@@ -16,6 +16,8 @@ export interface Feature {
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
   aux?: AuxPlane;            // Hilfsebene (Projektionsebene) für Kreis/Langloch
   datum?: string;            // Bezugsbuchstabe (A, B, C …)
+  /** constructed feature: construction key, parents (also in refs) and parameters */
+  cons?: { key: string; refs: number[]; params?: Record<string, number>; error?: string };
 }
 
 /** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */

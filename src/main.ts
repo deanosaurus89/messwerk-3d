@@ -23,13 +23,15 @@ import { Tour, TourStep } from './training';
 import type { Vec3 } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
+import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
 import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin } from './core/csys';
 import { NurbsParams, evalSurface, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
 type DimComp = '3D' | 'X' | 'Y' | 'Z';
 type DistMode = { kind: 'dist'; a: number | null; b: number | null; slot: 0 | 1; comp: DimComp };
-type Mode = FitMode | DistMode | null;
+type ConMode = { kind: 'con'; out: GeomType; key: string; refs: (number | null)[]; slot: number; params: Record<string, number> };
+type Mode = FitMode | DistMode | ConMode | null;
 interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'none' | number; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
@@ -365,6 +367,7 @@ window.addEventListener('pointerup', async (e) => {
   if (pe.tool === 'curve') curveAddPoint(h);
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h); }
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
+  else if (state.mode?.kind === 'con') { const f = featureAtHit(h); if (f) conPick(f.id); else status(tt('No feature at this location.')); }
   else if (state.csEdit) { const f = featureAtHit(h); if (f) selectFeature(f.id); else status(tt('No feature at this location.')); }
   else if (!pe.tool) { const f = featureAtHit(h); if (f) selectFeature(f.id); else selectModel(); }
 });
@@ -460,6 +463,7 @@ function ctxSpec(): CtxSpec | null {
   const m = state.mode; if (!m) return null;
   const p = state.preview;
   if (m.kind === 'dist') return distSpec(m);
+  if (m.kind === 'con') return conSpec(m);
   const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   const ctl = m.method === 'Klick'
@@ -569,6 +573,7 @@ function commitPreview() {
     method: p.method, color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
     src: p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
   };
+  if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
     f.auxIndices = p.aux.indices;
@@ -578,15 +583,17 @@ function commitPreview() {
   state.sel = [f.id]; state.selControl = null; state.addFeat = f.id;
   if (state.mode?.kind === 'dist') { const comp = state.mode.comp; f.dim = { comp }; const off = state.labelOffsets.get(-1); if (off) state.labelOffsets.set(f.id, off); state.labelOffsets.delete(-1);
     addControl(('Abstand ' + comp) as ControlKind, f.id); state.mode = { kind: 'dist', a: null, b: null, slot: 0, comp }; }
+  if (f.cons) { if (t === 'Winkel') addControl('Winkelwert', f.id); if (f.measured!.pattern) { addControl('Durchmesser', f.id); addControl('Teilung', f.id); }
+    const m = state.mode as ConMode; state.mode = { ...m, refs: [], slot: 0 }; state.preview = null; }
   renderAll();
   const node = document.querySelector<HTMLElement>(`#tree [data-fid="${f.id}"]`);
   node?.classList.add('flash'); node?.scrollIntoView({ block: 'nearest' });
-  toast(`✔ ${tt('{0} created', f.name)} (${p.method === 'Konstruiert' ? fmt(distValue(p.fit, f.dim?.comp ?? '3D'), 3) + ' mm' : p.indices.length + ' ' + tt('points')})`);
+  toast(`✔ ${tt('{0} created', f.name)} (${f.cons ? tt('constructed') : p.method === 'Konstruiert' ? fmt(distValue(p.fit, f.dim?.comp ?? '3D'), 3) + ' mm' : p.indices.length + ' ' + tt('points')})`);
 }
 const defaultFp = (): FitParamsUI => ({ k: 3, nf: { on: false, angleDeg: 30, maxPct: 10 }, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, aux: state.opts.aux });
 /** Merkmal mit seinen Fit-Parametern neu berechnen (Extraktion + Fit) und alles Abhängige aktualisieren. */
 async function refitFeature(f: FeatureView, type: GeomType = f.type) {
-  if (f.type === 'Abstand') return;
+  if (f.type === 'Abstand' || f.cons) { recomputeDistances(); renderAll(); return; }
   const fp = (f.fp ??= defaultFp());
   try {
     if (type === 'Freiformfläche') {
@@ -649,9 +656,17 @@ function updateDistancePreview() {
 }
 /** Abstände nach Änderung eines Bezugsmerkmals neu berechnen. */
 function recomputeDistances() {
-  for (const f of state.features) if (f.type === 'Abstand' && f.refs) {
-    const a = state.features.find((x) => x.id === f.refs![0]), b = state.features.find((x) => x.id === f.refs![1]);
-    if (a && b) f.measured = computeDistance(a.measured!, b.measured!);
+  // all derived features (distances, constructions) in parent-first order, so chains update completely
+  const byId = new Map(state.features.map((f) => [f.id, f]));
+  const order = recomputeOrder(state.features.filter((f) => f.refs?.length).map((f) => ({ id: f.id, refs: f.refs! })));
+  for (const id of order) {
+    const f = byId.get(id)!; const ps = f.refs!.map((r) => byId.get(r)?.measured);
+    if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); continue; }
+    if (f.type === 'Abstand' && !f.cons) { f.measured = computeDistance(ps[0]!, ps[1]!); continue; }
+    if (f.cons) {
+      try { const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params); f.measured = r; f.cons.error = undefined; }
+      catch (e: any) { f.cons.error = tt(e.message); }
+    }
   }
 }
 
@@ -770,6 +785,7 @@ document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!st
 function selectFeature(id: number, additive = false) {
   if (state.mode?.kind === 'dist') { setDistanceSlot(id); return; }
   if (state.csEdit?.field) { csPick(id); return; }
+  if (state.mode?.kind === 'con') { conPick(id); return; }
   if (additive) state.sel = state.sel.includes(id) ? state.sel.filter((x) => x !== id) : [...state.sel, id].slice(-2);
   else state.sel = [id];
   state.selModel = false; state.selControl = null; state.addFeat = id; state.csSel = null;
@@ -875,7 +891,7 @@ function deleteSelected() {
   } else if (state.sel.length) {
     const s = new Set(state.sel);
     // abhängige Abstände mitlöschen
-    for (const f of state.features) if (f.refs?.some((r) => s.has(r))) s.add(f.id);
+    for (let k = 0; k < 20; k++) for (const f of state.features) if (f.refs?.some((r) => s.has(r))) s.add(f.id);
     state.features = state.features.filter((f) => !s.has(f.id));
     state.controls = state.controls.filter((c) => !c.featureIds.some((i) => s.has(i)));
     state.sel = [];
@@ -922,6 +938,7 @@ function renderAll() { if (document.getElementById('cs-ind')) renderCsIndicator(
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
     (state.mode?.kind === 'fit' && state.mode.type === b.dataset.ftype) || (state.mode?.kind === 'dist' && b.dataset.ftype === 'Abstand')));
+  document.querySelectorAll<HTMLButtonElement>('[data-con]').forEach((b) => b.classList.toggle('on', state.mode?.kind === 'con' && (b.dataset.con === state.mode.out || b.dataset.con === state.mode.key) && !(b.dataset.con === 'Kreis' && state.mode.key === 'bc-pattern')));
   $('#btn-toggle-prims').classList.toggle('on', state.showPrims);
   $('#btn-toggle-pts').classList.toggle('on', state.colorPts);
   $('#btn-toggle-labels').classList.toggle('on', state.showLabels);
@@ -932,6 +949,7 @@ function renderHint() {
   if (state.csEdit) return hint(state.csEdit.field ? tt('Coordinate system: pick the feature for “{0}” in the 3D view or the tree.', csFieldName(state.csEdit.field)) : tt('Coordinate system: check the triad, then ✓ create or ✕ cancel.'));
   const m = state.mode;
   if (!m) return hint('');
+  if (m.kind === 'con') { const c = conByKey(m.key)!, s = slotFor(c, m.slot); return hint(s ? tt('Construction: pick “{0}” in the 3D view or the tree.', tt(s.label)) : tt('Construction: check the preview, then ✓ create.')); }
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
   if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
   if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface (mouse wheel = analysis area).', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
@@ -992,7 +1010,7 @@ function renderTree() {
     const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
     const tag = distSlots.includes(f.id) ? ` <span class="sub">[${distSlots.indexOf(f.id) === 0 ? 'A' : 'B'}]</span>` : '';
     const sel = state.sel.includes(f.id), vis = !state.hidden.has(f.id), lab = !state.hiddenLabels.has(f.id);
-    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="${tt('Datum {0}', f.datum)}">${f.datum}</span>` : ''}${tag}`,
+    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="${tt('Datum {0}', f.datum)}">${f.datum}</span>` : ''}${f.refs?.length ? ` <span class="chain" title="${tt('Constructed from')}: ${f.refs.map(nameOf).join(', ')}">🔗</span>` : ''}${f.cons?.error ? ` <span class="sub" title="${f.cons.error}">⚠</span>` : ''}${tag}`,
       'indent2' + (vis ? '' : ' hidden-feat'), (e) => selectFeature(f.id, e.ctrlKey || e.metaKey || e.shiftKey), sel, f.id,
       eyeBtn(vis, () => { vis ? state.hidden.add(f.id) : state.hidden.delete(f.id); renderTree(); renderScene(); }));
     fnode.appendChild(eyeBtn(lab, () => { lab ? state.hiddenLabels.add(f.id) : state.hiddenLabels.delete(f.id); renderTree(); renderScene(); }, true));
@@ -1084,6 +1102,7 @@ const DIALOGS: DialogProvider[] = [
   { id: 'curve-opts', when: () => pe.tool === 'curveopts', render: (d) => renderCurveOpts(d) },
   { id: 'mesh-tool', when: () => !!pe.tool, render: (d) => renderPolyDialog(d) },
   { id: 'csys-edit', when: () => !!state.csEdit, render: (d) => renderCsEdit(d) },
+  { id: 'construct-mode', when: () => state.mode?.kind === 'con', render: (d) => renderConDialog(d) },
   { id: 'distance-mode', when: () => state.mode?.kind === 'dist', render: (d) => renderDistDialog(d) },
   { id: 'fit-mode', when: () => state.mode?.kind === 'fit', render: (d) => renderFitDialog(d) },
   { id: 'curve', when: () => curveById(state.curveSel) != null, render: (d) => renderCurveSel(d, curveById(state.curveSel)!) },
@@ -1117,7 +1136,7 @@ function renderDistDialog(d: HTMLElement) {
 }
 function renderFitDialog(d: HTMLElement) {
   const m = state.mode as FitMode; const p = state.preview;
-  d.innerHTML = `<h3>${ICON[m.type] ?? ''} ${tt('Create feature')}: ${m.type === 'auto' ? tt('Auto detection') : typeName(m.type)}</h3>
+  d.innerHTML = `<h3>${ICON[m.type] ?? ''} ${tt('Create feature')}: ${m.type === 'auto' ? tt('Auto detection') : typeName(m.type)}</h3>${methodSeg(m.type, 'mesh')}
     <p class="note">${tt('Method, type, brush/area radius and ✓ ✕ are in the bottom panel of the 3D view. Here: settings and details.')}</p>
     ${m.method === 'Klick' ? `<h4>${tt('Region growing')}</h4>
     <div class="row"><label>${tt('Max. normal angle [°]')}</label><input id="d-ang" value="${state.opts.maxAngleDeg}" inputmode="decimal"></div>
@@ -1132,7 +1151,7 @@ function renderFitDialog(d: HTMLElement) {
       ${p.candidates.length ? `<h4>${tt('Detection (RMS per type)')}</h4>${kv(p.candidates.map((c) => [typeName(c.type), fmt(c.rms)] as [string, string]))}` : ''}`
     : `<p class="note">${tt('A click first creates a preview (points + geometry + values). Only ✓ creates the feature.')}</p>`}`;
   const bind = (id: string, key: 'maxAngleDeg' | 'radius' | 'brush') => { const el = d.querySelector<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x)) { state.opts[key] = x; renderModeBar(); } }; };
-  bind('#d-ang', 'maxAngleDeg'); bind('#d-rad', 'radius');
+  bind('#d-ang', 'maxAngleDeg'); bind('#d-rad', 'radius'); bindMethodSeg(d, m.type);
   d.querySelector<HTMLSelectElement>('#d-aux')?.addEventListener('change', (e) => {
     const v = (e.target as HTMLSelectElement).value; state.opts.aux = v === 'auto' || v === 'none' ? v : +v;
     if (state.preview?.hit) refitPreview(state.preview.fit.type); else renderAll();
@@ -1141,15 +1160,15 @@ function renderFitDialog(d: HTMLElement) {
 function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
   const dk = datumKind(f.type);
-  d.innerHTML = `<h3><span style="color:${hex(f.color)}">${ico}</span> ${f.name}${f.refs?.length ? ' <span class="chain" title="' + tt('Depends on other features') + '">⛓</span>' : ''}</h3>
+  d.innerHTML = `<h3><span style="color:${hex(f.color)}">${ico}</span> ${f.name}${f.refs?.length ? ' <span class="chain" title="' + tt('Depends on other features') + '">🔗</span>' : ''}</h3>
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label></div>
-    ${f.refs ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}
-    <h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...fitRows(f.measured!, f.pointCount)])}
+    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}
+    <h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}
-    ${f.type !== 'Abstand' ? fitParamsHTML(f) : ''}
+    ${f.type !== 'Abstand' && !f.cons ? fitParamsHTML(f) : ''}
     ${dk ? `<h4><span class="dflag sm">${f.datum ?? '?'}</span> ${tt('Datum (ISO 5459)')}</h4>
       <div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
         return `<option value="${l}" ${(f.datum ?? nextFreeLetter()) === l ? 'selected' : ''}>${l}${o ? ` (${tt('swap with {0}', o.name)})` : ''}</option>`; }).join('')}</select>
@@ -1169,7 +1188,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   ($('#d-lab') as HTMLInputElement).onchange = (e) => { (e.target as HTMLInputElement).checked ? state.hiddenLabels.delete(f.id) : state.hiddenLabels.add(f.id); renderTree(); renderScene(); };
   ($('#d-del') as HTMLButtonElement).onclick = () => { state.selControl = null; deleteSelected(); };
   ($('#d-addctrl') as HTMLButtonElement).onclick = () => { state.addFeat = f.id; state.ctab = 'katalog'; renderTable(); togglePanel('table', true); };
-  bindFitParams(d, f);
+  if (f.cons) bindConDefinition(d, f); else bindFitParams(d, f);
 }
 const auxSourceText = (a: AuxPlane) => (a.refId ? nameOf(a.refId) : tt('automatic (adjacent face)'));
 
@@ -1384,12 +1403,14 @@ function renderScene() {
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
-    if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
+    if (f.type === 'Winkel') viewer.addAngle(f.measured!, f.color, sel);
+    else if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
     else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
     else viewer.addPrimitive(f.measured!, f.color, sel);
   }
   if (p) {
-    if (p.fit.type === 'Abstand') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
+    if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
+    else if (p.fit.type === 'Abstand' && state.mode?.kind === 'dist') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
@@ -2502,3 +2523,128 @@ $('#btn-cs-show').onclick = () => { state.showCs = !state.showCs; renderAll(); }
 $('#btn-cs-view').onclick = () => csViewZ(state.activeCs);
 renderCsIndicator();
 Object.assign((window as any).__app, { csNew, csActivate, csOk, csEditStart, csResult });
+
+
+// ------------------------------------------------------------------ Constructed features
+// Method "Construction": the feature is computed from parent features (see core/construct.ts) and recomputed when a
+// parent changes (recomputeDistances handles all derived features in dependency order). Chain icon 🔗 in the tree.
+function startConstruct(out: GeomType, key?: string) {
+  if (!state.data) { toast(tt('Import a model and create features first.')); return; }
+  const list = constructionsFor(out); if (!list.length) { toast(tt('{0} cannot be constructed.', typeName(out))); return; }
+  pe.tool = null; state.csEdit = null;
+  const c = (key ? conByKey(key) : null) ?? (state.mode?.kind === 'con' && state.mode.out === out ? conByKey(state.mode.key)! : list[0]);
+  state.mode = { kind: 'con', out, key: c.key, refs: [], slot: 0, params: Object.fromEntries((c.params ?? []).map((p) => [p.key, p.def])) };
+  // prefill from the tree selection where the types fit
+  for (const id of state.sel) { const f = state.features.find((x) => x.id === id); const s = slotFor(c, state.mode.refs.length); if (f && s && accepts(s, f.type)) state.mode.refs.push(id); }
+  state.mode.slot = state.mode.refs.length; state.preview = null; clearBrush(); updateConPreview();
+  setPaneOpen('dialog', true); togglePanel('dialog', !isPhone()); renderAll();
+}
+function setConstruction(key: string) {
+  const m = state.mode as ConMode, c = conByKey(key)!; const keep = m.refs.filter((id, i) => { const f = state.features.find((x) => x.id === id), s = slotFor(c, i); return f && s && accepts(s, f.type); });
+  state.mode = { ...m, key, refs: keep as number[], slot: keep.length, params: Object.fromEntries((c.params ?? []).map((p) => [p.key, m.params[p.key] ?? p.def])) };
+  updateConPreview(); renderAll();
+}
+function conPick(id: number) {
+  const m = state.mode as ConMode, c = conByKey(m.key)!, f = state.features.find((x) => x.id === id); if (!f) return;
+  const s = slotFor(c, m.slot);
+  if (!s) { status(tt('All inputs are set – ✓ to create, or remove one first.')); return; }
+  if (!accepts(s, f.type)) { toast(tt('{0} cannot be used as “{1}”.', typeName(f.type), tt(s.label))); return; }
+  if (m.refs.includes(id)) { toast(tt('{0} is already used.', f.name)); return; }
+  m.refs[m.slot] = id; m.slot = m.refs.findIndex((r) => r == null); if (m.slot < 0) m.slot = m.refs.length;
+  if (!slotFor(c, m.slot) && m.slot >= c.slots.length && !c.multi) m.slot = m.refs.length;
+  updateConPreview();
+  if (state.preview && isPhone()) togglePanel('dialog', false);
+  renderAll();
+}
+let conError = '';
+function updateConPreview() {
+  const m = state.mode as ConMode; conError = '';
+  const ps = m.refs.filter((x) => x != null).map((id) => state.features.find((f) => f.id === id)?.measured).filter(Boolean) as FitResult[];
+  const c = conByKey(m.key)!, need = c.slots.length + (c.multi?.min ?? 0);
+  if (ps.length < need) { state.preview = null; return; }
+  try { state.preview = { fit: runConstruction(m.key, ps, m.params), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: m.refs.filter((x) => x != null) as number[] }; }
+  catch (e: any) { state.preview = null; conError = tt(e.message); }
+}
+function conStats(fit: FitResult): string {
+  const rows: [string, string][] = [];
+  if (fit.type === 'Winkel') rows.push([tt('Angle'), fmt(fit.angle, 4) + '°']);
+  if (fit.pattern) rows.push([tt('Holes'), String(fit.pattern.n)], [tt('Pitch'), fmt(fit.pattern.pitch, 3) + '°'], [tt('Pitch deviation'), fmt(fit.pattern.pitchDev, 4) + '°']);
+  if (fit.diameter != null && fit.type !== 'Winkel') rows.push(['Ø', fmt(fit.diameter, 4)]);
+  if (fit.form) rows.push([FORM_NAME[fit.type] ?? tt('Form'), fmt(fit.form, 4)]);
+  if (fit.type !== 'Winkel') { const fr = activeFrame(), C = fr ? csLocal(fr, fit.center) : fit.center; rows.push(['X Y Z', C.map((v) => fmt(v, 3)).join(' ')]); }
+  return rows.map(([k, v]) => `<span class="cp-kv"><small>${k}</small><b>${v}</b></span>`).join('');
+}
+function conSpec(m: ConMode): CtxSpec {
+  const c = conByKey(m.key)!, p = state.preview;
+  const n = Math.max(c.slots.length + (c.multi?.min ?? 0), m.refs.length + (c.multi ? 1 : 0));
+  const chips = Array.from({ length: n }, (_, i) => { const s = slotFor(c, i)!, id = m.refs[i];
+    return `<button data-cslot="${i}" class="cp-chip ${m.slot === i ? 'on' : ''}" title="${tt(s.label)}">${i + 1}: ${id != null ? nameOf(id) : tt(s.label) + ' …'}</button>`; }).join('');
+  const opts = constructionsFor(m.out).map((x) => `<option value="${x.key}" ${x.key === m.key ? 'selected' : ''}>${tt(x.label)}</option>`).join('');
+  return {
+    title: `🔗 ${tt('Construct')} ${typeName(m.out)}`,
+    controls: `<select id="cp-con">${opts}</select>${chips}`,
+    stats: p ? conStats(p.fit) : `<span class="cp-hint">${conError ? '⚠ ' + conError : tt('Pick: {0}', tt(slotFor(c, m.slot)?.label ?? ''))}</span>`,
+    bind: (el) => {
+      el.querySelector<HTMLSelectElement>('#cp-con')!.onchange = (e) => setConstruction((e.target as HTMLSelectElement).value);
+      el.querySelectorAll<HTMLButtonElement>('[data-cslot]').forEach((b) => (b.onclick = () => { m.slot = Number(b.dataset.cslot); renderAll(); }));
+    },
+    ok: { run: commitPreview, disabled: !p, title: tt('Create feature (Enter)') },
+    undo: { run: () => { if (m.refs.length) { m.refs.pop(); m.slot = m.refs.length; updateConPreview(); renderAll(); } }, disabled: !m.refs.length, title: tt('Remove last input') },
+    cancel: { run: stopMode, title: tt('Exit (Esc)') },
+  };
+}
+/** Method choice shown at the top of the create dialogs. */
+function methodSeg(out: GeomType | 'auto', cur: 'mesh' | 'con') {
+  const can = out !== 'auto' && constructionsFor(out as GeomType).length > 0, mesh = out !== 'Winkel';
+  return `<div class="row method-seg"><span class="cp-seg seg" role="radiogroup"><button data-meth="mesh" class="${cur === 'mesh' ? 'on' : ''}" ${mesh ? '' : 'disabled'}>${tt('From polygon model')}</button><button data-meth="con" class="${cur === 'con' ? 'on' : ''}" ${can ? '' : 'disabled'}>🔗 ${tt('Construction')}</button></span></div>`;
+}
+function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto') {
+  d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => { if (b.dataset.meth === 'con') startConstruct(out as GeomType); else startFitMode(out === 'Winkel' ? 'auto' : out); }));
+}
+function renderConDialog(d: HTMLElement) {
+  const m = state.mode as ConMode, c = conByKey(m.key)!, p = state.preview;
+  const list = constructionsFor(m.out);
+  const n = Math.max(c.slots.length + (c.multi?.min ?? 0), m.refs.length + (c.multi ? 1 : 0));
+  d.innerHTML = `<h3>${ICON[m.out] ?? ''} ${tt('Create feature')}: ${typeName(m.out)}</h3>${methodSeg(m.out, 'con')}
+    <h4>${tt('Construction')}</h4><div class="con-list">${list.map((x) => `<label class="con-item"><input type="radio" name="con-k" value="${x.key}" ${x.key === m.key ? 'checked' : ''}> ${tt(x.label)}</label>`).join('')}</div>
+    <h4>${tt('Inputs')}</h4>${Array.from({ length: n }, (_, i) => { const s = slotFor(c, i)!, id = m.refs[i];
+      return `<div class="cs-row ${m.slot === i ? 'act' : ''}"><label>${i + 1}</label><span style="flex:1">${id != null ? nameOf(id) : `<i>${tt(s.label)}</i>`}</span><button class="btn cs-pick ${m.slot === i ? 'on' : ''}" data-cslot="${i}" title="${tt('Pick in 3D view or tree')}">⌖</button>${id != null ? `<button class="btn" data-crm="${i}" title="${tt('Remove')}">✕</button>` : ''}</div>`; }).join('')}
+    ${c.multi ? `<p class="note">${tt('At least {0} features; pick more to add them.', c.multi.min)}</p>` : ''}
+    ${(c.params ?? []).map((q) => q.choices ? `<div class="row"><label>${tt(q.label)}</label><select data-cpar="${q.key}">${q.choices.map((ch, i) => `<option value="${i}" ${m.params[q.key] === i ? 'selected' : ''}>${tt(ch)}</option>`).join('')}</select></div>`
+      : `<div class="row"><label>${tt(q.label)}${q.unit ? ` [${q.unit}]` : ''}</label><input data-cpar="${q.key}" value="${m.params[q.key]}" inputmode="decimal"></div>`).join('')}
+    ${conError ? `<div class="cs-dof err">⚠ ${conError}</div>` : ''}
+    ${p ? `<h4>${tt('Preview')}</h4>${kv(conRows(p.fit))}` : ''}
+    <p class="note">${tt('A constructed feature has no own mesh points; it is recomputed automatically when a parent feature changes (chain icon 🔗 in the tree).')}</p>`;
+  bindMethodSeg(d, m.out);
+  d.querySelectorAll<HTMLInputElement>('[name="con-k"]').forEach((r) => (r.onchange = () => setConstruction(r.value)));
+  d.querySelectorAll<HTMLButtonElement>('[data-cslot]').forEach((b) => (b.onclick = () => { m.slot = Number(b.dataset.cslot); renderAll(); if (isPhone()) togglePanel('dialog', false); }));
+  d.querySelectorAll<HTMLButtonElement>('[data-crm]').forEach((b) => (b.onclick = () => { m.refs.splice(Number(b.dataset.crm), 1); m.slot = m.refs.length; updateConPreview(); renderAll(); }));
+  d.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-cpar]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v)) m.params[i.dataset.cpar!] = v; updateConPreview(); renderAll(); }));
+}
+function conRows(fit: FitResult): [string, string][] {
+  const rows: [string, string][] = [];
+  if (fit.type === 'Winkel') rows.push([tt('Angle [°]'), fmt(fit.angle, 4)]);
+  if (fit.pattern) rows.push([tt('Holes'), String(fit.pattern.n)], [tt('Nominal pitch [°]'), fmt(fit.pattern.pitch, 3)], [tt('Pitch deviation [°]'), fmt(fit.pattern.pitchDev, 4)], [tt('Angles [°]'), fit.pattern.angles.map((a) => a.toFixed(2)).join(', ')]);
+  if (fit.type !== 'Winkel') rows.push(...fitRows(fit, 0).filter(([k]) => k !== tt('Points') && k !== 'Max. +' && k !== 'Max. −' && k !== tt('Std. dev. (RMS)')));
+  return rows;
+}
+/** Feature dialog part for constructed features: definition, parameters (editable → recompute). */
+function conDefinitionHTML(f: FeatureView): string {
+  if (!f.cons) return '';
+  const c = conByKey(f.cons.key);
+  return `<h4>🔗 ${tt('Construction')}</h4>${kv([[tt('Method'), c ? tt(c.label) : f.cons.key], [tt('Parents'), f.cons.refs.map(nameOf).join(', ')]])}
+    ${(c?.params ?? []).map((q) => `<div class="row"><label>${tt(q.label)}${q.unit ? ` [${q.unit}]` : ''}</label><input data-fpar="${q.key}" value="${f.cons!.params?.[q.key] ?? q.def}" inputmode="decimal"></div>`).join('')}
+    ${f.cons.error ? `<div class="cs-dof err">⚠ ${f.cons.error}</div>` : ''}`;
+}
+function bindConDefinition(d: HTMLElement, f: FeatureView) {
+  d.querySelectorAll<HTMLInputElement>('[data-fpar]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (!isFinite(v)) return; (f.cons!.params ??= {})[i.dataset.fpar!] = v; recomputeDistances(); renderAll(); }));
+}
+{
+  const g = document.querySelector('#ribbon [data-tab="merkmale"] #btn-distance')?.parentElement;
+  if (g) for (const o of CON_OUTS) {
+    const b = document.createElement('button'); b.className = 'big'; b.dataset.con = o.key ?? o.out;
+    b.innerHTML = `<span class="ico">${o.key === 'bc-pattern' ? '✲' : ICON[o.out] ?? ''}</span>${tt(o.label)}`; b.title = tt('Construct {0} from other features', tt(o.label));
+    b.onclick = () => startConstruct(o.out, o.key); g.appendChild(b);
+  }
+}
+Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS });

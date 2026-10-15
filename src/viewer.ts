@@ -383,6 +383,18 @@ export class Viewer {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
     s.scale.set(0.032, 0.032, 1); s.position.set(p[0], p[1], p[2]); s.renderOrder = 10; s.raycast = () => {}; this.prims.add(s);
   }
+  /** Angle feature: two legs from the vertex towards both parents and an arc. */
+  addAngle(f: { center: number[]; p1?: number[]; p2?: number[]; angle?: number }, color: number, selected: boolean) {
+    const c = new THREE.Vector3(...f.center), L = this.radius * 0.12;
+    const dir = (p?: number[]) => { const v = p ? new THREE.Vector3(...p).sub(c) : new THREE.Vector3(1, 0, 0); return v.lengthSq() < 1e-12 ? new THREE.Vector3(1, 0, 0) : v.normalize(); };
+    const a = dir(f.p1), b = dir(f.p2), mat = new THREE.LineBasicMaterial({ color, depthTest: false });
+    const leg = (u: THREE.Vector3) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([c, c.clone().addScaledVector(u, L)]), mat); l.renderOrder = 7; this.prims.add(l); };
+    leg(a); leg(b);
+    const ang = a.angleTo(b), ax = new THREE.Vector3().crossVectors(a, b); if (ax.lengthSq() > 1e-12) { ax.normalize();
+      const pts = Array.from({ length: 25 }, (_, i) => c.clone().add(a.clone().applyAxisAngle(ax, (ang * i) / 24).multiplyScalar(L * 0.6)));
+      const arc = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false })); arc.renderOrder = 7; this.prims.add(arc); }
+    const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / (selected ? 120 : 160), 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false })); d.position.copy(c); d.renderOrder = 8; this.prims.add(d);
+  }
   /** Coordinate system triad: X red, Y green, Z blue arrows with letters; active one larger. */
   addTriad(o: number[], R: number[][], name: string, active: boolean, preview = false) {
     const L = this.radius * (active || preview ? 0.22 : 0.15), O = new THREE.Vector3(o[0], o[1], o[2]);

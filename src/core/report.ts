@@ -9,7 +9,7 @@ export interface ReportControlRow { feature: string; control: string; nominal: n
 export interface Report { id: number; name: string; created: string; source: string; features: ReportFeatureRow[]; controls: ReportControlRow[]; io: number; nio: number; }
 
 export const statusText = (s: string) => (s === 'IO' ? 'OK' : s === 'NIO' ? 'NOK' : s);
-const TYPE_EN: Record<string, string> = { Ebene: 'Plane', Kreis: 'Circle', Zylinder: 'Cylinder', Langloch: 'Slot', Kegel: 'Cone', Kugel: 'Sphere', Torus: 'Torus', Punkt: 'Point', Linie: 'Line', Freiformfläche: 'Freeform surface', Abstand: 'Distance' };
+const TYPE_EN: Record<string, string> = { Ebene: 'Plane', Kreis: 'Circle', Zylinder: 'Cylinder', Langloch: 'Slot', Kegel: 'Cone', Kugel: 'Sphere', Torus: 'Torus', Punkt: 'Point', Linie: 'Line', Freiformfläche: 'Freeform surface', Abstand: 'Distance', Winkel: 'Angle' };
 const f4 = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '' : v.toFixed(d));
 
 export function sizeText(f: Feature): string {
@@ -21,6 +21,7 @@ export function sizeText(f: Feature): string {
     case 'Torus': return `⌀ ${f4(m.diameter)} / tube ⌀ ${f4(2 * m.minorRadius!)}`;
     case 'Abstand': return `${f4(m.distance)}`;
     case 'Linie': return `L ${f4(m.length)}`;
+    case 'Winkel': return `∠ ${f4(m.angle)}°`;
     default: return '';
   }
 }

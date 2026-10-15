@@ -17,6 +17,7 @@ export const ICON: Record<string, string> = {
   aux: s('<path d="M3 16 L8 11 H21 L16 16 Z" stroke-dasharray="2 2"/><circle cx="12" cy="10" r="3.5"/>'),
   report: s('<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
   csys: s('<path d="M6 18V5M6 18h13M6 18l-4 4"/><path d="M4 7l2-2 2 2M17 16l2 2-2 2"/><circle cx="6" cy="18" r="1.4" fill="currentColor"/>'),
+  Winkel: s('<path d="M4 19h16M4 19L16 6"/><path d="M11 19a7 7 0 0 0-2.2-5.1"/>'),
   folder: s('<path d="M3 7h6l2 2h10v10H3z"/>'),
   data: s('<path d="M4 6h16v12H4z M4 10h16"/>'),
   mesh: s('<path d="M3 18 L8 6 L13 18 Z M8 6 L18 9 L13 18 M18 9 L21 18 H13"/>'),
