@@ -1,0 +1,45 @@
+[
+ {
+  "key": "formdemo",
+  "name": "Form deviation demo (default)",
+  "file": "formdemo.stl.gz",
+  "kind": "Measured scan with large form deviations",
+  "description": "Validation part with clearly visible form deviations – ideal for Analyze (color map, arrows, zones) and extraction.",
+  "triangles": 297828,
+  "bytes": 8964070,
+  "thumb": "thumb-formdemo.jpg",
+  "default": true
+ },
+ {
+  "key": "flansch",
+  "name": "Shaft/flange",
+  "file": "flansch.stl.gz",
+  "kind": "Scan-ähnlich (isotropes Netz)",
+  "description": "Rotationsteil: Flansch Ø110 × 16 mit Teilkreis 6 × Ø10 auf Ø85, Welle Ø50 mit Torus-Einstich, Absatz Ø36, Kegel 53,13°, Zapfen Ø24, Bohrung Ø16 – alle koaxial zur Z-Achse.",
+  "triangles": 304374,
+  "bytes": 11094837,
+  "thumb": "thumb-flansch.jpg"
+ },
+ {
+  "key": "cadsample",
+  "name": "CAD surface model (IGES)",
+  "file": "cad-sample.igs.gz",
+  "kind": "CAD (IGES, trimmed NURBS surfaces)",
+  "description": "Surface model with 138 faces – for CAD trimming (cut line/polygon, islands, boundary offset) and STEP/IGES export.",
+  "triangles": 0,
+  "bytes": 1034575,
+  "thumb": "thumb-cadsample.jpg",
+  "cad": true
+ },
+ {
+  "key": "beispielteil",
+  "name": "Training part",
+  "file": "beispielteil.stl",
+  "kind": "CAD-Tessellierung + Rauschen",
+  "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
+  "triangles": 284227,
+  "bytes": 14211434,
+  "thumb": "thumb-beispielteil.jpg",
+  "hidden": true
+ }
+]
