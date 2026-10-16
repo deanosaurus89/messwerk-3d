@@ -337,7 +337,7 @@ body.thumb #cs-ind { display:none !important; }
 .docs .doc-toc{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .docs .doc-toc a{padding:3px 8px;border:1px solid #c9d6e8;border-radius:12px;font-size:12px;text-decoration:none;color:#1f6fd1}
 .docs section{margin-bottom:14px}
-.doc-fig{margin:8px 0;max-width:640px}.doc-fig img{max-width:100%;border:1px solid #ccd;border-radius:4px}.doc-fig figcaption{font-size:11px;color:#556}
+.doc-fig{margin:8px 0;max-width:640px}.doc-fig img{max-width:100%;border:1px solid #ccd;border-radius:4px}.doc-fig.wide{max-width:100%}.doc-fig figcaption{font-size:11px;color:#556}
 .method-seg .seg{flex-wrap:wrap}
 .rsec{display:flex;align-items:stretch;padding:0 2px 0 8px;border-left:2px solid #1f6fd1;margin-left:6px}.rsec span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;color:#1f6fd1;text-align:center}
 .reex summary{cursor:pointer;font-weight:600;margin:8px 0 4px}
