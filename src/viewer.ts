@@ -220,7 +220,7 @@ export class Viewer {
    * scaled only by `locEx`; actual derived median line (red) at its REAL location, only its bend/form scaled by `formEx`;
    * location offset as a dimension arrow with value.
    */
-  addAxisAnalysis(an: AxisAnalysis, formEx: number, locEx = 1, offLabel = '') {
+  addAxisAnalysis(an: AxisAnalysis, formEx: number, locEx = 1, offLabel = '', show: { zones?: boolean; env?: boolean } = {}) {
     const V = (p: Vec3) => new THREE.Vector3(...p), d = V(an.dir), L = an.length * 1.15;
     const mid = V(nominalFoot(an, an.mlPoint));
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
@@ -230,7 +230,9 @@ export class Viewer {
     // nominal axis
     line([mid.clone().addScaledVector(d, -L / 2), mid.clone().addScaledVector(d, L / 2)], 0x555555);
     const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(mid); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
-    if (an.planeN && an.centers.length) {
+    const zonesOn = show.zones !== false;
+    if (!zonesOn) { /* tolerance + required zones hidden by the user */ }
+    else if (an.planeN && an.centers.length) {
       // zone between two parallel planes (axis ∥ plane, axis ⟂ axis): slabs centred on the median line's extent along planeN
       const n = V(an.planeN).normalize(), t = an.centers.map((c) => n.dot(V(c))), c0 = (Math.max(...t) + Math.min(...t)) / 2;
       const ctr = mid.clone().addScaledVector(n, c0 - n.dot(mid)), w = new THREE.Vector3().crossVectors(d, n).normalize();
@@ -241,6 +243,14 @@ export class Viewer {
     } else {
       if (an.tol) cyl((an.tol / 2) * locEx, 0x22aa44, 0.2);
       if (!an.missing) cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
+    }
+    // envelope: minimum-zone cylinder enclosing the derived median line (Ø = straightness), drawn with the same form scale
+    if (show.env !== false && an.envAxis && an.centers.length >= 2 && an.straightness > 0) {
+      const ep = V(displayPoint(an, an.envAxis.p, formEx, locEx)), ed = V(an.envAxis.d).normalize(), R = (an.straightness / 2) * Math.max(1, formEx || 1);
+      const g = new THREE.CylinderGeometry(R, R, an.length * 1.05, 40, 4, true);
+      const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x8e44ad, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+      const wire = new THREE.LineSegments(new THREE.EdgesGeometry(g, 1), new THREE.LineBasicMaterial({ color: 0x8e44ad, transparent: true, opacity: 0.7, depthTest: false }));
+      for (const o of [mesh, wire]) { o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ed); o.position.copy(ep); o.renderOrder = 6; o.raycast = () => {}; this.prims.add(o); }
     }
     // actual median line (real location, form exaggerated around its own axis)
     // coloured by deviation (app colour scale, 0 = green … h = red): radial distance from the reference axis

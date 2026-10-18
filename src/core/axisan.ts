@@ -31,6 +31,8 @@ export interface AxisAnalysis {
   straightness: number;                 // Ø zone of the median line straightness – minimum zone (floating + tilted)
   straightnessLSQ: number;              // same, zone direction fixed to the LSQ line (for comparison)
   mlPoint: Vec3; mlDir: Vec3;           // LSQ line through the median line (its own axis)
+  /** axis of the minimum-zone envelope cylinder (Ø = straightness) enclosing the median line */
+  envAxis?: { p: Vec3; d: Vec3 };
   offset: Vec3; offsetLen: number;      // location offset of the median line (centroid) from the nominal axis, ⟂ nominal (position mode)
   mode: 'position' | 'orientation' | 'fit';
   tol: number | null;
@@ -58,7 +60,7 @@ export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal0?: { dir: Vec3;
   const ml = centers.length >= 2 ? lsqLine(centers, a) : { p: fit.center, d: a };
   const off = mode === 'position' ? orth(sub(ml.p, o), d) : [0, 0, 0] as Vec3;
   const tilt = Math.acos(Math.min(1, Math.abs(dot(a, d)))) * 180 / Math.PI;
-  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness: st.dia, straightnessLSQ: st.diaLSQ, mlPoint: ml.p, mlDir: ml.d, offset: off, offsetLen: norm(off), mode, tol, label, planeN: nominal?.planeN, formDevs, length: L, radius: fit.radius ?? 1 };
+  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness: st.dia, straightnessLSQ: st.diaLSQ, mlPoint: ml.p, mlDir: ml.d, offset: off, offsetLen: norm(off), mode, tol, label, envAxis: { p: fz.centre, d: st.dir }, planeN: nominal?.planeN, formDevs, length: L, radius: fit.radius ?? 1 };
 }
 /**
  * Display position of a median-line point: the line stays at its REAL location. Only its deviation from its own
