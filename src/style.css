@@ -189,7 +189,8 @@ body.training .lbl { pointer-events:none !important; }
 @media (max-width: 900px), (max-height: 560px) {
   #btn-center { left:6px; bottom:96px; padding:5px 8px; }
   body.show-table #btn-center, body.show-tree #btn-center, body.show-dialog #btn-center { bottom:auto; top:8px; }
-  #help-view { left:4px; right:4px; top:4px; bottom:4px; }
+  #help-view { left:10px; right:10px; top:40px; bottom:14px; }
+  #help-view #hv-close { min-width:48px; min-height:48px; font-size:26px; }
   #tour-card { right:6px; left:6px; width:auto; bottom:6px; font-size:12.5px; }
 }
 
@@ -363,3 +364,7 @@ input.ted:disabled { background:#f1f3f5; }
 .an-derive { display:inline-flex; gap:4px; align-items:center; padding:1px 6px; border:1px dashed #d81b60; border-radius:4px; }
 
 .dslots { display:inline-flex; gap:2px; align-items:center; } .dslots select { max-width:110px; font-size:12px; } .dslots .dmod { max-width:44px; }
+
+#help-backdrop { position:absolute; inset:0; z-index:7; background:rgba(20,30,40,0.28); }
+#help-backdrop.hidden { display:none; }
+#help-view #hv-close { min-width:40px; min-height:36px; font-size:20px; font-weight:700; line-height:1; }

@@ -281,6 +281,11 @@ $('#btn-sample').onclick = () => openSamples();
 $('#btn-csv').onclick = () => download('pruefmerkmale.csv', controlsCSV(state.controls, featMap(), ctx));
 $('#btn-report').onclick = () => makeReport();
 $('#btn-report2').onclick = () => makeReport();
+// help/docs overlay: big ✕, tap outside (backdrop) and Esc close it (iOS: no hardware Esc → backdrop + ✕)
+{ const hv = $('#help-view'), bd = $('#help-backdrop');
+  new MutationObserver(() => bd.classList.toggle('hidden', hv.classList.contains('hidden'))).observe(hv, { attributes: true, attributeFilter: ['class'] });
+  bd.addEventListener('click', () => hv.classList.add('hidden'));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hv.classList.contains('hidden')) { hv.classList.add('hidden'); e.stopPropagation(); } }, true); }
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
 $('#btn-delete-feat').onclick = () => deleteSelected();
