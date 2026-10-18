@@ -6,6 +6,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.15', date: '2026-10-18', items: [
+    'Datums per ISO 5459: tangent plane (minimax, outside the material), maximum inscribed cylinder for holes, minimum circumscribed for shafts; secondary/tertiary constrained to the previous datums; 3σ spike filter for scan data. Controls › Datum simulation (ISO 5459 / least squares) and Datum info. Note: values of existing projects can change.',
+    'Oblique nominal directions: Position accepts TED angles θ (from Z) and φ (about Z) in the datum system – no snapping to the nearest axis.',
+    'Orientation zone shape: Ø button per control for axes (cylinder zone) vs. two parallel planes; sensible defaults per case.',
+    'Axis view: median line coloured by its deviation (0 … t/2) with a colour bar in the legend.',
+  ] },
   { version: '2026.0.14', date: '2026-10-18', items: [
     'Axis analysis: the median line is drawn at its true location; only its bend is exaggerated (Form ×). Nominal axis and tolerance zone are drawn separately; the position offset is a labelled arrow; optional Location × is always labelled.',
     'TED (basic dimensions) are no longer prefilled: fields are empty and required, the control shows “Nominal missing” until they are entered. “Use actual as nominal” is in the ⋯ menu.',
