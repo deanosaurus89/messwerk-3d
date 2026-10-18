@@ -141,7 +141,14 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
  *  Ⓛ → minimum-material size (hole: min. circumscribed, shaft: max. inscribed). Null if no points/normals. */
 export function matingSize(f: Feature, ctx: SimCtx, mod: 'M' | 'L'): { d: number; hole: boolean } | null {
   const m = f.measured, P0 = ctx.points?.(f.id); if (!m || !P0 || P0.length < 8 || (f.type !== 'Zylinder' && f.type !== 'Kreis')) return null;
-  const side = outward(f, ctx.normals?.(f.id), P0); if (side.hole == null) return null;
+  const N0 = ctx.normals?.(f.id), key = `${mod}|${ctx.datumFilter !== false}|${f.type}`;
+  const cm = msCache.get(P0)?.get(key); if (cm && cm.m === m && cm.N === N0) return cm.r;
+  const r = matingSize0(f, m, P0, N0, ctx, mod);
+  if (!msCache.has(P0)) msCache.set(P0, new Map()); msCache.get(P0)!.set(key, { m, N: N0, r }); return r;
+}
+const msCache = new WeakMap<Vec3[], Map<string, { m: unknown; N: unknown; r: { d: number; hole: boolean } | null }>>();
+function matingSize0(f: Feature, m: NonNullable<Feature['measured']>, P0: Vec3[], N0: Vec3[] | null | undefined, ctx: SimCtx, mod: 'M' | 'L'): { d: number; hole: boolean } | null {
+  const side = outward(f, N0, P0); if (side.hole == null) return null;
   const res = P0.map((q) => resid(f, q)), mu = res.reduce((a, b) => a + b, 0) / res.length, sd = Math.sqrt(res.reduce((a, b) => a + (b - mu) ** 2, 0) / res.length);
   const P = P0.filter((_, i) => ctx.datumFilter === false || Math.abs(res[i] - mu) <= 3 * sd + 1e-12);
   const c = contactCylinder(P, m, (mod === 'M') === side.hole, f.type === 'Kreis' ? { dir: unit(m.normal) } : {});

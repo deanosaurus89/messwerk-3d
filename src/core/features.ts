@@ -123,7 +123,15 @@ export const DATUM_ITEM: Record<DatumKindCtl, CatalogItem> = {
 };
 export { DATUM_CONTROLS, isDatumControl, datumKind };
 /** Bezugsbuchstaben eines Prüfmerkmals als Rahmen-Text, z. B. "A|B|C". */
-export const datumText = (c: Control, feats: Map<number, Feature>) => (c.datumIds ?? []).map((id) => feats.get(id)?.datum ?? '?').join('|');
+export const MOD_SYM = { M: 'Ⓜ', L: 'Ⓛ' } as const;
+export const datumText = (c: Control, feats: Map<number, Feature>) => (c.datumIds ?? []).map((id, i) => (feats.get(id)?.datum ?? '?') + (c.datumMods?.[i] ? MOD_SYM[c.datumMods[i]!] : '')).join('|');
+/** Parse a datum reference like "A|B(M)|C" or "A|BⓂ|C" → letters + modifiers. */
+export function parseDatumText(txt: string): { letters: string[]; mods: ('M' | 'L' | null)[] } {
+  const toks = txt.toUpperCase().replace(/Ⓜ/g, '(M)').replace(/Ⓛ/g, '(L)').split(/[|,; ]+/).filter(Boolean);
+  const letters: string[] = [], mods: ('M' | 'L' | null)[] = [];
+  for (const t of toks) { const m = /^(.+?)\(([ML])\)$/.exec(t); letters.push(m ? m[1] : t); mods.push(m ? (m[2] as 'M' | 'L') : null); }
+  return { letters, mods };
+}
 
 const KIND_EN: Partial<Record<ControlKind, string>> = { 'Geradheit Achse': 'Straightness of axis', Winkelwert: 'Angle', Teilung: 'Pitch deviation', Durchmesser: 'Diameter', Länge: 'Length', Breite: 'Width', Kegelwinkel: 'Cone angle', 'Std.-Abw.': 'Std. dev.', Rohrdurchmesser: 'Tube Ø', Rohrradius: 'Tube radius' };
 export function controlLabel(c: Control, f?: Feature): string {
