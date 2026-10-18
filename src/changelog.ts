@@ -6,6 +6,10 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.21', date: '2026-10-19', items: [
+    'Transparent model now works everywhere (Analyze › Display › Transparent): scan and CAD faces become semi-transparent also without an active analysis; the setting is remembered; clearer tooltips.',
+    'Derived features (from Analyze) no longer show empty re-extraction/fit parameter sections; a note explains that they follow their parent automatically.',
+  ] },
   { version: '2026.0.20', date: '2026-10-19', items: [
     'Fix: Click & grow on desktop – the mouse wheel changed the analysis area instead of zooming; after a zoom the cursor showed a brush-like circle and growing was limited to it. The wheel now zooms; Shift+wheel changes the analysis area.',
     'Fix: “All inside boundary” via the Creation Panel button now also switches outlier removal off (as the Parameters checkbox does) – before, bumps were dropped again and flatness ignored them.',

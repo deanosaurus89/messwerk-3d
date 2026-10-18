@@ -54,12 +54,16 @@ function buildFace(f: CadFace) {
   { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), new THREE.LineBasicMaterial({ color: 0x23303d })); e.raycast = () => {}; e.userData.cadEdge = true; e.visible = cadEdgesOn; m.add(e); }
   if (f.res) { const g = new THREE.Mesh(geo(f.tess), new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 })); g.raycast = () => {}; g.renderOrder = 1; ghosts[f.id] = g; group.add(g); }
 }
+let cadOpacity = 1;
+/** semi-transparent CAD faces (View › Transparent) */
+export function setCadOpacity(a: number) { if (a === cadOpacity) return; cadOpacity = a; cadPaint(); }
 /** Farben/Sichtbarkeit aktualisieren (Typfarbe, Hover, Auswahl, Beschnitt-Rest rot). */
 export function cadPaint() {
   for (const f of cad.faces) {
     const m = meshes[f.id]; if (!m) continue; const mat = m.material as THREE.MeshStandardMaterial;
     m.visible = f.visible; const sel = cad.sel.has(f.id), hov = cad.hover === f.id;
     mat.color.setHex(sel ? 0xffb300 : TYPE_COLOR[f.type]); if (hov && !sel) mat.color.offsetHSL(0, 0, 0.12); mat.emissive.setHex(sel ? 0x3a2600 : hov ? 0x202020 : 0);
+    const tr = cadOpacity < 1; if (mat.transparent !== tr || mat.opacity !== cadOpacity) { mat.transparent = tr; mat.opacity = cadOpacity; mat.depthWrite = !tr; mat.needsUpdate = true; }
     const g = ghosts[f.id]; if (g) g.visible = f.visible && cad.showRemoved;
   }
 }
