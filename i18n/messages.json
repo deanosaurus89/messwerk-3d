@@ -293,6 +293,8 @@
  "Hide": {},
  "Hide annotation": {},
  "Hide geometry": {},
+ "Hide mesh": {},
+ "Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible": {},
  "Hide triad": {},
  "History": {},
  "Hole closed: {0} triangles removed, {1} new points · replacement surface: <b>{2}</b>": {},

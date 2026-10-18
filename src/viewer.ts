@@ -246,10 +246,10 @@ export class Viewer {
     // coloured by deviation (app colour scale, 0 = green … h = red): radial distance from the reference axis
     const P = an.centers.map((c) => V(displayPoint(an, c, formEx, locEx)));
     const { vals, h } = axisColorScale(an), col = vals.map((v) => new THREE.Color(...devRGB(Math.min(1, v / h))));
-    const r = Math.max(an.radius / 90, this.radius / 1500);
+    const r = Math.max(an.radius / 60, this.radius / 1000);
     for (let i = 0; i + 1 < P.length; i++) { // tube segments
       const a0 = P[i], a1 = P[i + 1], len = a0.distanceTo(a1); if (len < 1e-12) continue;
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.45, len, 8, 1, true), new THREE.MeshBasicMaterial({ color: col[i].clone().lerp(col[i + 1], 0.5), depthTest: false }));
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r * 0.7, len, 10, 1, true), new THREE.MeshBasicMaterial({ color: col[i].clone().lerp(col[i + 1], 0.5), depthTest: false }));
       m.position.copy(a0.clone().lerp(a1, 0.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize()); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m); }
     P.forEach((p, i) => { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: col[i], depthTest: false })); s.position.copy(p); s.renderOrder = 8; s.raycast = () => {}; this.prims.add(s); });
     // its own LSQ axis (dashed)
