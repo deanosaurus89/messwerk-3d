@@ -6,6 +6,15 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.14', date: '2026-10-18', items: [
+    'Axis analysis: the median line is drawn at its true location; only its bend is exaggerated (Form ×). Nominal axis and tolerance zone are drawn separately; the position offset is a labelled arrow; optional Location × is always labelled.',
+    'TED (basic dimensions) are no longer prefilled: fields are empty and required, the control shows “Nominal missing” until they are entered. “Use actual as nominal” is in the ⋯ menu.',
+    'Analyze per control: tree right-click › Analyze (one entry per control), Analyze › Per control picker, ◐ button and right-click in the Controls list. One control at a time; tolerance and TED editable live in the Action Bar.',
+    'New control “Straightness of axis” (cylinder/cone) with minimum-zone evaluation (zone may tilt). Perpendicularity, parallelism, angularity and coaxiality of axes now use the derived median line in the table too – same values as the axis view.',
+  ] },
+  { version: '2026.0.13', date: '2026-10-16', items: [
+    'Docs: new pages “Derived median line” and “Datum reference frame (A|B|C) and position” with illustrations.',
+  ] },
   { version: '2026.0.12', date: '2026-10-16', items: [
     'New sample: CAD surface model (IGES, 138 faces) – opens directly in CAD trimming.',
     'CAD trimming fixes: right-click no longer adds an extra point before closing the polygon; double-click/tap no longer creates duplicate points; Enter closes the polygon like ✓; boundary offset faster on faces with many edges (no corner spheres at smooth joints).',

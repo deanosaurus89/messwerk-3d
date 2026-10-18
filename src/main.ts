@@ -1992,7 +1992,7 @@ const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left butt
 <li><b>Tertiary C</b> fixes the remaining rotation or the last origin coordinate. X/Y are named so that X is closest to the world X direction.</li></ul>
 <h3>Tolerances</h3><ul><li>Form and orientation/location controls use a single tolerance zone <b>0 … t</b>; sizes (diameter, radius, distance, length …) use nominal + upper/lower deviation.</li>
 <li><b>∥ Parallelism / ⟂ Perpendicularity / ∠ Angularity</b>: planes – distance of two planes in the nominal direction containing all points; axes – length × sin(angle error).</li>
-<li><b>⌖ Position</b>: theoretically exact dimensions [X][Y][Z] in the datum system, entered by hand. Axes: cylindrical zone Ø = 2 × largest distance of the axis end points from the nominal axis; sphere/torus/point: SØ; plane: 2 × largest point distance to the nominal plane.</li>
+<li><b>⌖ Position</b>: theoretically exact dimensions [X][Y][Z] in the datum system, entered by hand. Axes: cylindrical zone Ø = 2 × largest distance of the derived median line from the nominal axis (axis end points if no points); TED fields start empty and are required (“Nominal missing” until filled); sphere/torus/point: SØ; plane: 2 × largest point distance to the nominal plane.</li>
 <li><b>◎ Coaxiality / concentricity</b>: Ø = 2 × distance of the axis (end points) or the center to the datum axis.</li>
 <li><b>⌯ Symmetry</b>: 2 × distance of the median plane/center from the datum (slot: in width direction).</li>
 <li><b>↗ Circular run-out</b>: radial distances of the points to the datum axis in measuring circles (sections); largest span. <b>⌰ Total run-out</b>: span over the whole surface.</li>
