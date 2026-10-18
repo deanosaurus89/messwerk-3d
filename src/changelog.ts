@@ -6,6 +6,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.17', date: '2026-10-18', items: [
+    'Polish release (no new features): the preview features of 0.16 are now finished and verified on desktop and iPhone.',
+    'Ⓜ/Ⓛ and patterns: per-hole table (Ø, t + bonus, permitted, margin) in Control Properties and the analysis panel; ▶ marks the hole with the smallest margin, which decides OK/NOK.',
+    'Pattern position in the axis view: each hole is shown against its own nominal axis (after the best fit of the pattern) with its permitted zone; the label names the hole (k of n), bonus and margin.',
+    'Datum slots (primary → secondary → tertiary, with Ⓜ/Ⓛ) also in the analysis panel – changes recompute immediately.',
+    'Analyze closes an open construction mode without preview (the analysis panel was hidden behind it).',
+  ] },
   { version: '2026.0.16', date: '2026-10-18', items: [
     'TEDs: the actual value is pre-filled as a suggestion (grey, italic) – computed but flagged “Nominal unconfirmed” until you tick ✓ (or ✓ all) or type the drawing value. Also for θ/φ and the angularity angle.',
     'TED fields follow the situation: only coordinates ⟂ to the axis that the datums lock are required; along the axis not shown; free directions greyed as not applicable – each with a tooltip why.',
