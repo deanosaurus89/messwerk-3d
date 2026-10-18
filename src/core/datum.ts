@@ -80,6 +80,22 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
 };
 
 export interface EvalCtx { points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
+/** TED components the user must enter for a control (indices into basic): Neigung → angle; Position/Profile →
+ *  the DRF components that matter (plane: along its normal; axis: the two ⟂ to the nominal axis; point/sphere: all). */
+export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: Feature[]): number[] {
+  if (c.kind === 'Neigung') return [0];
+  if (c.kind !== 'Position' && c.kind !== 'Profil (Bezug)') return [];
+  if (!f?.measured || !ds.length || ds.some((d) => !d?.measured)) return [0, 1, 2];
+  const F = buildDRF(ds), k = datumKind(f.type);
+  const nl = dirLocal(F, unit(f.measured.normal)), ax = [0, 1, 2].reduce((a, i) => (Math.abs(nl[i]) > Math.abs(nl[a]) ? i : a), 0);
+  if (k === 'plane') return [ax];
+  if (k === 'axis' && f.type !== 'Torus') return [0, 1, 2].filter((i) => i !== ax);
+  return [0, 1, 2];
+}
+export const NOMINAL_MISSING = 'Nominal missing';
+export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: Feature[]): boolean {
+  return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
+}
 export interface DatumEval { value: number | null; flag?: string; detail?: string; }
 
 function range(p: Vec3[], n: Vec3) { let mn = Infinity, mx = -Infinity; for (const q of p) { const t = dot(q, n); if (t < mn) mn = t; if (t > mx) mx = t; } return mx - mn; }
@@ -99,6 +115,8 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
   const D = ds as Feature[];
   const m = f.measured, D0 = D[0], k0 = datumKind(D0.type);
   const pts = () => ctx.points?.(f.id) ?? null;
+  if (missingBasic(c, f, D)) return { value: null, flag: NOMINAL_MISSING, detail: 'Enter the theoretically exact dimensions (TED) from the drawing' };
+  const B = (i: number, dflt = 0) => (c.basic?.[i] ?? dflt) as number;
   switch (kind) {
     case 'Parallelität': case 'Rechtwinkligkeit': case 'Neigung': {
       if (k0 === 'point') return { value: null, flag: 'Datum must be a plane or axis' };
@@ -108,7 +126,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
       const eIsNormal = cls !== 'axis', gIsNormal = k0 === 'plane';
       const same = eIsNormal === gIsNormal; // beide Normalen bzw. beide Achsen
       let beta: number;
-      if (kind === 'Neigung') { const a = (c.basic?.[0] ?? 45) * Math.PI / 180; beta = same ? a : Math.PI / 2 - a; }
+      if (kind === 'Neigung') { const a = B(0) * Math.PI / 180; beta = same ? a : Math.PI / 2 - a; }
       else beta = (kind === 'Parallelität') === same ? 0 : Math.PI / 2;
       const phi = Math.acos(Math.min(1, Math.abs(dot(e, g))));
       const err = Math.abs(phi - beta);
@@ -124,7 +142,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
     }
     case 'Position': {
       const F = buildDRF(D);
-      const loc = toLocal(F, m.center), b = (c.basic ?? [0, 0, 0]) as Vec3, d = sub(loc, b);
+      const loc = toLocal(F, m.center), b: Vec3 = [B(0, loc[0]), B(1, loc[1]), B(2, loc[2])], d = sub(loc, b); // non-required components (e.g. along the axis) do not matter
       if (f.type === 'Ebene') {
         const nl = dirLocal(F, dirOf(f)), ax = [0, 1, 2].reduce((a, k) => (Math.abs(nl[k]) > Math.abs(nl[a]) ? k : a), 0);
         const nn: Vec3 = [0, 0, 0]; nn[ax] = 1;
@@ -176,7 +194,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
     }
     case 'Profil (Bezug)': {
       const F = buildDRF(D);
-      const loc = toLocal(F, m.center), b = (c.basic ?? loc) as Vec3;
+      const loc = toLocal(F, m.center), b: Vec3 = [B(0, loc[0]), B(1, loc[1]), B(2, loc[2])];
       const r = Math.max(Math.abs(m.maxPos), Math.abs(m.maxNeg));
       let dd = norm(sub(loc, b));
       if (f.type === 'Ebene') dd = Math.abs(dot(sub(loc, b), unit(dirLocal(F, dirOf(f)))));

@@ -63,3 +63,18 @@ describe('Position from the derived median line', () => {
     expect(noPts.measured!).toBeLessThan(1e-6); expect(withPts.measured!).toBeGreaterThan(0.05); expect(withPts.measured!).toBeLessThan(0.062); expect(withPts.detail).toContain("median line");
   });
 });
+
+import { requiredBasic, NOMINAL_MISSING } from '../src/core/datum';
+describe('TED never prefilled: nominal missing', () => {
+  it('Position of a hole: X and Y (⟂ axis) required, Z not; missing → flag, no OK/NOK', () => {
+    expect(requiredBasic({ kind: 'Position' }, Z1, [A, B, C])).toEqual([0, 1]);
+    const r = evaluate(ctl('Position', [1, 2, 3], { basic: [null, null, null] }), map()); expect(r.flag).toBe(NOMINAL_MISSING); expect(r.status).toBe('—'); expect(r.measured).toBeNull();
+    const half = evaluate(ctl('Position', [1, 2, 3], { basic: [20, null, null] }), map()); expect(half.flag).toBe(NOMINAL_MISSING);
+    const ok = evaluate(ctl('Position', [1, 2, 3], { basic: [20, 20, null] }), map()); expect(ok.flag).toBeUndefined(); expect(ok.measured).toBeGreaterThan(0);
+  });
+  it('Angularity needs the angle; plane position needs only the normal component', () => {
+    expect(evaluate(ctl('Neigung', [1], { basic: [null] }), map()).flag).toBe(NOMINAL_MISSING);
+    expect(evaluate(ctl('Neigung', [1], {}), map()).flag).toBe(NOMINAL_MISSING);
+    const P2 = F(7, 'Ebene 7', 'Ebene', fit('Ebene', [50, 30, 25], [0, 0, 1])); expect(requiredBasic({ kind: 'Position' }, P2, [A, B, C])).toEqual([2]);
+  });
+});

@@ -46,7 +46,7 @@ export interface Control {
   tolUp: number;
   tolLo: number;              // negativ, z. B. -0.1
   datumIds?: number[];        // Bezüge (Merkmal-IDs) in Reihenfolge primär|sekundär|tertiär
-  basic?: number[];           // theoretisch genaue Maße: Position X/Y/Z im Bezugssystem bzw. Neigungswinkel
+  basic?: (number | null)[];  // TED (theoretically exact dimensions): position X/Y/Z in the DRF or angularity angle; null = not entered yet (never prefilled)
 }
 
 export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; }

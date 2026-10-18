@@ -38,7 +38,7 @@ import {
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
-import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal } from './core/datum';
+import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -962,6 +962,20 @@ function defaultDatums(kind: ControlKind, fid: number): number[] {
   }
   return ds.slice(0, mx).map((d) => d.id);
 }
+/** TED inputs (theoretically exact dimensions) of a datum control: empty until entered, required ones marked;
+ *  'Use actual as nominal' only in the ⋯ menu. */
+function tedInputs(c: Control, f: FeatureView, lab: (t: string, el: HTMLElement) => void) {
+  const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
+  const req = requiredBasic(c, f, ds);
+  const inp = (k: number) => { const i = numInput(c.basic?.[k] ?? null, (x) => { const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = x; c.basic = b; });
+    i.placeholder = req.includes(k) ? tt('required') : tt('optional'); i.classList.add('ted'); if (req.includes(k) && c.basic?.[k] == null) i.classList.add('req');
+    i.title = req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)'); return i; };
+  if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') ['X', 'Y', 'Z'].forEach((a, k) => lab(`[${a}]`, inp(k)));
+  if (c.kind === 'Neigung') lab('[∠°]', inp(0));
+  if (req.length) { const m = document.createElement('button'); m.className = 'btn ted-more'; m.textContent = '⋯'; m.title = tt('More');
+    m.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); renderAll(); } }]]); };
+    lab('', m); }
+}
 function defaultBasic(kind: ControlKind, f: FeatureView, datumIds: number[]): number[] | undefined {
   const fm = featMap();
   if (kind === 'Neigung') {
@@ -990,7 +1004,7 @@ function parseDatumRef(txt: string): number[] | null {
 function addControl(kind: ControlKind, id: number) {
   const t = defaultTolerance(kind);
   const c: Control = { id: state.nextCtrl++, kind, featureIds: [id], nominal: t.nominal, tolUp: t.up, tolLo: t.lo };
-  if (isDatumControl(kind)) { c.datumIds = defaultDatums(kind, id); c.basic = defaultBasic(kind, state.features.find((f) => f.id === id)!, c.datumIds); }
+  if (isDatumControl(kind)) { c.datumIds = defaultDatums(kind, id); if (kind === 'Neigung') c.basic = [null]; else if (kind === 'Position' || kind === 'Profil (Bezug)') c.basic = [null, null, null]; } // TED never prefilled: user enters drawing values
   state.controls.push(c);
   state.selControl = state.nextCtrl - 1;
 }
@@ -1439,12 +1453,11 @@ function renderTable() {
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0))));
         const di = document.createElement('input'); di.className = 'dref'; di.value = datumText(c, fm); di.title = tt('Datums primary|secondary|tertiary, e.g. A|B|C');
-        di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast(tt('Unknown datum letter: {0}', di.value)); } else { c.datumIds = ids; if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') c.basic = c.basic ?? defaultBasic(c.kind, f, ids); } renderAll(); };
+        di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast(tt('Unknown datum letter: {0}', di.value)); } else { c.datumIds = ids; } renderAll(); };
         lab(tt('Datum'), di);
-        if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') ['X', 'Y', 'Z'].forEach((a, k) => lab(`[${a}]`, numInput(c.basic?.[k] ?? 0, (x) => { c.basic = c.basic ?? [0, 0, 0]; c.basic[k] = x ?? 0; })));
-        if (c.kind === 'Neigung') lab('[∠°]', numInput(c.basic?.[0] ?? 45, (x) => (c.basic = [x ?? 0])));
+        tedInputs(c, f, lab);
         ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : ''}${fmt(c.tolUp, 3)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
-          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag">⚠ ${r.flag}</span>` : ''}`);
+          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}</span><span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
         if (r.detail) ed.title = r.detail;
         row.appendChild(ed);
       } else if (c && r) {
@@ -1481,14 +1494,14 @@ function renderTable() {
     if (state.selControl === c.id) tr.className = 'sel';
     const td = (html: string | HTMLElement, cls = '') => { const e = document.createElement('td'); e.className = cls; if (typeof html === 'string') e.innerHTML = html; else e.appendChild(html); tr.appendChild(e); return e; };
     td(fc?.name ?? '?');
-    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag ? ` <span class="flag">⚠ ${r.flag}</span>` : ''}`);
+    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag ? ` <span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
     const zone = isZoneControl(c.kind);
     td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => (c.nominal = x)), 'num');
     td(fmt(r.measured), 'num');
     td(zone ? '' : fmt(r.deviation), `num dev ${r.status}`);
     td(numInput(c.tolUp, (x) => (c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0)), 'num');
     td(zone ? '<span class="note" title="' + tt('Form/orientation tolerance zone 0..t') + '">0</span>' : numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))), 'num');
-    td(`<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
+    td(r.flag === NOMINAL_MISSING ? `<span class="st missing" title="${tt('Enter the theoretically exact dimensions (TED) from the drawing in the control catalog')}">${tt('Nominal missing')}</span>` : `<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = tt('Delete');
     x.onclick = (e) => { e.stopPropagation(); state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); };
     td(x);
@@ -1704,6 +1717,14 @@ setTimeout(() => maybeShowWhatsNew(), 1500);
 
 // ------------------------------------------------------------------ Kontextmenü (Rechtsklick / langes Tippen)
 const ctxMenu = document.createElement('div'); ctxMenu.id = 'ctx-menu'; ctxMenu.className = 'hidden'; document.body.appendChild(ctxMenu);
+/** Generic popup menu at screen position (null = separator, label with null action = disabled). */
+function showMenu(x: number, y: number, items: ([string, (() => void) | null] | null)[]) {
+  ctxMenu.className = 'ctx-menu';
+  ctxMenu.innerHTML = items.map((it, i) => (it ? `<button data-i="${i}" ${it[1] ? '' : 'disabled'}>${it[0]}</button>` : '<hr>')).join('');
+  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!]![1]?.(); }));
+  const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
+  ctxMenu.style.left = Math.max(4, Math.min(x, innerWidth - w - 4)) + 'px'; ctxMenu.style.top = Math.max(4, Math.min(y, innerHeight - h - 4)) + 'px';
+}
 function openContext(x: number, y: number, fid: number | null) {
   const f = state.features.find((g) => g.id === fid);
   const items: ([string, () => void] | null)[] = [];
