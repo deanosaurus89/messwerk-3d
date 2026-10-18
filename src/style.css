@@ -435,3 +435,5 @@ body.nav-pause #scene canvas { cursor:grab; }
 .zshape { display:inline-block; padding:0 5px; border:1px solid #1b7a32; border-radius:8px; color:#1b7a32; font-weight:600; }
 #ctx-panel.an input.an-n { width:56px; }
 .an-btm button { flex:1 1 0; white-space:nowrap; }
+.cp-pick { display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
+.cp-pick input { width:64px; } .cp-pick button { min-width:26px; padding:2px 4px; }

@@ -192,7 +192,7 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
   const base = { indices: use, fit: r.best, candidates: r.candidates.map((c) => ({ type: c.type, rms: c.rms })) };
   // Kugel/Torus/Kegel direkt neben einer Ebene sind meist Bohrungsränder: Kreis in Hilfsebene bevorzugen
   if (['Ebene', 'Zylinder', 'Kreis', 'Langloch', 'Kugel', 'Torus', 'Kegel'].includes(r.best.type)) {
-    const T = Math.min(3, Math.max(0.5, 0.015 * diag));
+    const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag)); // pick circle: plane/wall transition must lie inside it
     const maxD = r.best.type === 'Langloch' ? diag : T;
     try {
       const a = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, 'auto', undefined, maxD);
@@ -227,7 +227,7 @@ export function segmentedRim(mesh: MeshData, topo: MeshTopology, seedTri: number
     cand.push([t, Math.hypot(P[3 * v] - seedPoint[0], P[3 * v + 1] - seedPoint[1], P[3 * v + 2] - seedPoint[2])]); });
   cand.sort((x, y) => x[1] - y[1]);
   // only a click AT the rim (plane within a few edges of the click) is segmented; mid-wall clicks stay cylinders
-  if (!cand.length || cand[0][1] > 4 * topo.localEdge(seedTri)) return null;
+  if (!cand.length || cand[0][1] > Math.max(4 * topo.localEdge(seedTri), o.seedR ?? 0)) return null;
   // planar triangles at increasing distance (the ones right at the rim often grow into the edge chamfer)
   const tries = [0, 0.15, 0.3, 0.5, 0.7].map((q) => cand[Math.floor(q * (cand.length - 1))]).filter(Boolean);
   for (const [t] of tries) {

@@ -90,7 +90,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
+  opts: { maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: true, outlierK: 3, zoneSrc: 'points' as 'points' | 'geom' } },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
@@ -404,8 +404,8 @@ canvas.addEventListener('pointermove', (e) => {
   if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); lastHit = h; viewer.showCursor(h, pe.radius, desk); if (painting && h) pePaint(h); return; }
   if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && desk && !e.buttons) {
     const h = viewer.pick(e.clientX, e.clientY); lastHit = h;
-    // Klick + Wachstum mit Suchradius: Saatbereich als Kreis zeigen
-    viewer.showCursor(state.opts.radius > 0 ? h : null, state.opts.radius, true);
+    // Click & grow: pick circle = seed area of the region growing (also the plane/wall transition window for circles)
+    viewer.showCursor(h, pickR(), true);
     scheduleAuxHover(h); return;
   }
   if (state.mode?.kind !== 'fit' || state.mode.method !== 'Pinsel') return;
@@ -421,13 +421,31 @@ canvas.addEventListener('pointerup', (e) => { if (navPaused) { rdown = null; ret
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerleave', () => { if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
+/** Automatic pick radius for display: 6 × median edge length of the mesh (same rule as the worker's seed patch). */
+let autoPick: { uuid: string; r: number } | null = null;
+function pickR(): number {
+  if (state.opts.pick > 0) return state.opts.pick;
+  const m = viewer.model; if (!m) return 1;
+  if (autoPick?.uuid === m.geometry.uuid) return autoPick.r;
+  const g = m.geometry, P = g.attributes.position.array as ArrayLike<number>, I = g.index?.array as ArrayLike<number> | undefined, nt = I ? I.length / 3 : P.length / 9, L: number[] = [];
+  const step = Math.max(1, Math.floor(nt / 3000));
+  for (let t = 0; t < nt; t += step) { const a = I ? I[3 * t] : 3 * t, b = I ? I[3 * t + 1] : 3 * t + 1; L.push(Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2])); }
+  L.sort((x, y) => x - y); autoPick = { uuid: g.uuid, r: +(6 * (L[L.length >> 1] || 0.2)).toFixed(2) }; return autoPick.r;
+}
+function setPickR(v: number | 0) {
+  state.opts.pick = v > 0 ? +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 4).toFixed(v < 1 ? 2 : 1) : 0; localStorage.setItem('mw3d-pick', String(state.opts.pick));
+  for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.value = state.opts.pick ? String(state.opts.pick) : '';
+  for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.placeholder = `${tt('auto')} ${pickR()}`;
+  if (lastHit && areaMode()) viewer.showCursor(lastHit, pickR(), true);
+  status(tt('Pick radius r = {0} mm{1} – seed area of Click & grow (Alt+mouse wheel; empty = automatic).', pickR(), state.opts.pick ? '' : ' (' + tt('auto') + ')'));
+}
 /** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
 const brushActive = () => pe.tool === 'erase' || (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel');
 const areaMode = () => state.mode?.kind === 'fit' && state.mode.method === 'Klick';
 function setBrushRadius(v: number) {
   v = +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 2).toFixed(v < 1 ? 2 : 1);
   if (areaMode() && pe.tool !== 'erase') { state.opts.radius = v; const a = document.querySelector<HTMLInputElement>('#cp-area'); if (a) a.value = String(v); const d = document.querySelector<HTMLInputElement>('#d-rad'); if (d) d.value = String(v);
-    if (lastHit) viewer.showCursor(lastHit, v, true); status(tt('Analysis area r = {0} mm (Shift+mouse wheel; 0 = unlimited).', v)); return; }
+    if (lastHit) viewer.showCursor(lastHit, pickR(), true); status(tt('Analysis area r = {0} mm (Shift+mouse wheel; 0 = unlimited).', v)); return; }
   if (pe.tool === 'erase') { pe.radius = v; for (const id of ['#pe-rad-n', '#pe-rad-r']) { const el = document.querySelector<HTMLInputElement>(id); if (el) el.value = String(v); } }
   else { state.opts.brush = v; const el = document.querySelector<HTMLInputElement>('#d-brush'); if (el) el.value = String(v); const mb = document.querySelector('#mb-brush-r'); if (mb) mb.textContent = String(v); }
   if (lastHit) viewer.showCursor(lastHit, v, true);
@@ -437,6 +455,7 @@ canvas.parentElement!.addEventListener('wheel', (e) => {
   // Click & grow: the wheel ZOOMS (as everywhere); only Shift+wheel changes the analysis area. (Before, the plain wheel
   // changed the area r – after a zoom the cursor showed a circle like the brush and growing was limited to r.)
   if (navPaused) return;
+  if (areaMode() && pe.tool !== 'erase' && e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); setPickR(pickR() * Math.pow(1.1, (e.deltaY || e.deltaX) > 0 ? -1 : 1)); return; }
   if (areaMode() && pe.tool !== 'erase') { if (!e.shiftKey) return; }
   else if (!brushActive() || e.ctrlKey || e.metaKey) return; // Strg/⌘ + Rad: normal zoomen
   e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
@@ -458,7 +477,7 @@ function scheduleAuxHover(h: Hit | null) {
     const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
     try {
       if (!usesAux(m.type)) { // Live-Vorschau des erkannten Typs (Auto bzw. gewählter Typ)
-        const r = await engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type });
+        const r = await engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type, seedR: state.opts.pick });
         if (seq !== auxSeq || state.preview) return;
         viewer.showHoverSets([...(r.aux ? [{ idx: r.aux.indices, color: 0x2f7de1 }] : []), { idx: r.indices, color: 0xff8c1a }]);
         hoverType = r.fit.type; renderModeBar();
@@ -484,6 +503,9 @@ window.addEventListener('pointerup', async (e) => {
   const h = viewer.pick(e.clientX, e.clientY);
   if (!h) { if (!state.mode && !pe.tool) clearSelection(); return; }
   if (pe.tool === 'curve') curveAddPoint(h);
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && auxPickArm) { const F = viewer.model!.geometry.index?.array, vs = F ? [F[3 * h.tri], F[3 * h.tri + 1], F[3 * h.tri + 2]] : [3 * h.tri];
+    const pl = state.features.find((f) => f.type === 'Ebene' && f.measured && vs.some((v) => f.indices.includes(v)));
+    if (pl) setAuxPlane(pl.id); else status(tt('No measured plane at this point – click a plane feature (or choose it in the list).')); }
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h, e.shiftKey); }
   else if (state.mode?.kind === 'anchor') anchorPick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
@@ -588,13 +610,14 @@ function ctxSpec(): CtxSpec | null {
   const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   // aux plane for circle / slot / line (also when Auto detected one): Full plane | Local ring (+ gap/width), All inside boundary
-  const AUXT = ['Kreis', 'Langloch', 'Linie'], auxable = m.method === 'Klick' && (p ? !!p.aux && AUXT.includes(p.fit.type) : AUXT.includes(m.type as string));
+  const AUXT = ['Kreis', 'Langloch', 'Linie'], auxable = m.method === 'Klick' && (p ? !!p.aux && AUXT.includes(p.fit.type) : AUXT.includes(m.type as string) || m.type === 'auto');
   const ao = state.opts.aux;
   const auxCtl = auxable ? `<span class="cp-seg cp-aux" title="${tt('Auxiliary plane: the circle/slot/line is the intersection of the wall with this plane')}"><button data-aux="auto" class="${ao === 'auto' ? 'on' : ''}" title="${tt('Full adjacent planar face as auxiliary plane')}">▱ ${tt('Full plane')}</button><button data-aux="ring" class="${ao === 'ring' ? 'on' : ''}" title="${tt('Local ring around the contour (gap and width in mm)')}">◎ ${tt('Local ring')}</button></span>`
     + (ao === 'ring' ? `<label title="${tt('Ring gap [mm]')}">${tt('gap')} <input id="cp-rg" data-num="abs" type="number" min="0" step="0.1" value="${state.opts.ring.gap}" inputmode="decimal"></label><label title="${tt('Ring width [mm]')}">${tt('width')} <input id="cp-rw" data-num="abs" type="number" min="0.2" step="0.5" value="${state.opts.ring.width}" inputmode="decimal"></label>` : '')
-    + (typeof ao === 'number' ? `<span class="cp-hint">${tt('Existing plane')}: ${nameOf(ao)}</span>` : ao === 'none' ? `<span class="cp-hint">${tt('None (3D fit)')}</span>` : '') : '';
+    + auxPlaneSel(ao) + (ao === 'none' ? `<span class="cp-hint">${tt('None (3D fit)')}</span>` : '') : '';
+  const pick = `<span class="cp-pick" title="${tt('Pick radius [mm]: the circle at the cursor is the seed area of Click & grow – the region starts from the surface inside it. For circles/slots/lines place it across the edge between hole wall and plane (the transition must lie inside the circle). Desktop: Alt + mouse wheel. Empty = automatic (6 × mesh edge length).')}">◎ r <button type="button" data-pk="-">−</button><input class="cp-pick-v" data-num="abs" value="${state.opts.pick || ''}" placeholder="${tt('auto')} ${pickR()}" inputmode="decimal"><button type="button" data-pk="+">＋</button></span>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this feature (plane, cylinder, cone, sphere): click further faces (or Shift+click) – the union of all regions is fitted. Also for split or interrupted areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
+    ? `${seg}${type}${p ? '' : pick}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this feature (plane, cylinder, cone, sphere): click further faces (or Shift+click) – the union of all regions is fitted. Also for split or interrupted areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
     : `${seg}${type}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -616,11 +639,15 @@ function ctxSpec(): CtxSpec | null {
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'fill') { setContour(!state.opts.fill.on); applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
+      el.querySelectorAll<HTMLButtonElement>('[data-pk]').forEach((b) => (b.onclick = () => setPickR(pickR() * (b.dataset.pk === '+' ? 1.25 : 0.8))));
+      el.querySelectorAll<HTMLInputElement>('.cp-pick-v').forEach((i) => (i.onchange = () => { const v = parseNum(i.value); setPickR(v && v > 0 ? v : 0); }));
       el.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => (b.onclick = async () => { state.opts.lineSide = Number(b.dataset.side) as 0 | 1;
         if (state.preview?.hit && state.preview.fit.type === 'Linie') { try { await previewWithAux(state.preview.hit, 'Linie'); } catch (e: any) { toast(e.message); } } renderAll(); }));
       el.querySelector<HTMLSelectElement>('#cp-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; (state.mode as FitMode).type = v; if (state.preview) refitPreview(v); else renderAll(); };
       const auxRefresh = () => { const pv = state.preview; if (pv?.hit && pv.aux && AUXT.includes(pv.fit.type)) previewWithAux(pv.hit, pv.fit.type as 'Kreis' | 'Langloch' | 'Linie').catch((e) => toast(e.message)).then(() => renderAll()); else renderAll(); };
       el.querySelectorAll<HTMLButtonElement>('button[data-aux]').forEach((b) => (b.onclick = () => { state.opts.aux = b.dataset.aux as 'auto' | 'ring'; auxRefresh(); }));
+      const apl = el.querySelector<HTMLSelectElement>('#cp-auxpl'); if (apl) apl.onchange = () => { state.opts.aux = apl.value === 'auto' ? 'auto' : +apl.value; auxPickArm = false; auxRefresh(); };
+      const apk = el.querySelector<HTMLButtonElement>('[data-auxpick]'); if (apk) apk.onclick = () => { auxPickArm = !auxPickArm; if (auxPickArm) status(tt('Click the plane to use as aux plane (3D view or tree).')); renderModeBar(); };
       for (const [id, k] of [['#cp-rg', 'gap'], ['#cp-rw', 'width']] as const) { const ie = el.querySelector<HTMLInputElement>(id); if (ie) ie.onchange = () => { const x = Number(ie.value.replace(',', '.')); if (isFinite(x) && x >= 0) { state.opts.ring[k] = k === 'width' ? Math.max(0.2, x) : x; auxRefresh(); } }; }
       const fb = el.querySelector<HTMLInputElement>('#cp-fband'); if (fb) fb.onchange = () => { const x = parseNum(fb.value); if (x == null || x === 0) { state.opts.fill.band = null; extractLive(); } else if (isFinite(x) && x > 0) { state.opts.fill.band = x; extractLive(); } };
       const dz = el.querySelector<HTMLSelectElement>('#cp-datum'); if (dz) dz.onchange = () => { state.opts.newDatum = dz.value; };
@@ -645,10 +672,16 @@ function ctxSpec(): CtxSpec | null {
 const usesAux = (t: GeomType | 'auto') => (t === 'Kreis' || t === 'Langloch' || t === 'Linie') && state.opts.aux !== 'none';
 const usesAuxType = usesAux;
 /** Hilfsebenen-Extraktion im Worker: Kreis/Langloch (Wand in Ebene) bzw. Linie (Kante, Seite wählbar). */
+/** 'Use existing plane' for circle/slot/line: select from the planes in the tree or 🎯 pick one in the 3D view. */
+let auxPickArm = false;
+function auxPlaneSel(ao: unknown): string {
+  const pls = state.features.filter((f) => f.type === 'Ebene' && f.measured);
+  return `<label class="cp-auxpl" title="${tt('Aux plane: “Auto-detect” finds the adjacent planar face itself. “Existing plane”: the circle/slot/line lies in a plane you already measured (pick it in the list, or 🎯 then click the plane in the 3D view / tree) – you then only click the hole wall; its points are projected onto that plane and the circle is fitted in 2D.')}">${tt('Aux plane')} <select id="cp-auxpl"><option value="auto" ${typeof ao === 'number' ? '' : 'selected'}>${tt('Auto-detect')}</option>${pls.map((f) => `<option value="${f.id}" ${ao === f.id ? 'selected' : ''}>${tt('Existing')}: ${f.name.replace(/[<>&"]/g, "")}${f.datum ? ` [${f.datum}]` : ''}</option>`).join('')}</select>${pls.length ? `<button type="button" data-auxpick class="${auxPickArm ? 'on' : ''}" title="${tt('Pick the aux plane: click a measured plane in the 3D view or in the tree')}">🎯</button>` : ''}</label>`;
+}
 function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView, ring?: { gap: number; width: number }, fill?: { band: number; excludeRaised: boolean } | null) {
   return type === 'Linie'
     ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured, ring, fill })
-    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring, fill });
+    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring, fill, seedR: state.opts.pick });
 }
 async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch' | 'Linie') {
   const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
@@ -681,9 +714,13 @@ async function previewByClick(h: Hit, add = false) {
     renderAll(); return;
   }
   try {
-    const r = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type }));
+    const r = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type, seedR: state.opts.pick }));
     state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Klick', hit: h,
       aux: r.aux ? { plane: r.aux.plane, indices: r.aux.indices, source: tt('automatic (adjacent face)') } : undefined };
+    // Auto + 'Use existing plane': a hole wall (cylinder) whose axis ⟂ that plane becomes a circle in it – only the wall points are taken
+    const exPl = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux && f.measured) : undefined;
+    if (exPl && (['Kreis', 'Langloch', 'Zylinder'].includes(r.fit.type)) && Math.abs(dot((r.fit.normal ?? [0, 0, 1]) as Vec3, exPl.measured!.normal as Vec3)) > 0.95) {
+      try { await previewWithAux(h, r.fit.type === 'Langloch' ? 'Langloch' : 'Kreis'); } catch (e: any) { toast(e.message); } renderAll(); return; }
     if (!r.aux && extractActive()) await applyExtract();
     if (r.aux) {
       // Creation Panel choice (local ring / all inside boundary) also applies to an auto-detected circle/slot/line
@@ -753,7 +790,7 @@ const MULTI_TYPES: string[] = ['Ebene', 'Zylinder', 'Kegel', 'Kugel'];
 async function addPlaneRegion(h: Hit) {
   const pv = state.preview!, type = pv.fit.type as GeomType;
   try {
-    const g = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type }));
+    const g = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type, seedR: state.opts.pick }));
     const regions = [...(pv.regions ?? [pv.seed ?? pv.indices]), g.indices as Uint32Array];
     await refitRegions(regions, pv.hit, type);
     if (extractActive()) await applyExtract();
@@ -1306,7 +1343,13 @@ document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state
 document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!state.an.on) analyze(state.an.kind); else document.querySelector<HTMLInputElement>('#an-sc')?.focus(); });
 
 // ------------------------------------------------------------------ Auswahl, Prüfmerkmale
+function setAuxPlane(id: number) {
+  auxPickArm = false; state.opts.aux = id; const pv = state.preview;
+  status(tt('Aux plane: {0} – now click the hole wall.', nameOf(id)));
+  if (pv?.hit && ['Kreis', 'Langloch', 'Linie'].includes(pv.fit.type)) previewWithAux(pv.hit, pv.fit.type as 'Kreis').catch((e) => toast(e.message)).then(() => renderAll()); else renderAll();
+}
 function selectFeature(id: number, additive = false) {
+  if (auxPickArm && state.features.find((f) => f.id === id)?.type === 'Ebene') { setAuxPlane(id); return; }
   if (state.mode?.kind === 'dist') { setDistanceSlot(id); return; }
   if (state.csEdit?.field) { csPick(id); return; }
   if (state.mode?.kind === 'con') { conPick(id); return; }
@@ -1595,7 +1638,7 @@ function renderHint() {
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
   if (state.preview && state.opts.multi && MULTI_TYPES.includes(state.preview.fit.type)) return hint(tt('Add region: click further faces of the {0} (Shift+click also works), then ✓ create.', typeName(state.preview.fit.type)));
   if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
-  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface (Shift+wheel = analysis area).', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
+  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface – the circle is the pick radius (seed area; for circles place it across the hole edge). Wheel = zoom · Alt+wheel = pick radius · Shift+wheel = analysis area.', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
   hint('');
 }
 
@@ -2444,7 +2487,7 @@ $('#btn-help').onclick = () => {
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
 };
 const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left button</b>: rotate · <b>middle button</b> (wheel pressed) or right button: pan · <b>mouse wheel</b>: zoom.</li>
-<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li>Brush tools: the <b>mouse wheel changes the brush radius</b> (shown live), <b>Ctrl+wheel</b> zooms. Click &amp; grow: the wheel zooms, <b>Shift+wheel</b> changes the analysis area.</li>
+<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li>Click & grow: the circle at the cursor is the <b>pick radius</b> (seed area). <b>Alt + wheel</b> resizes it, <b>Shift + wheel</b> sets the analysis area, the plain wheel zooms. On phones use the ◎ r − / ＋ stepper in the Creation Panel.</li><li>Brush tools: the <b>mouse wheel changes the brush radius</b> (shown live), <b>Ctrl+wheel</b> zooms. Click &amp; grow: the wheel zooms, <b>Shift+wheel</b> changes the analysis area.</li>
 <li>Circle/slot/line by click with auxiliary plane: hover preview – <b style="color:#2f7de1">blue</b> auxiliary plane, <b style="color:#ff8c1a">orange</b> wall points.</li><li>Touch: one finger rotates, two fingers zoom/pan.</li>
 <li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the Action Bar (bottom of the 3D view). The Dialog shows the object selected in the tree or 3D view.</li></ul>
 <h3>Assign a datum (ISO 5459)</h3><ol><li>Select a feature (plane, cylinder/hole, circle, cone, slot, torus, sphere, line).</li>

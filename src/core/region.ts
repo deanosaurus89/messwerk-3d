@@ -12,6 +12,8 @@ export interface GrowOptions {
   /** Prismatische Wand (Bohrung/Langloch): Normalen ⟂ dieser Achse statt Modellfit. */
   prismAxis?: Vec3;
   /** Altes Verfahren (nur Nachbarwinkel/Krümmung) – für Vergleichstests. */
+  /** seed patch radius around the click [mm] (pick circle); 0/undefined = automatic 6 × local edge length */
+  seedR?: number;
   legacy?: boolean; /** nur saubere Kantenwachstums-Regionen (Gütekontrolle), sonst leer */ strict?: boolean; legacyCap?: number;
 }
 /** Vorzeichenbehafteter Abstand eines Punkts zum Regelgeometrie-Modell. */
@@ -188,7 +190,7 @@ export class MeshTopology {
     const el: number[] = []; for (const t of near) { const a = f[3 * t], b = f[3 * t + 1]; el.push(Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2])); }
     el.sort((x, y) => x - y); const h = el[el.length >> 1] || 1;
     // 2) Saat-Fleck: glatte Nachbarn (Winkel zur Saat < 25°) im Radius 8h um den Klickpunkt
-    const R0 = 6 * h, cos0 = Math.cos((15 * Math.PI) / 180); const seed: number[] = []; const sMark = new Uint8Array(nt);
+    const R0 = o.seedR && o.seedR > 0 ? o.seedR : 6 * h, cos0 = Math.cos((15 * Math.PI) / 180); const seed: number[] = []; const sMark = new Uint8Array(nt);
     { const q = [seedTri]; sMark[seedTri] = 1; while (q.length) { const t = q.shift()!; seed.push(t); for (const u of this.neighbors(t)) { if (sMark[u]) continue; const c = this.cen(u);
       if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R0 * R0) continue; if (dotN(sn, seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
     const ptsOf = (tris: ArrayLike<number>, max = 3000) => { const seenV = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = []; const step = Math.max(1, Math.floor(tris.length / max));

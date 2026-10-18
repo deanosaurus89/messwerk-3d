@@ -75,11 +75,11 @@ export type Req =
   | { op: 'curveJoin'; a: { chain: number[]; kind: CurveKind }; b: { chain: number[] } }
   | { op: 'compare' }
   | { op: 'getOriginal' }
-  | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto' }
+  | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto'; seedR?: number }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
-  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null }
+  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null; seedR?: number }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
   | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[] }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null };
@@ -186,18 +186,18 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
     } else if (req.op === 'grow') {
       if (!topo) throw new Error('Region growing needs a polygon model (triangles). Use the brush for point clouds.');
       if (req.type === 'auto') {
-        const r = autoExtract(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius }, bounds(mesh!).diag);
+        const r = autoExtract(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius, seedR: req.seedR }, bounds(mesh!).diag);
         delete r.fit.residuals; r.fit.n = r.indices.length; if (r.aux) delete r.aux.plane.residuals;
         result = r;
       } else {
-        const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius });
+        const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius, seedR: req.seedR });
         const v = topo.regionVertices(tris);
         const use = v.interior.length >= 20 ? v.interior : v.all;
         result = { indices: use, ...doFit(use, req.type) };
       }
     } else if (req.op === 'aux') {
       if (!topo) throw new Error('The auxiliary plane needs a polygon model (triangles).');
-      let r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane, Infinity, req.ring);
+      let r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0, seedR: req.seedR }, req.type, req.plane, Infinity, req.ring);
       const af = auxFill(r, req);
       if (af) r = { ...extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, af.plane, Infinity), plane: af.plane, planeIdx: af.indices };
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx, raised: af?.raised, contour: af?.contour, filled: af?.added } };
