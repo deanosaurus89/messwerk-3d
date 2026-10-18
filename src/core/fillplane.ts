@@ -3,6 +3,8 @@
 // taken – regardless of normal angle, curvature or σ filter. Bumps, spatter, craters and burrs on the face are kept
 // (exactly the points flatness needs); real openings stay out because they have no points in the band, and bore walls
 // are rejected by their wall-like normal below the surface; the opposite side of the part is rejected by its normal.
+// A gap of the grown region whose surface rises above the band (boss, sphere, cone, torus) is another feature and is
+// excluded as a whole (incl. its base).
 //
 // Outer contour: occupancy grid of the seed points in the plane, closed by `closeCells`, flood fill from the border;
 // everything not reached from outside is inside (gaps left by region growing around bumps are inside).
@@ -17,7 +19,7 @@ export interface FillParams {
   /** morphological closing of the contour, in grid cells (default 2) */
   closeCells?: number;
 }
-export const FILL_DEFAULT: FillParams = { band: 1, maxWallDeg: 75, closeCells: 2 };
+export const FILL_DEFAULT: FillParams = { band: 0.5, maxWallDeg: 75, closeCells: 2 };
 export interface FillResult { indices: Uint32Array; added: number; cell: number; insideCells: number }
 
 export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number> | null, seed: ArrayLike<number>, fit: FitResult, p: FillParams = FILL_DEFAULT): FillResult {
@@ -67,15 +69,32 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
   }
   // real openings: inside cells without any point in the band; points BELOW the surface right at an opening are its
   // edge (chamfer, bore wall) and not part of the face – burrs above the surface stay
-  const voids = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) if (inside[k] && !has[k]) voids[k] = 1;
+  // the same holds at the OUTER contour (edge rounding/chamfer going down, step wall of an adjacent face)
+  const voids = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) if (!inside[k] || !has[k]) voids[k] = 1;
   const nearOpen = dilate(voids, 2);
+  // gaps of the grown region inside the contour whose surface rises ABOVE the band are other features (boss, sphere,
+  // torus, cone) – exclude the whole gap; bumps/spatter stay within the band and are kept
+  const comp = new Int32Array(W * H).fill(-1); let nc = 0;
+  for (let k0 = 0; k0 < W * H; k0++) { if (!inside[k0] || occ[k0] || comp[k0] >= 0) continue; const q = [k0]; comp[k0] = nc;
+    while (q.length) { const k = q.pop()!, i = k % W, j = (k - i) / W; for (const [ii, jj] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) { if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue; const kk = jj * W + ii; if (inside[kk] && !occ[kk] && comp[kk] < 0) { comp[kk] = nc; q.push(kk); } } }
+    nc++; }
+  const foreignC = new Uint8Array(nc);
+  for (let i = 0; i < N; i++) {
+    const dx = pos[3 * i] - c[0], dy = pos[3 * i + 1] - c[1], dz = pos[3 * i + 2] - c[2], d = dx * n[0] + dy * n[1] + dz * n[2]; if (d <= band) continue;
+    if (nrm && nrm[3 * i] * n[0] + nrm[3 * i + 1] * n[1] + nrm[3 * i + 2] * n[2] < -0.2) continue;
+    const ii = cx(dx * u[0] + dy * u[1] + dz * u[2]), jj = cy(dx * v[0] + dy * v[1] + dz * v[2]); if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+    const cc = comp[jj * W + ii]; if (cc >= 0) foreignC[cc] = 1;
+  }
+  const foreign = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) if (comp[k] >= 0 && foreignC[comp[k]]) foreign[k] = 1;
+  const nearForeign = dilate(foreign, 2);
   let added = 0;
   for (let t = 0; t < cand.length; t++) {
     const i = cand[t], d = cd[t];
     if (d < 0 && nearOpen[ccell[t]]) continue;
+    if (nearForeign[ccell[t]]) continue;
     if (nrm) { const dn = nrm[3 * i] * n[0] + nrm[3 * i + 1] * n[1] + nrm[3 * i + 2] * n[2];
-      if (dn < -0.5) continue;                       // opposite side of the part
-      if (d < 0 && Math.abs(dn) < cosW) continue; }  // wall going into the material (bore, step) – not part of the face
+      if (dn < -0.2) continue;                       // facing away: opposite side of the part or an overhang (not a bump)
+      if (Math.abs(dn) < cosW && (d < 0 || nearOpen[ccell[t]])) continue; } // wall: into the material, or at an edge/opening (step)
     sel[i] = 1; added++;
   }
   const idx: number[] = []; for (let i = 0; i < N; i++) if (sel[i]) idx.push(i);

@@ -38,4 +38,18 @@ describe('Capture all points inside outer boundary (plane)', () => {
     let mn = Infinity, mx = -Infinity; for (const i of r.indices) { mn = Math.min(mn, pos[3 * i + 2]); mx = Math.max(mx, pos[3 * i + 2]); }
     expect(mx - mn).toBeGreaterThan(0.25); // 0.2 bump + 0.06 crater
   });
+  it('a raised feature (boss) inside the contour is another feature – excluded entirely', () => {
+    const P: number[] = [...pos], Nn: number[] = [...nrm], K = [...kind];
+    // boss Ø6 at (12, 30), 5 high, with a small base fillet: drop face points under it, add wall + fillet + top
+    const keep: number[] = []; for (let i = 0; i < K.length; i++) if (!(K[i] === 'face' && Math.hypot(P[3 * i] - 12, P[3 * i + 1] - 30) < 3.6)) keep.push(i);
+    const p2: number[] = [], n2: number[] = [], k2: string[] = []; for (const i of keep) { p2.push(P[3 * i], P[3 * i + 1], P[3 * i + 2]); n2.push(Nn[3 * i], Nn[3 * i + 1], Nn[3 * i + 2]); k2.push(K[i]); }
+    for (let a = 0; a < 360; a += 5) { const c = Math.cos(a * Math.PI / 180), s2 = Math.sin(a * Math.PI / 180);
+      for (const [rr, zz, nz] of [[3.5, 0.05, 0.8], [3.2, 0.25, 0.4]]) { p2.push(12 + rr * c, 30 + rr * s2, zz); n2.push(c * 0.6, s2 * 0.6, nz); k2.push('boss'); }
+      for (let z = 0.5; z <= 5; z += 0.5) { p2.push(12 + 3 * c, 30 + 3 * s2, z); n2.push(c, s2, 0); k2.push('boss'); } }
+    const sd = k2.map((k, i) => (k === 'face' ? i : -1)).filter((i) => i >= 0);
+    const r2 = fillOuterBoundary(Float64Array.from(p2), Float64Array.from(n2), Uint32Array.from(sd), fit, { band: 1 });
+    const g2 = new Set(r2.indices);
+    expect(k2.filter((k, i) => k === 'boss' && g2.has(i)).length).toBe(0);
+    expect(k2.filter((k, i) => k === 'bump' && g2.has(i)).length).toBe(k2.filter((k) => k === 'bump').length);
+  });
 });
