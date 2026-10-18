@@ -9,6 +9,8 @@ export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
   { version: '2026.0.21', date: '2026-10-19', items: [
     'Transparent model now works everywhere (Analyze › Display › Transparent): scan and CAD faces become semi-transparent also without an active analysis; the setting is remembered; clearer tooltips.',
     'Derived features (from Analyze) no longer show empty re-extraction/fit parameter sections; a note explains that they follow their parent automatically.',
+    'Axis/position analysis panel redesigned: compact; Hide mesh + Transparent side by side; tolerance zone always drawn; optional 3D value labels for zone (Ø/2 planes + size), envelope Ø, nominal (TED, in the DRF) and deviation; clear zone-shape indicator (Ø cylinder / ∥ 2 planes) instead of the old Ø toggle text; tooltips explain Form bend × and Location offset ×.',
+    'Analyze shows only the annotation of the analysed feature. New “Show datum features” (only for controls with datums, default off) shows and highlights the datum features of the control.',
   ] },
   { version: '2026.0.20', date: '2026-10-19', items: [
     'Fix: Click & grow on desktop – the mouse wheel changed the analysis area instead of zooming; after a zoom the cursor showed a brush-like circle and growing was limited to it. The wheel now zooms; Shift+wheel changes the analysis area.',

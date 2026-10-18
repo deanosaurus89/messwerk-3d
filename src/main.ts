@@ -93,7 +93,7 @@ const state = {
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: true, outlierK: 3, zoneSrc: 'points' as 'points' | 'geom' } },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -1106,6 +1106,16 @@ function axisExag(r: AnResult) {
   return Math.max(1, Math.round((0.25 * R) / z));
 }
 const offsetLabel = (x: AxisAnalysis) => x.mode === 'position' ? `Δ ${fmt(x.offsetLen, 4)} mm${state.an.axLoc > 1 ? ` (${tt('shown ×{0}', state.an.axLoc)})` : ''}` : '';
+/** Optional 3D value labels of the axis analysis (zone, envelope, nominal). */
+function axisLabels(x: AxisAnalysis) {
+  const L = state.an.axLab, sh = x.planeN ? `∥ ${tt('2 planes')}` : 'Ø';
+  return { zone: L.zone && x.tol ? `${tt('tolerance zone')} ${sh} ${fmt(x.tol, 4)}` : '', req: L.zone && !x.missing ? `${tt('required')} ${sh} ${fmt(x.zone, 4)}` : '',
+    env: L.env && state.an.axEnv ? `${tt('envelope')} Ø ${fmt(x.straightness, 4)}` : '', nom: L.nom ? (x.mode === 'position' ? tt('nominal axis (TED, DRF)') : tt('nominal direction')) : '' };
+}
+/** Zone shape indicator (legend/tooltips). */
+const zoneShapeHTML = (x: { planeN?: unknown }) => x.planeN
+  ? `<span class="zshape" title="${tt('Zone shape: two parallel planes, distance t apart (no Ø in the feature control frame). The axis must lie between them.')}">∥ ${tt('2 planes')}</span>`
+  : `<span class="zshape" title="${tt('Zone shape: cylinder of diameter t around the nominal axis (Ø in the feature control frame). The axis must lie inside it.')}">Ø ${tt('cylinder')}</span>`;
 function paintAnalysis(): boolean {
   const a = state.an, r = a.res;
   if (!a.on || !r || !viewer.colors) return false;
@@ -1113,7 +1123,7 @@ function paintAnalysis(): boolean {
     viewer.setModelOpacity(a.axHide ? 0 : a.trans ? 0.35 : 1);
     let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
     const fx = axisExag(r), lx = Math.max(1, a.axLoc);
-    el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${x.missing ? `<span class="st missing" title="${tt('Enter the TED in the panel below (or ⋯ → Use actual as nominal) to get the zone and OK/NOK')}">${tt('zone')}: ${tt('Nominal missing')}</span>` : `${tt('zone')} ${x.planeN ? `⟷ ${tt('(two planes)')}` : 'Ø'} ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}`}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
+    el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${x.missing ? `<span class="st missing" title="${tt('Enter the TED in the panel below (or ⋯ → Use actual as nominal) to get the zone and OK/NOK')}">${tt('zone')}: ${tt('Nominal missing')}</span>` : `${zoneShapeHTML(x)} · ${tt('required')} ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}`}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
       + `<small>${tt('Median line at its true location; its bend is shown ×{0}.', fx)} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('Location and zones: true scale.')}</small>`
       + r.axes.slice(0, 1).map((x) => { const cs = axisColorScale(x), REF = { nominal: tt('distance from the nominal axis'), zone: tt('distance from the zone axis'), planes: tt('distance from the zone mid-plane'), form: tt('distance from the minimum-zone axis') };
         return `<small title="${tt('Median-line points and segments are coloured by their deviation: green = on the reference, red = at the zone boundary (t/2) or beyond')}">${tt('Colour')}: ${REF[cs.ref]}<div class="bar half"></div><div class="ticks"><span>0</span><span>${fmt(cs.h / 2, 4)}</span><span>≥ ${fmt(cs.h, 4)}${x.tol != null ? ' (t/2)' : ''}</span></div></small>`; }).join('')
@@ -1171,12 +1181,16 @@ function deriveParent(): FeatureView | undefined {
 }
 /** In Analyze: features whose annotations stay visible (analysed feature(s) + datum features of the control); null = all. */
 function anFocusIds(): Set<number> | null {
-  const a = state.an; if (!a.on || a.otherLabels) return null;
-  const C = a.ctrl != null ? state.controls.find((c) => c.id === a.ctrl) : undefined;
-  const ids = C ? [...C.featureIds, ...(C.datumIds ?? [])] : a.ids.length ? a.ids : state.sel;
+  const a = state.an; if (!a.on) return null;
+  const C = anControl();
+  const ids = C ? [...C.featureIds, ...(a.otherLabels ? C.datumIds ?? [] : [])] : a.ids.length ? a.ids : state.sel;
   return new Set(ids);
 }
-const otherLabelsHtml = () => `<button data-ol class="${state.an.otherLabels ? 'on' : ''}" title="${tt('Annotations of features not involved in this analysis are hidden while analysing. Show them again (they are always restored when Analyze is closed)')}">🏷 ${tt('Show other annotations')}</button>`;
+const anControl = () => (state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined);
+/** 'Show datum features': only for controls with datums; toggles annotations + highlight of the datum features (default off). */
+const otherLabelsHtml = () => { const C = anControl(); if (!C?.datumIds?.length) return '';
+  const names = C.datumIds.map((i) => state.features.find((f) => f.id === i)).filter(Boolean).map((f) => (f!.datum ? `${f!.datum} (${f!.name})` : f!.name)).join(', ');
+  return `<button data-ol class="${state.an.otherLabels ? 'on' : ''}" title="${tt('While analysing only the annotation of the analysed feature is shown. Switch on to also show the annotations of the datum features of this control and highlight them (blue): {0}. Off by default; restored when Analyze is closed.', names)}">🏷 ${tt('Show datum features')}</button>`; };
 function deriveHtml(): string {
   const p = deriveParent(), dv = p ? derivesFor(p.type) : [];
   if (state.an.derivePrev) return `<span class="an-derive"><b>🔗 ${tt(DERIVES.find((d) => d.key === state.an.derivePrev!.key)!.label)}</b><button class="btn primary" data-dv="add" title="${tt('Create the previewed geometry as a feature in the tree; it is recomputed automatically when the parent feature changes')}">＋ ${tt('Add to tree')}</button><button class="btn" data-dv="x" title="${tt('Discard the preview')}">✕</button></span>`;
@@ -1200,23 +1214,32 @@ function addDerived(key: string, p: FeatureView) {
   state.features.push(f); deriveSrc.set(f, { m: p.measured, P: featPoints(p.id) });
   toast(`✔ ${tt('{0} created', f.name)} (🔗 ${tt('derived from {0}', p.name)})`);
 }
+/** Compact bottom area of the axis/position analysis: value-label checkboxes + [Hide mesh][Transparent] side by side. */
+function axViewRow(cpos: boolean): string {
+  const a = state.an, L = a.axLab, cb = (k: keyof typeof L, lbl: string, tip: string) => `<label class="an-lab" title="${tip}"><input type="checkbox" data-lab="${k}" ${L[k] ? 'checked' : ''}> ${lbl}</label>`;
+  return `<div class="an-labs"><span title="${tt('3D value labels (annotations) next to the drawn elements')}">🏷</span>${cb('zone', tt('Zone'), tt('Label the tolerance zone (green) with its shape and size, e.g. Ø 0.100, and the required zone of the actual axis (orange)'))}${cpos ? '' : cb('env', tt('Envelope'), tt('Label the envelope (purple minimum-zone cylinder around the median line) with its Ø = straightness of the axis'))}${cb('nom', tt('Nominal'), tt('Label the nominal (TED) axis/point, located in the datum reference frame (DRF triad)'))}${cb('dev', tt('Deviation'), tt('Label the location deviation (blue arrow nominal → actual)'))}</div>
+    ${otherLabelsHtml()}<div class="an-btm"><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Transparent model: the scan is drawn semi-transparent so the tolerance zones and axes inside the part are visible (same switch as Analyze › Transparent, remembered)')}">◌ ${tt('Transparent')}</button></div>`;
+}
+function bindAxView(el: HTMLElement) {
+  el.querySelectorAll<HTMLInputElement>('[data-lab]').forEach((c) => (c.onchange = () => { state.an.axLab[c.dataset.lab as 'zone'] = c.checked; renderScene(); }));
+}
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
   const cp = ctrlPanel();
   if (a.res.cpos) return { title: `◐ ${tt('Circle position')}`, cls: 'an',
-    controls: `${cp.html}<label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Transparent model: the scan is drawn semi-transparent so the tolerance zones and axes inside the part are visible (same switch as Analyze › Transparent)')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show/hide the tolerance zone cylinder')}">▭ ${tt('Zones')}</button>${otherLabelsHtml()}`,
-    bind: (el) => { cp.bind(el); const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
+    controls: `${cp.html}<label title="${tt('Location exaggeration (×): magnifies the LOCATION error – the offset of the median line from the nominal (TED) axis, measured perpendicular to the nominal axis, is multiplied by this factor, and the tolerance zones are enlarged by the same factor, so ‘inside/outside the zone’ looks the same as at true scale. 1 = true scale; a blue note is shown when > 1.')}">${tt('Location offset')} × <input id="an-lx" class="an-n" type="number" min="1" step="10" value="${a.axLoc}"></label>
+      ${axViewRow(true)}`,
+    bind: (el) => { cp.bind(el); bindAxView(el); const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'hide') a.axHide = !a.axHide; else if (b.dataset.a === 'zones') a.axZones = !a.axZones; else { a.trans = !a.trans; localStorage.setItem('mw3d-trans', a.trans ? '1' : '0'); } renderAll(); }));
       el.querySelectorAll<HTMLButtonElement>('[data-ol]').forEach((b) => (b.onclick = () => { state.an.otherLabels = !state.an.otherLabels; renderAll(); })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
-    controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
-      <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Transparent model: the scan is drawn semi-transparent so the tolerance zones and axes inside the part are visible (same switch as Analyze › Transparent)')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show the tolerance zone (green, Ø t or two planes) and the required zone of the control (orange)')}">▭ ${tt('Zones')}</button><button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
-    bind: (el) => { cp.bind(el); bindDerive(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
+    controls: `${cp.html}<label title="${tt('Form exaggeration (×): only the BEND of the derived median line is magnified – each section centre is moved away from the median line’s own best-fit axis, perpendicular to it, by (distance × factor). Its location and tilt stay true. Also scales the envelope Ø. 0 = automatic (largest bend ≈ 25 % of the radius).')}">${tt('Form bend')} × <input id="an-ax" class="an-n" type="number" min="0" step="10" value="${a.axExag}"></label>
+      <label title="${tt('Location exaggeration (×): magnifies the LOCATION error – the offset of the median line from the nominal (TED) axis, measured perpendicular to the nominal axis, is multiplied by this factor, and the tolerance zones are enlarged by the same factor, so ‘inside/outside the zone’ looks the same as at true scale. 1 = true scale; a blue note is shown when > 1.')}">${tt('Location offset')} × <input id="an-lx" class="an-n" type="number" min="1" step="10" value="${a.axLoc}"></label>
+      <button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${deriveHtml()}${axViewRow(false)}`,
+    bind: (el) => { cp.bind(el); bindDerive(el); bindAxView(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
       const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
-      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else if (b.dataset.a === 'hide') { a.axHide = !a.axHide; renderAll(); } else if (b.dataset.a === 'zones') { a.axZones = !a.axZones; renderAll(); } else if (b.dataset.a === 'env') { a.axEnv = !a.axEnv; renderAll(); } else { a.trans = !a.trans; renderAll(); } })); },
+      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else if (b.dataset.a === 'hide') { a.axHide = !a.axHide; renderAll(); } else if (b.dataset.a === 'zones') { a.axZones = !a.axZones; renderAll(); } else if (b.dataset.a === 'env') { a.axEnv = !a.axEnv; renderAll(); } else if (b.dataset.a === 'trans') { a.trans = !a.trans; localStorage.setItem('mw3d-trans', a.trans ? '1' : '0'); renderAll(); } })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
   return {
     title: `◐ ${tt('Analyze')}`, cls: 'an',
@@ -1331,8 +1354,8 @@ function diaInfo(c: Control, f?: FeatureView): { applies: boolean; on: boolean }
   return { applies: true, on: c.dia ?? defaultDia(c.kind, D.type === 'Ebene') };
 }
 function diaButton(c: Control, f: FeatureView, after: () => void): HTMLButtonElement {
-  const b = document.createElement('button'), on = diaInfo(c, f).on; b.className = 'btn dia-tg' + (on ? ' on' : ''); b.textContent = 'Ø';
-  b.title = on ? tt('Ø in the feature control frame: cylindrical tolerance zone. Click for a zone between two parallel planes') : tt('No Ø: zone between two parallel planes (worst direction if the drawing gives none). Click for a cylindrical Ø zone');
+  const b = document.createElement('button'), on = diaInfo(c, f).on; b.className = 'btn dia-tg' + (on ? ' on' : ''); b.textContent = on ? `Ø ${tt('cylinder')}` : `∥ ${tt('2 planes')}`;
+  b.title = (on ? tt('Zone shape: CYLINDER Ø t around the nominal axis (drawing shows Ø before the tolerance value).') : tt('Zone shape: TWO PARALLEL PLANES t apart (drawing shows no Ø; direction = worst case if the drawing gives none).')) + ' ' + tt('Click to switch the zone shape. The zone is always drawn in Analyze.');
   b.onclick = (e) => { e.stopPropagation(); c.dia = !on; after(); }; return b;
 }
 /** Datum reference frame input as slots: primary (placeholder) → secondary appears once filled → tertiary.
@@ -2040,15 +2063,15 @@ function renderScene() {
   { const rx = reexPreviewPts(zoneAlive); if (rx) viewer.paint(rx, rgb(PREVIEW_COLOR)); }
   const lg = [p?.dev && state.devMap ? p.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
   if (!peOn) renderDevLegend(lg ?? null);
-  if (state.an.on) { /* Legende aus paintAnalysis */ }
+  if (state.an.on && state.an.otherLabels) for (const i of anControl()?.datumIds ?? []) { const d = state.features.find((x) => x.id === i); if (d?.indices.length && vis(d)) viewer.paint(d.indices, [0.12, 0.53, 0.9]); }
   viewer.commitColors();
   viewer.clearPrims();
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
   { const R = showZone ? reexPreview(zoneAlive) : null; if (R) viewer.addRegion(R); }
   if (showZone && state.preview?.zone) viewer.addRegion(state.preview.zone);
-  if (state.an.on && state.an.res?.cpos) { const v = state.an.res.cpos; viewer.addCirclePos(v, Math.max(1, state.an.axLoc), `Ø ${fmt(v.val, 4)}${v.status === 'IO' ? ' ✔' : v.status === 'NIO' ? ' ✘' : ''}`, state.an.axZones); }
-  if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), offsetLabel(x), { zones: state.an.axZones, env: state.an.axEnv });
+  if (state.an.on && state.an.res?.cpos) { const v = state.an.res.cpos; viewer.addCirclePos(v, Math.max(1, state.an.axLoc), state.an.axLab.dev ? `${tt('deviation')} Ø ${fmt(v.val, 4)}${v.status === 'IO' ? ' ✔' : v.status === 'NIO' ? ' ✘' : ''}` : '', true, { zone: state.an.axLab.zone ? `${tt('zone')} Ø ${fmt(v.tol, 4)}` : '', nom: state.an.axLab.nom ? tt('nominal (TED)') : '' }); }
+  if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), state.an.axLab.dev ? offsetLabel(x) : '', { zones: true, env: state.an.axEnv, labels: axisLabels(x) });
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.an.on && state.an.derivePrev) viewer.addPrimitive(state.an.derivePrev.fit, 0xd81b60, true);
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);

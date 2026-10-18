@@ -239,7 +239,8 @@ export class Viewer {
    * scaled only by `locEx`; actual derived median line (red) at its REAL location, only its bend/form scaled by `formEx`;
    * location offset as a dimension arrow with value.
    */
-  addAxisAnalysis(an: AxisAnalysis, formEx: number, locEx = 1, offLabel = '', show: { zones?: boolean; env?: boolean } = {}) {
+  addAxisAnalysis(an: AxisAnalysis, formEx: number, locEx = 1, offLabel = '', show: { zones?: boolean; env?: boolean; labels?: { zone?: string; req?: string; env?: string; nom?: string } } = {}) {
+    const lab = show.labels ?? {};
     const V = (p: Vec3) => new THREE.Vector3(...p), d = V(an.dir), L = an.length * 1.15;
     const mid = V(nominalFoot(an, an.mlPoint));
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
@@ -248,6 +249,7 @@ export class Viewer {
       if (dashed) l.computeLineDistances(); l.renderOrder = 7; l.raycast = () => {}; this.prims.add(l); };
     // nominal axis
     line([mid.clone().addScaledVector(d, -L / 2), mid.clone().addScaledVector(d, L / 2)], 0x555555);
+    if (lab.nom) this.addText(mid.clone().addScaledVector(d, L / 2).toArray(), lab.nom, '#444444');
     const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(mid); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
     const zonesOn = show.zones !== false;
     if (!zonesOn) { /* tolerance + required zones hidden by the user */ }
@@ -259,9 +261,14 @@ export class Viewer {
         m.matrixAutoUpdate = false; m.matrix.makeBasis(n.clone().multiplyScalar(W), d.clone().multiplyScalar(L), w.clone().multiplyScalar(4 * an.radius)).setPosition(ctr); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
       if (an.tol) slab(an.tol * locEx, 0x22aa44, 0.2);
       if (!an.missing) slab(an.zone * locEx, 0xff8c1a, 0.14);
+      if (lab.zone) this.addText(ctr.clone().addScaledVector(n, (an.tol ?? 0) * locEx / 2).addScaledVector(d, -L * 0.42).toArray(), lab.zone, '#1b7a32');
+      if (lab.req) this.addText(ctr.clone().addScaledVector(n, -an.zone * locEx / 2).addScaledVector(d, -L * 0.3).toArray(), lab.req, '#c26200');
     } else {
       if (an.tol) cyl((an.tol / 2) * locEx, 0x22aa44, 0.2);
       if (!an.missing) cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
+      const side = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      if (lab.zone) this.addText(mid.clone().addScaledVector(side, (an.tol ?? 0) * locEx / 2).addScaledVector(d, -L * 0.42).toArray(), lab.zone, '#1b7a32');
+      if (lab.req) this.addText(mid.clone().addScaledVector(side, -an.zone * locEx / 2).addScaledVector(d, -L * 0.3).toArray(), lab.req, '#c26200');
     }
     // envelope: minimum-zone cylinder enclosing the derived median line (Ø = straightness), drawn with the same form scale
     if (show.env !== false && an.envAxis && an.centers.length >= 2 && an.straightness > 0) {
@@ -270,6 +277,7 @@ export class Viewer {
       const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x8e44ad, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
       const wire = new THREE.LineSegments(new THREE.EdgesGeometry(g, 1), new THREE.LineBasicMaterial({ color: 0x8e44ad, transparent: true, opacity: 0.7, depthTest: false }));
       for (const o of [mesh, wire]) { o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ed); o.position.copy(ep); o.renderOrder = 6; o.raycast = () => {}; this.prims.add(o); }
+      if (lab.env) this.addText(ep.clone().addScaledVector(ed, an.length * 0.5).toArray(), lab.env, '#8e44ad');
     }
     // actual median line (real location, form exaggerated around its own axis)
     // coloured by deviation (app colour scale, 0 = green … h = red): radial distance from the reference axis
@@ -551,7 +559,7 @@ export class Viewer {
   }
   /** Position of a circle/slot centre: zone axis (⟂ aux plane) through the nominal point, tolerance cylinder Øt,
    *  nominal point, actual centre (green inside / red outside) and the offset arrow with its value; offset and zone ×locEx. */
-  addCirclePos(v: { nom: number[]; act: number[]; dir: number[]; tol: number; val: number; radius: number }, locEx = 1, label = '', zones = true) {
+  addCirclePos(v: { nom: number[]; act: number[]; dir: number[]; tol: number; val: number; radius: number }, locEx = 1, label = '', zones = true, lab: { zone?: string; nom?: string } = {}) {
     const V = (p: number[]) => new THREE.Vector3(p[0], p[1], p[2]), N = V(v.nom), d = V(v.dir).normalize(), S = Math.max(v.tol, v.val, 1e-3) * locEx, H = Math.min(v.radius * 1.6, S * 4);
     const off = V(v.act).sub(N), A = N.clone().addScaledVector(off, locEx), ok = v.val <= v.tol + 1e-12;
     const add = (o: THREE.Object3D, order = 7) => { o.traverse((c: any) => { if (c.material) { c.material.depthTest = false; c.material.transparent = true; } c.renderOrder = order; c.raycast = () => {}; }); this.prims.add(o); };
@@ -559,10 +567,12 @@ export class Viewer {
     if (zones && v.tol > 0) { const R = (v.tol / 2) * locEx, g = new THREE.CylinderGeometry(R, R, H, 48, 1, true);
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x22aa44, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
       const w = new THREE.LineSegments(new THREE.EdgesGeometry(g, 1), new THREE.LineBasicMaterial({ color: 0x22aa44, opacity: 0.8 }));
-      for (const o of [m, w]) { o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d); o.position.copy(N); add(o, 5); } }
+      for (const o of [m, w]) { o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d); o.position.copy(N); add(o, 5); }
+      if (lab.zone) this.addText(N.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d)), R).addScaledVector(d, -H / 2).toArray(), lab.zone, '#1b7a32'); }
     const r = S / 25;
     const dot = (p: THREE.Vector3, color: number) => { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), new THREE.MeshBasicMaterial({ color })); s.position.copy(p); add(s, 8); };
     dot(N, 0x555555); dot(A, ok ? 0x2e9e3e : 0xc62828);
+    if (lab.nom) this.addText(N.clone().addScaledVector(d, H / 2).toArray(), lab.nom, '#444444');
     const len = A.distanceTo(N);
     if (len > 1e-9) { const ah = new THREE.ArrowHelper(A.clone().sub(N).normalize(), N, len, 0x1565c0, Math.min(len * 0.35, S / 4), Math.min(len * 0.2, S / 8)); add(ah, 9); }
     if (label) this.addText(N.clone().lerp(A, 0.5).addScaledVector(d, H * 0.35).toArray(), label, '#1565c0');
