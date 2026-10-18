@@ -39,6 +39,7 @@ import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
+import { defaultDia } from './core/median';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING, hasTedAngle } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
@@ -810,7 +811,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
   const miss = c ? missingBasic(c, f, DS) : false;
-  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic, f.measured!.normal, f) : undefined;
+  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic, f.measured!.normal, f, c.dia) : undefined;
   if (nominal && miss) nominal = { dir: nominal.dir };
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
     `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
@@ -937,12 +938,13 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b> <span class="st ${r.status}">${statusText(r.status)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
-      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${ted}${req.length ? `<button class="btn ted-more" data-more title="${tt('More')}">⋯</button>` : ''} ${st}</span>`,
+      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${ted}${req.length ? `<button class="btn ted-more" data-more title="${tt('More')}">⋯</button>` : ''}<span data-dia></span> ${st}</span>`,
     bind: (el) => {
       const upd = () => { void analyzeControl(c.id, true); };
       const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = Number(t.value.replace(',', '.')); if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; upd(); } };
       el.querySelectorAll<HTMLInputElement>('[data-ted]').forEach((i) => (i.onchange = () => { const k = +i.dataset.ted!, s2 = i.value.replace(',', '.').trim(), v = s2 === '' ? null : Number(s2);
         if (v != null && !isFinite(v)) return; const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = v; c.basic = b; upd(); }));
+      const dz = el.querySelector('.an-ctrl [data-dia]'); if (dz && f && diaInfo(c, f).applies) dz.appendChild(diaButton(c, f, upd));
       const mo = el.querySelector<HTMLButtonElement>('.an-ctrl [data-more]');
       if (mo && f) mo.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); upd(); } }]]); };
     } };
@@ -1063,6 +1065,17 @@ function defaultDatums(kind: ControlKind, fid: number): number[] {
 }
 /** TED inputs (theoretically exact dimensions) of a datum control: empty until entered, required ones marked;
  *  'Use actual as nominal' only in the ⋯ menu. */
+/** Ø toggle of axis orientation controls (zone shape): applies to perpendicularity/parallelism/angularity of a cylinder/cone axis. */
+function diaInfo(c: Control, f?: FeatureView): { applies: boolean; on: boolean } {
+  const D = state.features.find((x) => x.id === c.datumIds?.[0]);
+  if (!f || !D || !['Rechtwinkligkeit', 'Parallelität', 'Neigung'].includes(c.kind) || (f.type !== 'Zylinder' && f.type !== 'Kegel')) return { applies: false, on: false };
+  return { applies: true, on: c.dia ?? defaultDia(c.kind, D.type === 'Ebene') };
+}
+function diaButton(c: Control, f: FeatureView, after: () => void): HTMLButtonElement {
+  const b = document.createElement('button'), on = diaInfo(c, f).on; b.className = 'btn dia-tg' + (on ? ' on' : ''); b.textContent = 'Ø';
+  b.title = on ? tt('Ø in the feature control frame: cylindrical tolerance zone. Click for a zone between two parallel planes') : tt('No Ø: zone between two parallel planes (worst direction if the drawing gives none). Click for a cylindrical Ø zone');
+  b.onclick = (e) => { e.stopPropagation(); c.dia = !on; after(); }; return b;
+}
 /** TED input fields of a control: [label, index into basic, tooltip override]. Position: X Y Z + optional angles θ/φ. */
 function tedFields(c: Control, req: number[]): [string, number, string | null][] {
   const ang = hasTedAngle(c.basic);
@@ -1565,7 +1578,8 @@ function renderTable() {
         di.onchange = () => { const ids = parseDatumRef(di.value); if (!ids) { toast(tt('Unknown datum letter: {0}', di.value)); } else { c.datumIds = ids; } renderAll(); };
         lab(tt('Datum'), di);
         tedInputs(c, f, lab);
-        ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : ''}${fmt(c.tolUp, 3)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
+        if (diaInfo(c, f).applies) lab(tt('Zone'), diaButton(c, f, () => renderAll()));
+        ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : diaInfo(c, f).on ? 'Ø' : ''}${fmt(c.tolUp, 3)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
           <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}</span><span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
         if (r.detail) ed.title = r.detail;
         row.appendChild(ed);

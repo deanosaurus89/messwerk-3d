@@ -351,3 +351,4 @@ body.thumb #cs-ind { display:none !important; }
 .an-row { color:#1f5fa8; } .an-row:disabled { opacity:.3; }
 .an-ctrl { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; padding:2px 6px; border:1px solid #9ec1e8; border-radius:4px; background:#f2f7fd; }
 .an-ctrl input { width:60px; } .an-ctrl input.ted.req { border-color:#d32f2f; background:#fff4f4; }
+.dia-tg { min-width:28px; font-weight:600; } .dia-tg.on { background:#1f5fa8; color:#fff; }

@@ -10,7 +10,7 @@
 import { FitResult, fitCircle2D } from './fit';
 import { Vec3, add, basis, dot, norm, scale, sub, unit } from './linalg';
 import { buildDRF, positionNominal } from './datum';
-import { lsqLine, medianLine, minCircle, orientNominal, orientZone, straightnessMZ } from './median';
+import { lsqLine, medianLine, minCircle, orientNominal, orientZone, resolveOrient, straightnessMZ } from './median';
 export { medianLine, minCircle };
 import type { Feature } from './features';
 
@@ -36,11 +36,12 @@ const orth = (v: Vec3, d: Vec3): Vec3 => sub(v, scale(d, dot(v, d)));
 
 export const floatingZone = (C: Vec3[], d: Vec3) => { const [u, v] = basis(d); return 2 * minCircle(C.map((c) => [dot(c, u), dot(c, v)] as [number, number])).r; };
 
-export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal?: { dir: Vec3; point?: Vec3; planeN?: Vec3 }, tol: number | null = null, sections = 0, label = ''): AxisAnalysis {
-  const a = unit(fit.normal); let d = nominal ? unit(nominal.dir) : a; if (dot(d, a) < 0) d = scale(d, -1);
+export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal0?: { dir: Vec3; point?: Vec3; planeN?: Vec3; worst?: boolean }, tol: number | null = null, sections = 0, label = ''): AxisAnalysis {
+  const a = unit(fit.normal); let d = nominal0 ? unit(nominal0.dir) : a; if (dot(d, a) < 0) d = scale(d, -1);
   const L = fit.length || 2 * (fit.radius ?? 1);
   const top = add(fit.center, scale(a, L / 2)), bot = add(fit.center, scale(a, -L / 2));
   const centers = medianLine(fit, pts, sections);
+  const nominal = nominal0?.worst ? { ...resolveOrient(centers, nominal0), point: nominal0.point } : nominal0;
   const mode: AxisAnalysis['mode'] = nominal?.point ? 'position' : nominal ? 'orientation' : 'fit';
   // nominal axis point: given (position) or the centre of the floating zone (orientation / fit)
   let o = nominal?.point ?? fit.center;
@@ -67,7 +68,7 @@ export function displayPoint(an: AxisAnalysis, p: Vec3, formEx: number, locEx = 
 export const nominalFoot = (an: AxisAnalysis, p: Vec3): Vec3 => add(an.origin, scale(an.dir, dot(sub(p, an.origin), an.dir)));
 /** Nominal axis for a control: Position → through the basic dimensions in the full DRF (A|B|C), direction = TED
  *  angles θ/φ or the DRF axis closest to the actual axis; orientation → direction only (zone floats); coaxiality → datum axis. */
-export function axisNominal(kind: string, DS: Feature[], basic: (number | null)[] | undefined, a: Vec3, f?: Feature): { dir: Vec3; point?: Vec3; planeN?: Vec3 } | undefined {
+export function axisNominal(kind: string, DS: Feature[], basic: (number | null)[] | undefined, a: Vec3, f?: Feature, dia?: boolean): { dir: Vec3; point?: Vec3; planeN?: Vec3; worst?: boolean } | undefined {
   const D = DS[0]?.measured; if (!D) return undefined;
   const g = D.normal;
   if (kind === 'Position') {
@@ -75,5 +76,5 @@ export function axisNominal(kind: string, DS: Feature[], basic: (number | null)[
     return { dir: N.dirW, point: N.pointW };
   }
   if (kind === 'Koaxialität') return { dir: g, point: D.center };
-  return orientNominal(kind, D.type === 'Ebene', g, a, kind === 'Neigung' ? (basic?.[0] ?? 0) : 0);
+  return orientNominal(kind, D.type === 'Ebene', g, a, kind === 'Neigung' ? (basic?.[0] ?? 0) : 0, dia);
 }

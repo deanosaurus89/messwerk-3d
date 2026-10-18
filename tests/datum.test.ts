@@ -140,3 +140,24 @@ describe('Oblique TEDs (θ/φ) for position', () => {
     expect(N.ax).toBe(1); expect(N.g[1]).toBeCloseTo(1, 12); expect(N.b).toEqual([1, 2, 3]);
   });
 });
+
+import { worstPlaneN, defaultDia } from '../src/core/median';
+describe('Orientation zone shape: Ø vs. two parallel planes', () => {
+  const s = 0.02, ML: Vec3[] = [[0, 0, 0], [s, 0, 5], [s / 2, s * Math.sqrt(3) / 2, 10]]; // equilateral triangle in XY
+  it('defaults: Ø for axis ⟂ plane / ∥ axis / angularity; planes for axis ∥ plane / ⟂ axis', () => {
+    expect(defaultDia('Rechtwinkligkeit', true)).toBe(true); expect(defaultDia('Parallelität', false)).toBe(true); expect(defaultDia('Neigung', true)).toBe(true);
+    expect(defaultDia('Parallelität', true)).toBe(false); expect(defaultDia('Rechtwinkligkeit', false)).toBe(false);
+  });
+  it('axis ⟂ plane: Ø zone = enclosing circle (1.155·s), without Ø = worst-direction plane pair (s)', () => {
+    expect(orientZone(ML, orientNominal('Rechtwinkligkeit', true, [0, 0, 1], [0, 0, 1]))).toBeCloseTo(2 * s / Math.sqrt(3), 9);
+    const nom = orientNominal('Rechtwinkligkeit', true, [0, 0, 1], [0, 0, 1], 0, false); expect(nom.worst).toBe(true);
+    expect(orientZone(ML, nom)).toBeCloseTo(s, 7); const n = worstPlaneN(ML, [0, 0, 1]); expect(Math.abs(n[2])).toBeLessThan(1e-12);
+  });
+  it('control flag dia=false switches the table value to the plane pair', () => {
+    const P: Vec3[] = []; for (let i = 0; i < 4000; i++) { const z = (20 * i) / 4000, a = i * 0.37, bow = 0.03 * (1 - ((z - 10) / 10) ** 2); P.push([20 + bow + 6 * Math.cos(a), 20 + 6 * Math.sin(a), z]); }
+    const Zs = F(9, 'Z', 'Zylinder', fit('Zylinder', [20.02, 20, 10], [0, 0, 1], { radius: 6, diameter: 12, length: 20 }));
+    const m = new Map([A, B, C, Zs].map((f) => [f.id, f])), ctx = { points: (id: number) => (id === 9 ? P : null) } as any;
+    const c = ctl('Rechtwinkligkeit', [1]); c.featureIds = [9]; const d = evaluate(c, m, ctx).measured!;
+    c.dia = false; const p = evaluate(c, m, ctx); expect(p.detail).toContain('two planes'); expect(p.measured!).toBeLessThanOrEqual(d + 1e-9); expect(p.measured!).toBeGreaterThan(0.02);
+  });
+});

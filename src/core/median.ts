@@ -74,24 +74,41 @@ export function straightnessMZ(P: Vec3[], hint: Vec3): { dia: number; dir: Vec3;
   return S[0].v < diaLSQ ? { dia: S[0].v, dir: dirOf(S[0].x), diaLSQ } : { dia: diaLSQ, dir: L.d, diaLSQ };
 }
 
+/** Default zone shape of an axis orientation control: Ø for axis ⟂ plane, axis ∥ axis and angularity; planes for axis ∥ plane and axis ⟂ axis. */
+export const defaultDia = (kind: string, datumIsPlane: boolean) => kind === 'Neigung' || (kind === 'Parallelität') !== datumIsPlane;
 /**
  * Nominal direction and zone type for an orientation control of a derived median line (ISO 1101):
- * - axis ⟂ plane, axis ∥ axis, angularity: cylindrical zone Ø around `dir` (floats);
- * - axis ∥ plane, axis ⟂ axis: zone between two parallel planes with normal `planeN` (= datum direction);
- *   `dir` is then the actual axis projected into those planes (for drawing).
- * `g` = datum direction (plane normal or axis), `a` = actual axis direction, `alphaDeg` = TED angle (angularity:
- * angle to the datum plane resp. datum axis).
+ * - Ø given (dia): cylindrical zone around `dir` (floats);
+ * - no Ø: zone between two parallel planes. Axis ∥ plane / ⟂ axis: plane normal = datum direction (`planeN`);
+ *   axis ⟂ plane / ∥ axis / angularity: the planes contain the nominal direction, their normal is the WORST direction
+ *   ⟂ to it (`worst`, conservative because the leader direction of the drawing is not known).
+ * `g` = datum direction, `a` = actual axis direction, `alphaDeg` = TED angle (angularity: to the datum plane/axis).
  */
-export function orientNominal(kind: string, datumIsPlane: boolean, g: Vec3, a: Vec3, alphaDeg = 0): { dir: Vec3; planeN?: Vec3 } {
+export function orientNominal(kind: string, datumIsPlane: boolean, g: Vec3, a: Vec3, alphaDeg = 0, dia?: boolean): { dir: Vec3; planeN?: Vec3; worst?: boolean } {
   g = unit(g); a = unit(a); const sg = dot(a, g) < 0 ? -1 : 1;
   const pr = sub(a, scale(g, dot(a, g))), w = Math.hypot(...pr) > 1e-9 ? unit(pr) : basis(g)[0];
-  if (kind === 'Neigung') { const th = ((datumIsPlane ? 90 - alphaDeg : alphaDeg) * Math.PI) / 180; return { dir: unit(add(scale(g, sg * Math.cos(th)), scale(w, Math.sin(th)))) }; }
-  const planar = (kind === 'Parallelität') === datumIsPlane; // ∥ plane or ⟂ axis
-  return planar ? { dir: w, planeN: g } : { dir: g };
+  const D = dia ?? defaultDia(kind, datumIsPlane);
+  let dir: Vec3;
+  if (kind === 'Neigung') { const th = ((datumIsPlane ? 90 - alphaDeg : alphaDeg) * Math.PI) / 180; dir = unit(add(scale(g, sg * Math.cos(th)), scale(w, Math.sin(th)))); }
+  else dir = (kind === 'Parallelität') === datumIsPlane ? w : g;
+  if (D) return { dir };
+  if (kind !== 'Neigung' && (kind === 'Parallelität') === datumIsPlane) return { dir, planeN: g };
+  return { dir, worst: true };
+}
+/** Normal (⟂ dir) of the widest projection of the points: worst direction for a two-plane zone containing `dir`. */
+export function worstPlaneN(ML: Vec3[], dir: Vec3): Vec3 {
+  const [u, v] = basis(unit(dir)), wid = (t: number) => { const n = add(scale(u, Math.cos(t)), scale(v, Math.sin(t))); let mn = Infinity, mx = -Infinity; for (const p of ML) { const x = dot(p, n); if (x < mn) mn = x; if (x > mx) mx = x; } return mx - mn; };
+  let bt = 0, bw = -1; for (let i = 0; i < 180; i++) { const t = (i * Math.PI) / 180, x = wid(t); if (x > bw) { bw = x; bt = t; } }
+  for (let h = Math.PI / 360; h > 1e-7; h /= 2) for (const t of [bt - h, bt + h]) { const x = wid(t); if (x > bw) { bw = x; bt = t; } }
+  return add(scale(u, Math.cos(bt)), scale(v, Math.sin(bt)));
+}
+/** Resolve `worst` into a concrete plane normal for the given median line. */
+export function resolveOrient(ML: Vec3[], nom: { dir: Vec3; planeN?: Vec3; worst?: boolean }): { dir: Vec3; planeN?: Vec3 } {
+  return nom.worst && ML.length ? { dir: nom.dir, planeN: worstPlaneN(ML, nom.dir) } : nom.worst ? { dir: nom.dir } : nom;
 }
 /** Zone value of a median line for an orientation nominal: Ø of the floating cylinder, or width between planes. */
-export function orientZone(ML: Vec3[], nom: { dir: Vec3; planeN?: Vec3 }): number {
-  if (!ML.length) return 0;
+export function orientZone(ML: Vec3[], nom0: { dir: Vec3; planeN?: Vec3; worst?: boolean }): number {
+  if (!ML.length) return 0; const nom = resolveOrient(ML, nom0);
   if (nom.planeN) { const t = ML.map((p) => dot(p, nom.planeN!)); return Math.max(...t) - Math.min(...t); }
   return floatZone(ML, nom.dir).dia;
 }

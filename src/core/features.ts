@@ -47,6 +47,8 @@ export interface Control {
   tolUp: number;
   tolLo: number;              // negativ, z. B. -0.1
   datumIds?: number[];        // Bezüge (Merkmal-IDs) in Reihenfolge primär|sekundär|tertiär
+  /** orientation of an axis: Ø (cylindrical) zone; false = zone between two parallel planes; undefined = default of the case (see zoneIsDia) */
+  dia?: boolean;
   basic?: (number | null)[];  // TED (theoretically exact dimensions): position X/Y/Z in the DRF or angularity angle; null = not entered yet (never prefilled)
 }
 

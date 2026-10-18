@@ -10,7 +10,7 @@
 import type { Control, Feature } from './features';
 import type { GeomType } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
-import { medianLine, orientNominal, orientZone } from './median';
+import { medianLine, orientNominal, orientZone, resolveOrient } from './median';
 import { SimCtx, simulateDatums } from './datumsim';
 
 export type DatumKind = 'plane' | 'axis' | 'point';
@@ -162,7 +162,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
       }
       // cylinder/cone with points: derived median line (ISO 12180-1) in the orientation zone (same as the axis view)
       if (f.type === 'Zylinder' || f.type === 'Kegel') { const P = pts(); const ML = P && P.length >= 64 ? medianLine(m, P) : [];
-        if (ML.length >= 2) { const nom = orientNominal(kind, gIsNormal, g, e, kind === 'Neigung' ? B(0) : 0);
+        if (ML.length >= 2) { const nom = resolveOrient(ML, orientNominal(kind, gIsNormal, g, e, kind === 'Neigung' ? B(0) : 0, c.dia));
           return { value: orientZone(ML, nom), detail: `derived median line (${ML.length} sections) in ${nom.planeN ? 'zone between two planes' : 'floating Ø zone'}` }; } }
       return { value: elemSize(f) * Math.sin(err), detail: `angle error ${(err * 180 / Math.PI).toFixed(4)}° over ${elemSize(f).toFixed(2)} mm` };
     }
