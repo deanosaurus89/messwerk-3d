@@ -73,3 +73,25 @@ export function straightnessMZ(P: Vec3[], hint: Vec3): { dia: number; dir: Vec3;
   S.sort((a, b) => a.v - b.v);
   return S[0].v < diaLSQ ? { dia: S[0].v, dir: dirOf(S[0].x), diaLSQ } : { dia: diaLSQ, dir: L.d, diaLSQ };
 }
+
+/**
+ * Nominal direction and zone type for an orientation control of a derived median line (ISO 1101):
+ * - axis ⟂ plane, axis ∥ axis, angularity: cylindrical zone Ø around `dir` (floats);
+ * - axis ∥ plane, axis ⟂ axis: zone between two parallel planes with normal `planeN` (= datum direction);
+ *   `dir` is then the actual axis projected into those planes (for drawing).
+ * `g` = datum direction (plane normal or axis), `a` = actual axis direction, `alphaDeg` = TED angle (angularity:
+ * angle to the datum plane resp. datum axis).
+ */
+export function orientNominal(kind: string, datumIsPlane: boolean, g: Vec3, a: Vec3, alphaDeg = 0): { dir: Vec3; planeN?: Vec3 } {
+  g = unit(g); a = unit(a); const sg = dot(a, g) < 0 ? -1 : 1;
+  const pr = sub(a, scale(g, dot(a, g))), w = Math.hypot(...pr) > 1e-9 ? unit(pr) : basis(g)[0];
+  if (kind === 'Neigung') { const th = ((datumIsPlane ? 90 - alphaDeg : alphaDeg) * Math.PI) / 180; return { dir: unit(add(scale(g, sg * Math.cos(th)), scale(w, Math.sin(th)))) }; }
+  const planar = (kind === 'Parallelität') === datumIsPlane; // ∥ plane or ⟂ axis
+  return planar ? { dir: w, planeN: g } : { dir: g };
+}
+/** Zone value of a median line for an orientation nominal: Ø of the floating cylinder, or width between planes. */
+export function orientZone(ML: Vec3[], nom: { dir: Vec3; planeN?: Vec3 }): number {
+  if (!ML.length) return 0;
+  if (nom.planeN) { const t = ML.map((p) => dot(p, nom.planeN!)); return Math.max(...t) - Math.min(...t); }
+  return floatZone(ML, nom.dir).dia;
+}

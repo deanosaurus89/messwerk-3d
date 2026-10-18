@@ -10,7 +10,7 @@
 import type { Control, Feature } from './features';
 import type { GeomType } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
-import { medianLine } from './median';
+import { medianLine, orientNominal, orientZone } from './median';
 
 export type DatumKind = 'plane' | 'axis' | 'point';
 export const datumKind = (t: GeomType): DatumKind | null =>
@@ -138,6 +138,10 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
         if (P && P.length) return { value: range(P, nz), detail: `Zone ⟂ ${nz.map((v) => v.toFixed(3)).join(' ')}` };
         return { value: elemSize(f) * Math.sin(err) + m.form, detail: 'aus Ausgleichsebene (ohne Punkte)' };
       }
+      // cylinder/cone with points: derived median line (ISO 12180-1) in the orientation zone (same as the axis view)
+      if (f.type === 'Zylinder' || f.type === 'Kegel') { const P = pts(); const ML = P && P.length >= 64 ? medianLine(m, P) : [];
+        if (ML.length >= 2) { const nom = orientNominal(kind, gIsNormal, g, e, kind === 'Neigung' ? B(0) : 0);
+          return { value: orientZone(ML, nom), detail: `derived median line (${ML.length} sections) in ${nom.planeN ? 'zone between two planes' : 'floating Ø zone'}` }; } }
       return { value: elemSize(f) * Math.sin(err), detail: `angle error ${(err * 180 / Math.PI).toFixed(4)}° over ${elemSize(f).toFixed(2)} mm` };
     }
     case 'Position': {
@@ -173,6 +177,8 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
       if (kind === 'Konzentrizität') return { value: 2 * (k0 === 'point' ? norm(sub(m.center, pD)) : distLine(m.center)) };
       if (kind === 'Koaxialität') {
         const a = dirOf(f), L = m.length || 0;
+        const P = f.type === 'Zylinder' || f.type === 'Kegel' ? pts() : null, ML = P && P.length >= 64 ? medianLine(m, P) : [];
+        if (ML.length >= 2) return { value: 2 * Math.max(...ML.map(distLine)), detail: `derived median line (${ML.length} sections) in Ø zone around the datum axis` };
         return { value: 2 * Math.max(distLine(add(m.center, scale(a, L / 2))), distLine(add(m.center, scale(a, -L / 2)))) };
       }
       const P = pts(); if (!P || P.length < 10) return { value: null, flag: 'no points' };

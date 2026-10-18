@@ -78,3 +78,40 @@ describe('TED never prefilled: nominal missing', () => {
     const P2 = F(7, 'Ebene 7', 'Ebene', fit('Ebene', [50, 30, 25], [0, 0, 1])); expect(requiredBasic({ kind: 'Position' }, P2, [A, B, C])).toEqual([2]);
   });
 });
+
+import { orientNominal, orientZone } from '../src/core/median';
+import { analyzeAxis, axisNominal } from '../src/core/axisan';
+import { controlCatalog } from '../src/core/features';
+describe('Orientation / coaxiality / straightness of axis from the derived median line', () => {
+  // bowed hole axis: bend 0.03 mm in X in the middle, otherwise ∥ Z
+  const P: Vec3[] = []; for (let i = 0; i < 4000; i++) { const z = (20 * i) / 4000, a = i * 0.37, bow = 0.03 * (1 - ((z - 10) / 10) ** 2); P.push([20 + bow + 6 * Math.cos(a), 20 + 6 * Math.sin(a), z]); }
+  const Zs = F(9, 'Z', 'Zylinder', fit('Zylinder', [20.02, 20, 10], [0, 0, 1], { radius: 6, diameter: 12, length: 20 }));
+  const m = new Map([A, B, C, Zs].map((f) => [f.id, f])), ctx = { points: (id: number) => (id === 9 ? P : null) } as any;
+  it('perpendicularity to plane A = floating Ø zone of the median line (≈ bow), same value as the axis view', () => {
+    const c = ctl('Rechtwinkligkeit', [1]); c.featureIds = [9];
+    const r = evaluate(c, m, ctx); expect(r.detail).toContain('median line'); expect(r.measured!).toBeGreaterThan(0.025); expect(r.measured!).toBeLessThan(0.032);
+    const an = analyzeAxis(Zs.measured!, P, axisNominal('Rechtwinkligkeit', [A], undefined, [0, 0, 1]), 0.1);
+    expect(an.zone).toBeCloseTo(r.measured!, 9);
+  });
+  it('parallelism of an axis to a plane = width between two planes along the plane normal', () => {
+    const nom = orientNominal('Parallelität', true, [0, 1, 0], [0, 0, 1]); expect(nom.planeN).toEqual([0, 1, 0]);
+    const ML: Vec3[] = [[0, 0, 0], [0, 0.02, 5], [0.5, -0.01, 10]]; expect(orientZone(ML, nom)).toBeCloseTo(0.03, 12);
+    expect(orientNominal('Rechtwinkligkeit', false, [1, 0, 0], [0, 0, 1]).planeN).toEqual([1, 0, 0]);
+    expect(orientNominal('Rechtwinkligkeit', true, [0, 0, 1], [0, 0, 1]).planeN).toBeUndefined();
+  });
+  it('angularity: nominal direction tilted by the TED angle', () => {
+    const nom = orientNominal('Neigung', true, [0, 0, 1], [0.5, 0, 0.8], 60); // 60° to the plane → 30° to its normal
+    expect(Math.acos(nom.dir[2]) * 180 / Math.PI).toBeCloseTo(30, 9);
+  });
+  it('coaxiality uses the median line (bow counts), straightness of axis via minimum zone', () => {
+    const D = F(10, 'D', 'Zylinder', fit('Zylinder', [20, 20, 10], [0, 0, 1], { radius: 8, length: 20 }), 'D'); const m2 = new Map([...m, [10, D]]);
+    const c = ctl('Koaxialität', [10]); c.featureIds = [9]; const r = evaluate(c, m2, ctx);
+    expect(JSON.stringify(r)).toContain('median line'); expect(r.measured!).toBeGreaterThan(0.055); expect(r.measured!).toBeLessThan(0.062);
+    const s = ctl('Geradheit Achse', [], { tolUp: 0.05 }); s.featureIds = [9]; const rs = evaluate(s, m2, ctx);
+    expect(rs.measured!).toBeGreaterThan(0.025); expect(rs.measured!).toBeLessThan(0.032); expect(rs.status).toBe('IO');
+    expect(evaluate(s, m2).measured).toBeNull(); // no points → no value
+  });
+  it('catalog offers "Straightness of axis" for cylinders and cones', () => {
+    for (const t of ['Zylinder', 'Kegel'] as const) expect(controlCatalog(t).flatMap((g) => g.items.map((i) => i.kind))).toContain('Geradheit Achse');
+  });
+});
