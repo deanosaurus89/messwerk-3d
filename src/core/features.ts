@@ -24,7 +24,7 @@ export interface Feature {
   /** anchor feature: the picked points (mathematical minimum) and their surface normals */
   anchor?: { pts: Vec3[]; nrm: Vec3[] };
   /** re-extraction applied on top of the initial method (parameters + result) */
-  reex?: { maxDist: number; sigma: number; maxAngleDeg: number; margin: number; points: number; removed: number; before: number };
+  reex?: { maxDist: number; sigma: number; maxAngleDeg: number; margin?: number | null; fill?: boolean; fillBand?: number; points: number; removed: number; before: number };
 }
 
 /** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */

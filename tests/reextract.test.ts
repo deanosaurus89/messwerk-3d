@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRegion, inRegion, reextract } from '../src/core/reextract';
+import { buildRegion, inRegion, lateralOf, normReex, reextract } from '../src/core/reextract';
 // plane z=0 grid with noise, a few outliers, and a parallel face at z=5 that must not be picked
 describe('re-extraction', () => {
   const pos: number[] = [], nrm: number[] = []; let s = 1; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647 - 0.5);
@@ -42,5 +42,28 @@ describe('torus region', () => {
     const T: any = { type: 'Torus', center: [0, 0, 0], normal: [0, 0, 1], radius: 10, minorRadius: 2 };
     const R = buildRegion(T, Float32Array.from([12, 0, 0]), Uint32Array.from([0]), { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0.5 });
     expect(inRegion(R, [12.05, 0, 0])).toBe(true); expect(inRegion(R, [11, 0, 0])).toBe(false); expect(inRegion(R, [0, 10, 2.02])).toBe(true);
+  });
+});
+describe('unified search region (0.19)', () => {
+  it('migrates old parameters: larger of max. distance / band → search distance, fill on, margin → lateral', () => {
+    const q = normReex({ maxDist: 1, sigma: 3, maxAngleDeg: 30, margin: 0.5, fillBand: 3 });
+    expect(q.maxDist).toBe(3); expect(q.fill).toBe(true); expect(q.margin).toBe(0.5); expect('fillBand' in q).toBe(false);
+    const r = normReex({ maxDist: 0.2, sigma: 3, maxAngleDeg: 30, margin: 1, fillBand: 0 }); expect(r.fill).toBeFalsy(); expect(r.maxDist).toBe(0.2);
+  });
+  it('lateral extension: automatic = search distance, at least 0.5 mm', () => {
+    expect(lateralOf(normReex({ maxDist: 0.1 }))).toBe(0.5); expect(lateralOf(normReex({ maxDist: 2 }))).toBe(2); expect(lateralOf(normReex({ maxDist: 2, margin: 0.2 }))).toBe(0.2);
+    const fit: any = { type: 'Zylinder', center: [0, 0, 0], normal: [0, 0, 1], radius: 5, length: 10 };
+    const R = buildRegion(fit, Float32Array.from([5, 0, -5, 0, 5, 5]), Uint32Array.from([0, 1]), { maxDist: 0.1, sigma: 3, maxAngleDeg: 30 });
+    expect(inRegion(R, [5, 0, 5.45])).toBe(true); expect(inRegion(R, [5, 0, 5.6])).toBe(false);
+  });
+  it('outlier removal 0 = off keeps all points; n × RMS removes the largest deviations', () => {
+    const pos: number[] = [], nrm: number[] = [];
+    for (let i = 0; i < 30; i++) for (let j = 0; j < 30; j++) { pos.push(i, j, ((i * 7 + j * 3) % 5 - 2) * 0.002); nrm.push(0, 0, 1); }
+    for (let k = 0; k < 10; k++) { pos.push(3 + k, 7, 0.08); nrm.push(0, 0, 1); }
+    const start = Uint32Array.from({ length: 910 }, (_, k) => k), fit0: any = { type: 'Ebene', center: [15, 15, 0], normal: [0, 0, 1], rms: 0, form: 0 };
+    const off = reextract(fit0, pos, nrm, start, { maxDist: 0.1, sigma: 0, maxAngleDeg: 30 });
+    const on = reextract(fit0, pos, nrm, start, { maxDist: 0.1, sigma: 3, maxAngleDeg: 30 });
+    expect(off.indices.length).toBe(910); expect(off.removedSigma).toBe(0);
+    expect(on.indices.length).toBeLessThanOrEqual(900); expect([...on.indices].some((v) => v >= 900)).toBe(false);
   });
 });

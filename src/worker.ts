@@ -1,5 +1,6 @@
 // Web Worker: Parsen, Topologie, Regionenwachstum, Pinsel und Fits laufen hier (UI bleibt flüssig).
-import { fillOuterBoundary, FillParams } from './core/fillplane';
+import { fillOuterBoundary, FillParams, insetPlane } from './core/fillplane';
+import { reextract, ReexParams } from './core/reextract';
 import { parseByName } from './core/io';
 import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
@@ -80,23 +81,31 @@ export type Req =
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
+  | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[] }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null };
 
+/** automatic search distance of All inside boundary: 3 × RMS of the region-grown fit, at least 0.1 mm */
+const autoBand = (rms: number) => Math.max(0.1, Math.round(3 * (rms || 0) * 100) / 100);
 /** Aux plane 'full adjacent face' + All inside boundary: fill the aux plane points inside its outer contour, refit it. */
 function auxFill(r: { plane: FitResult; planeIdx: Uint32Array }, req: { plane?: FitResult; ring?: unknown; fill?: FillParams | null }) {
   if (!req.fill || req.plane || req.ring || !r.planeIdx || r.planeIdx.length < 3) return null;
-  const f = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, r.planeIdx, r.plane, req.fill);
+  const band = req.fill.band > 0 ? req.fill.band : autoBand(r.plane.rms);
+  const f = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, r.planeIdx, r.plane, { ...req.fill, band }, mesh!.indices);
   const { p, n } = gather(mesh!, f.indices); const plane = fitType('Ebene', p, n, 0); delete plane.residuals; plane.n = f.indices.length;
-  return { plane, indices: f.indices, raised: f.raised, contour: f.contour, added: f.added };
+  return { plane, indices: f.indices, raised: f.raised, contour: f.contour, added: f.added, band };
 }
-export interface FitParams { k: number; nf?: NormalFilter | null; /** planes: capture all points inside the outer boundary of the region (band ± mm) */ fill?: FillParams | null; }
+export interface FitParams { k: number; nf?: NormalFilter | null; /** planes: capture all points inside the outer boundary of the region (band ± mm) */ fill?: FillParams | null;
+  /** planes without fill: boundary exclusion distance [mm] from the edge of the region */ inset?: number; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   let { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Too few points selected');
-  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0, raised: Uint32Array | undefined, contour: number[][][] | undefined;
+  let band: number | undefined; let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0, raised: Uint32Array | undefined, contour: number[][][] | undefined;
   if (prm.fill && type === 'Ebene') {
-    const r = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, idx, fit, prm.fill);
+    band = prm.fill.band > 0 ? prm.fill.band : autoBand(fit.rms);
+    const r = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, idx, fit, { ...prm.fill, band }, mesh!.indices);
     use = idx = r.indices; filled = r.added; raised = r.raised; contour = r.contour; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
+  } else if (type === 'Ebene' && (prm.inset ?? 0) > 0) {
+    use = idx = insetPlane(mesh!.positions, idx, fit, prm.inset!, mesh!.indices); ({ p, n } = gather(mesh!, idx)); if (p.length < 3) throw new Error('Boundary exclusion distance removes all points'); fit = fitType(type, p, n, prm.k);
   }
   if (prm.nf && n.length === p.length) {
     const keep = normalFilter(fit, p, n, prm.nf);
@@ -107,7 +116,7 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
     } else removed = 0;
   }
   delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
-  return { indices: use, fit, candidates: [], filled, raised, contour };
+  return { indices: use, fit, candidates: [], filled, raised, contour, band };
 }
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
@@ -209,6 +218,9 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
     } else if (req.op === 'nurbs') {
       result = doNurbs(req);
+    } else if (req.op === 'reex') {
+      const r = reextract(req.fit, mesh!.positions, mesh!.vertexNormals ?? null, req.indices, req.params, req.seedPts ?? [], mesh!.indices);
+      result = { ...r, fit: { ...r.fit, residuals: undefined } };
     } else if (req.op === 'fit') {
       result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
     }

@@ -84,7 +84,41 @@ describe('Capture all points inside outer boundary (plane)', () => {
     expect(cnt('bump')).toBe(tot('bump')); expect(inBand).toBeLessThan(tot('bump')); // tips above the band are captured too expect(cnt('strip')).toBe(tot('strip'));
     expect(cnt('wall')).toBe(0); expect(cnt('bottom')).toBe(0); expect(cnt('side')).toBe(0);
     expect(r4.raisedCount).toBe(0);
-    expect(r4.contour.length).toBe(1); expect(r4.contour[0].length).toBeGreaterThan(20);
-    const xs4 = r4.contour[0].map((q) => q[0]); expect(Math.min(...xs4)).toBeLessThan(1.5); expect(Math.max(...xs4)).toBeGreaterThan(74.5);
+    // contour = boundary of the captured points: outer loop + loops around the hole and the slot
+    expect(r4.contour.length).toBeGreaterThanOrEqual(1); const outer = r4.contour.reduce((a, b) => (b.length > a.length ? b : a)); expect(outer.length).toBeGreaterThan(20);
+    const xs4 = outer.map((q) => q[0]); expect(Math.min(...xs4)).toBeLessThan(1.5); expect(Math.max(...xs4)).toBeGreaterThan(74.5);
+  });
+});
+
+describe('All inside boundary – plate with edge fillets and side walls (regression 0.19)', () => {
+  it('contour never beyond the grown region, no fillet/wall points, flatness ≈ grown + bumps', () => {
+    // plate 60×40, top z=0 with 1 mm bump and spatter; edge fillet R=3 all around, side walls down to −10, through hole
+    const P: number[] = [], Nn: number[] = [], K: string[] = []; const add = (p: number[], n: number[], k: string) => { P.push(...p); Nn.push(...n); K.push(k); };
+    const R = 3, X = 60, Y = 40, sdx = 0.4;
+    for (let x = R; x <= X - R + 1e-9; x += sdx) for (let y = R; y <= Y - R + 1e-9; y += sdx) {
+      if (Math.hypot(x - 42, y - 20) < 4) continue; // hole Ø8
+      const e1 = 1.0 * Math.exp(-((x - 20) ** 2 + (y - 20) ** 2) / (2 * 2 * 2)), e2 = 0.6 * Math.exp(-((x - 42) ** 2 + (y - 25.5) ** 2) / (2 * 0.5 * 0.5)), e = e1 + e2;
+      const gx = (-e1 * (x - 20)) / 4 + (-e2 * (x - 42)) / 0.25, gy = (-e1 * (y - 20)) / 4 + (-e2 * (y - 25.5)) / 0.25, l = Math.hypot(gx, gy, 1);
+      add([x, y, e], [-gx / l, -gy / l, 1 / l], e > 0.02 ? 'bump' : 'face');
+    }
+    // fillets: quarter circles along the 4 edges, then walls
+    for (let t = 0; t <= 90; t += 6) { const a = (t * Math.PI) / 180, off = R * Math.sin(a), dz = -R * (1 - Math.cos(a)), nn = [Math.sin(a), Math.cos(a)];
+      for (let y = R; y <= Y - R; y += sdx) { add([X - R + off, y, dz], [nn[0], 0, nn[1]], 'fillet'); add([R - off, y, dz], [-nn[0], 0, nn[1]], 'fillet'); }
+      for (let x = R; x <= X - R; x += sdx) { add([x, Y - R + off, dz], [0, nn[0], nn[1]], 'fillet'); add([x, R - off, dz], [0, -nn[0], nn[1]], 'fillet'); } }
+    for (let z = -R - 0.4; z >= -10; z -= 0.4) { for (let y = 0; y <= Y; y += sdx) { add([X, y, z], [1, 0, 0], 'wall'); add([0, y, z], [-1, 0, 0], 'wall'); } for (let x = 0; x <= X; x += sdx) { add([x, Y, z], [0, 1, 0], 'wall'); add([x, 0, z], [0, -1, 0], 'wall'); } }
+    for (let a = 0; a < 360; a += 5) for (let z = -0.2; z >= -10; z -= 0.4) { const c = Math.cos((a * Math.PI) / 180), s = Math.sin((a * Math.PI) / 180); add([42 + 4 * c, 20 + 4 * s, z], [-c, -s, 0], 'hole'); }
+    // region growing result: flat top without bumps and without the fillet start
+    const seed = K.map((k, i) => (k === 'face' && Math.abs(Nn[3 * i + 2]) > 0.999 ? i : -1)).filter((i) => i >= 0);
+    const fit = { type: 'Ebene', center: [30, 20, 0], normal: [0, 0, 1], rms: 0.01, form: 0.02 } as unknown as FitResult;
+    for (const band of [0.1, 2]) {
+      const r = fillOuterBoundary(Float64Array.from(P), Float64Array.from(Nn), Uint32Array.from(seed), fit, { band });
+      const g = new Set(r.indices), cnt = (k: string) => K.filter((x, i) => x === k && g.has(i)).length, tot = (k: string) => K.filter((x) => x === k).length;
+      expect(cnt('wall')).toBe(0); expect(cnt('hole')).toBe(0);
+      const zs = Array.from(r.indices, (i) => P[3 * i + 2]); expect(Math.min(...zs)).toBeGreaterThan(-0.15); // no fillet points
+      expect(cnt('bump')).toBe(tot('bump'));
+      expect(Math.max(...zs) - Math.min(...zs)).toBeLessThan(1.15);           // flatness ≈ grown + bump (1.0)
+      const outer = r.contour.reduce((a, b) => (b.length > a.length ? b : a)); const xs = outer.map((q) => q[0]), ys = outer.map((q) => q[1]);
+      expect(Math.min(...xs)).toBeGreaterThan(R - 1.2); expect(Math.max(...xs)).toBeLessThan(X - R + 1.2); expect(Math.min(...ys)).toBeGreaterThan(R - 1.2); expect(Math.max(...ys)).toBeLessThan(Y - R + 1.2);
+    }
   });
 });

@@ -1,6 +1,8 @@
 // Re-extraction: the existing actual geometry is the start; scan points are re-collected inside a SEARCH REGION that is
-// built from the geometry (not a bounding box), with the usual industry criteria (max distance, normal angle, n·σ filter).
-// Regions (all ± max distance around the fitted surface/curve):
+// built from the geometry (not a bounding box), with the usual industry criteria (search distance, normal angle, outlier removal).
+// ONE search region: ± search distance normal to the fitted surface/curve (also the band of 'All inside boundary'),
+// laterally extended beyond the actual contour by the lateral extension (Advanced; default derived = search distance, ≥ 0.5 mm).
+// Regions:
 //  plane (trimmed)  → prism over its contour (occupancy grid of the current points in the plane, + edge margin)
 //  plane (no points, e.g. anchor) → rectangular box over the anchor points + margin
 //  cylinder / cone  → hollow shell over the trimmed height (+ margin)
@@ -9,10 +11,41 @@
 //  line             → tube along the line (over its extent + margin)
 import { FitResult, GeomType, fitType, modelNormal, signedDistance } from './fit';
 import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
-import { fillOuterBoundary } from './fillplane';
+import { fillOuterBoundary, insetPlane } from './fillplane';
 
-export interface ReexParams { maxDist: number; sigma: number; maxAngleDeg: number; margin: number; iterations?: number; /** planes: then capture all points inside the outer boundary (band ± mm; 0 = off) */ fillBand?: number }
-export const REEX_DEFAULT: ReexParams = { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0.5, iterations: 3 };
+export interface ReexParams {
+  /** search distance ± [mm]: normal thickness of the search region (and band for All inside boundary) */
+  maxDist: number;
+  /** outlier removal: exclude points beyond n × RMS (std. dev.) of the residuals; 0 = off (keep all) */
+  sigma: number; maxAngleDeg: number;
+  /** lateral extension beyond the actual contour [mm]; null/undefined = automatic (see lateralOf) */
+  margin?: number | null; iterations?: number;
+  /** planes: then capture all points inside the outer boundary within ± search distance */
+  fill?: boolean;
+  /** with fill: drop raised features (boss, sphere, step) as a whole */
+  excludeRaised?: boolean;
+  /** with fill: include detected islands inside the outer contour (default true) */
+  islands?: boolean;
+  /** planes: boundary exclusion distance [mm] (inset from the outer contour / openings / excluded islands) */
+  inset?: number;
+  /** normal angle criterion on/off (default on) */
+  angleOn?: boolean;
+  /** outlier removal on/off (default on); off = nothing removed regardless of sigma */
+  sigmaOn?: boolean;
+  /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
+  fillBand?: number;
+}
+export const REEX_DEFAULT: ReexParams = { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: null, iterations: 3 };
+/** automatic lateral extension: = search distance, at least 0.5 mm */
+export const lateralAuto = (p: { maxDist: number }) => Math.max(0.5, p.maxDist);
+export const lateralOf = (p: ReexParams) => (p.margin != null && isFinite(p.margin) ? p.margin : lateralAuto(p));
+/** Migrate old parameter sets (max. distance + search margin + separate fill band) to the unified search region. */
+export function normReex<T extends Partial<ReexParams>>(p: T): T & ReexParams {
+  const q: any = { ...REEX_DEFAULT, ...p };
+  if (p.fillBand != null) { if (p.fillBand > 0) { q.fill = true; q.maxDist = Math.max(q.maxDist, p.fillBand); } delete q.fillBand; }
+  if (q.margin === undefined) q.margin = null;
+  return q;
+}
 export interface ReexResult { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
 
 /** Geometry of the search region – also used for the transparent preview body. */
@@ -33,8 +66,9 @@ const along = (pos: ArrayLike<number>, idx: ArrayLike<number>, c: Vec3, a: Vec3,
 /** in-plane distance from 2D point (x,y) to the slot contour (stadium, centre line along x, half length hl, radius r) */
 const stadiumDist = (x: number, y: number, hl: number, r: number) => { const cx = Math.max(-hl, Math.min(hl, x)); return Math.hypot(x - cx, y) - r; };
 
-export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uint32Array, p: ReexParams, seedPts: Vec3[] = []): SearchRegion {
-  const d = p.maxDist, m = p.margin, n = unit(fit.normal), c = fit.center;
+export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uint32Array, p0: ReexParams, seedPts: Vec3[] = []): SearchRegion {
+  const p = normReex(p0);
+  const d = p.maxDist, m = lateralOf(p), n = unit(fit.normal), c = fit.center;
   if (!current.length && !seedPts.length) throw new Error('No start points');
   switch (fit.type) {
     case 'Ebene': {
@@ -82,31 +116,37 @@ export function inRegion(R: SearchRegion, q: Vec3): boolean {
   }
 }
 
-export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLike<number> | null, current: Uint32Array, p: ReexParams, seedPts: Vec3[] = []): ReexResult {
+export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLike<number> | null, current: Uint32Array, p0: ReexParams, seedPts: Vec3[] = [], tris: ArrayLike<number> | null = null): ReexResult {
+  const p = normReex(p0);
   const type = fit0.type as GeomType;
   const R0 = buildRegion(fit0, pos, current, p, seedPts);
-  const cosA = Math.cos((p.maxAngleDeg * Math.PI) / 180), N = pos.length / 3;
+  const cosA = p.angleOn === false ? -2 : Math.cos((p.maxAngleDeg * Math.PI) / 180), N = pos.length / 3, outl = p.sigmaOn !== false && p.sigma > 0;
   // candidates of the region (region fixed from the start geometry; the distance test is part of the region)
   const cands: number[] = []; for (let v = 0; v < N; v++) if (inRegion(R0, P3(pos, v))) cands.push(v);
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];
     for (const v of cands) { const q = P3(pos, v); if (Math.abs(signedDistance(fit, q)) > p.maxDist) continue;
-      if (nrm) { const nn: Vec3 = [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]]; if (Math.abs(dot(nn, modelNormal(fit, q))) < cosA) continue; } sel.push(v); }
+      if (nrm && cosA > -1) { const nn: Vec3 = [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]]; if (Math.abs(dot(nn, modelNormal(fit, q))) < cosA) continue; } sel.push(v); }
     cand = sel.length; if (sel.length < 5) throw new Error('Too few points within the distance/angle criteria');
     const dv = sel.map((v) => signedDistance(fit, P3(pos, v)));
     const mu = dv.reduce((a, b) => a + b, 0) / dv.length, sd = Math.sqrt(dv.reduce((a, b) => a + (b - mu) ** 2, 0) / dv.length);
-    const keep = sel.filter((_, i) => Math.abs(dv[i] - mu) <= p.sigma * sd || sd === 0); removed = sel.length - keep.length;
+    const keep = outl ? sel.filter((_, i) => Math.abs(dv[i] - mu) <= p.sigma * sd || sd === 0) : sel; removed = sel.length - keep.length;
     const Pp: Vec3[] = keep.map((v) => P3(pos, v)), Nn: Vec3[] = nrm ? keep.map((v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]]) : [];
     const nf = fitType(type, Pp, Nn.length ? Nn : Pp.map(() => fit.normal), false);
     const nIdx = Uint32Array.from(keep); const same = nIdx.length === idx.length && nIdx.every((v, i) => v === idx[i]);
     fit = { ...nf, type }; idx = nIdx; if (same) break;
   }
-  if (p.fillBand && p.fillBand > 0 && type === 'Ebene') {
+  if (p.fill && type === 'Ebene') {
     // region from the re-extraction gives the outer contour; then all points inside it within the band (no σ/angle filter)
-    const fr = fillOuterBoundary(pos, nrm, idx, fit, { band: p.fillBand });
+    const fr = fillOuterBoundary(pos, nrm, idx, fit, { band: p.maxDist, excludeRaised: !!p.excludeRaised, islands: p.islands !== false, inset: p.inset ?? 0 }, tris);
     const Pp: Vec3[] = Array.from(fr.indices, (v) => P3(pos, v)), Nn: Vec3[] = nrm ? Array.from(fr.indices, (v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]] as Vec3) : Pp.map(() => fit.normal);
     fit = { ...fitType(type, Pp, Nn, false), type }; idx = fr.indices; removed = 0;
+  }
+  else if (type === 'Ebene' && (p.inset ?? 0) > 0) {
+    idx = insetPlane(pos, idx, fit, p.inset!, tris); if (idx.length < 5) throw new Error('Boundary exclusion distance removes all points');
+    const Pp: Vec3[] = Array.from(idx, (v) => P3(pos, v)), Nn: Vec3[] = nrm ? Array.from(idx, (v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]] as Vec3) : Pp.map(() => fit.normal);
+    fit = { ...fitType(type, Pp, Nn, false), type };
   }
   return { fit, indices: idx, removedSigma: removed, candidates: cand, iterations: it + 1, region: R0 };
 }

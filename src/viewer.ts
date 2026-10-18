@@ -192,25 +192,42 @@ export class Viewer {
       const e = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), new THREE.LineBasicMaterial({ color: 0x0077cc, transparent: true, opacity: 0.6 })); if (q) e.quaternion.copy(q); if (p) e.position.copy(p); this.prims.add(e); };
     const up = new THREE.Vector3(0, 1, 0);
     switch (R.kind) {
-      case 'prism': { const pts: number[] = []; const o = V(R.o), n = V(R.n), u = V(R.u), v = V(R.v);
+      case 'prism': { // closed prism: top + bottom (cells at ±d) and side faces along the contour (cell edges with an empty neighbour)
+        const pts: number[] = [], edge: number[] = []; const o = V(R.o), n = V(R.n), u = V(R.u), v = V(R.v);
         const P = (i: number, j: number, z: number) => o.clone().addScaledVector(u, (i + R.i0) * R.h).addScaledVector(v, (j + R.j0) * R.h).addScaledVector(n, z);
-        for (let j = 0; j < R.hgt; j++) for (let i = 0; i < R.w; i++) if (R.cells[j * R.w + i]) for (const z of [-R.d, R.d]) { const a = P(i, j, z), b = P(i + 1, j, z), c = P(i + 1, j + 1, z), d = P(i, j + 1, z); pts.push(...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray()); }
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const m = new THREE.Mesh(g, mat); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m); break; }
+        const on = (i: number, j: number) => i >= 0 && j >= 0 && i < R.w && j < R.hgt && R.cells[j * R.w + i] === 1;
+        const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => pts.push(...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray());
+        const wall = (i0: number, j0: number, i1: number, j1: number) => { const a = P(i0, j0, -R.d), b = P(i1, j1, -R.d), c = P(i1, j1, R.d), d = P(i0, j0, R.d); quad(a, b, c, d);
+          edge.push(...a.toArray(), ...b.toArray(), ...d.toArray(), ...c.toArray()); };
+        for (let j = 0; j < R.hgt; j++) for (let i = 0; i < R.w; i++) if (on(i, j)) {
+          for (const z of [-R.d, R.d]) quad(P(i, j, z), P(i + 1, j, z), P(i + 1, j + 1, z), P(i, j + 1, z));
+          if (!on(i, j - 1)) wall(i, j, i + 1, j); if (!on(i + 1, j)) wall(i + 1, j, i + 1, j + 1); if (!on(i, j + 1)) wall(i + 1, j + 1, i, j + 1); if (!on(i - 1, j)) wall(i, j + 1, i, j);
+        }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const m = new THREE.Mesh(g, mat); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m);
+        const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(edge, 3));
+        const e = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x0077cc, transparent: true, opacity: 0.7 })); e.raycast = () => {}; this.prims.add(e); break; }
       case 'box': { const g = new THREE.BoxGeometry(R.u1 - R.u0, R.v1 - R.v0, 2 * R.d); const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(R.u), V(R.v), V(R.n)));
         add(g, q, V(R.o).addScaledVector(V(R.u), (R.u0 + R.u1) / 2).addScaledVector(V(R.v), (R.v0 + R.v1) / 2)); break; }
       case 'shell': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)), H = R.t1 - R.t0, mid = V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2);
         const ta = R.type === 'Kegel' ? Math.tan(R.fit.halfAngle ?? 0) : 0, rr = (t: number) => Math.max(1e-3, R.fit.radius! + t * ta);
-        for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(rr(R.t1) + s, rr(R.t0) + s, H, 48, 1, true), q, mid); break; }
+        // closed hollow shell: inner + outer wall and annular end faces (lathe of the closed profile)
+        const prof = [new THREE.Vector2(Math.max(1e-4, rr(R.t0) - R.d), -H / 2), new THREE.Vector2(rr(R.t0) + R.d, -H / 2), new THREE.Vector2(rr(R.t1) + R.d, H / 2), new THREE.Vector2(Math.max(1e-4, rr(R.t1) - R.d), H / 2), new THREE.Vector2(Math.max(1e-4, rr(R.t0) - R.d), -H / 2)];
+        add(new THREE.LatheGeometry(prof, 64), q, mid); break; }
       case 'torus': { const f = R.fit, q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), V(f.normal).normalize());
         for (const s of [-R.d, R.d]) add(new THREE.TorusGeometry(f.radius!, Math.max(1e-3, (f.minorRadius ?? 0) + s), 16, 64), q, V(f.center)); break; }
       case 'sphere': for (const s of [-R.d, R.d]) add(new THREE.SphereGeometry(Math.max(1e-3, R.r + s), 32, 20), undefined, V(R.c)); break;
       case 'band': { const f = R.fit, a = V(f.normal).normalize(), q = new THREE.Quaternion().setFromUnitVectors(up, a), H = R.t1 - R.t0, mid = V(f.center).addScaledVector(a, (R.t0 + R.t1) / 2);
-        if (R.type === 'Kreis') { for (const s of [-R.d, R.d]) add(new THREE.CylinderGeometry(f.radius! + s, f.radius! + s, H, 64, 1, true), q, mid); }
-        else { const r = f.radius!, hl = f.length! / 2 - r; for (const s of [-R.d, R.d]) { const sh = new THREE.Shape(); sh.absarc(hl, 0, r + s, -Math.PI / 2, Math.PI / 2, false); sh.absarc(-hl, 0, r + s, Math.PI / 2, 1.5 * Math.PI, false);
-          const g = new THREE.ExtrudeGeometry(sh, { depth: H, bevelEnabled: false }); g.translate(0, 0, -H / 2); const dx = V(f.direction!).normalize(), y = new THREE.Vector3().crossVectors(a, dx);
-          add(g, new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(dx, y, a)), mid); } }
+        // closed band body: extruded ring (circle) / stadium ring (slot) between contour − d and contour + d
+        const r = f.radius!, hl = R.type === 'Kreis' ? 0 : f.length! / 2 - r;
+        const stad = (rad: number, cw: boolean) => { const p = new THREE.Path(); if (hl <= 1e-9) p.absarc(0, 0, rad, 0, 2 * Math.PI, cw);
+          else if (!cw) { p.absarc(hl, 0, rad, -Math.PI / 2, Math.PI / 2, false); p.absarc(-hl, 0, rad, Math.PI / 2, 1.5 * Math.PI, false); }
+          else { p.absarc(-hl, 0, rad, 1.5 * Math.PI, Math.PI / 2, true); p.absarc(hl, 0, rad, Math.PI / 2, -Math.PI / 2, true); } return p; };
+        const sh = new THREE.Shape(stad(r + R.d, false).getPoints(64)); if (r - R.d > 1e-4) sh.holes.push(stad(r - R.d, true));
+        const g = new THREE.ExtrudeGeometry(sh, { depth: H, bevelEnabled: false, curveSegments: 48 }); g.translate(0, 0, -H / 2);
+        const dx = R.type === 'Kreis' ? new THREE.Vector3().crossVectors(a, Math.abs(a.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize() : V(f.direction!).normalize(), y = new THREE.Vector3().crossVectors(a, dx);
+        add(g, new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(dx, y, a)), mid);
         break; }
-      case 'tube': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)); add(new THREE.CylinderGeometry(R.d, R.d, R.t1 - R.t0, 24, 1, true), q, V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2)); break; }
+      case 'tube': { const q = new THREE.Quaternion().setFromUnitVectors(up, V(R.a)); add(new THREE.CylinderGeometry(R.d, R.d, R.t1 - R.t0, 24, 1, false), q, V(R.c).addScaledVector(V(R.a), (R.t0 + R.t1) / 2)); break; }
     }
   }
   /** Axis analysis: nominal axis (grey), tolerance cylinder Ø t (green), required zone envelope (orange),

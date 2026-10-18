@@ -6,6 +6,19 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.19', date: '2026-10-18', items: [
+    'Re-extraction: ONE search region instead of three distances – “Search distance ± [mm]” (thickness normal to the geometry, also the band of All inside boundary, now a checkbox) and, under Advanced, “Lateral extension [mm]” (beyond the actual contour; empty = automatic). Old projects are migrated. Creation Panel uses the same term.',
+    '“Show search region” draws a closed body: plane → prism with side faces along the contour, cylinder/cone → shell with end rings, circle/slot → closed ring body, line → closed tube, sphere/torus → shell.',
+    '“σ filter (n·σ)” renamed to “Exclude outliers beyond [n × RMS]” (0 = off, keep all points); tooltip explains that the points with the largest deviation are removed.',
+    'iPhone keypad without minus: numeric fields now accept “,” and “.”; fields that may be negative (TEDs, nominal, Tol+, Tol−, CS offsets, construction parameters) get a ± button that flips the sign; magnitude fields (± bands, search distance, zone tolerances, radii) drop a typed sign. Tol−: a plain number is the minus deviation, ± makes it “+”.',
+    '“Exclude raised” has a clear tooltip and a “?” that opens the new documentation section “All inside boundary & Exclude raised” with an explanatory picture; Re-extraction offers Exclude raised too. Fit parameters use the same terms (Search distance ±, Exclude outliers beyond n × RMS).',
+    'Actual geometry info (type, method, points, RMS, flatness, max ±, XYZ, IJK, aux plane) moved out of the Dialog into ⓘ Properties… (right-click / long-press in the tree, or the link in the Dialog). The Dialog keeps extraction and fit parameters.',
+    'Fix (high priority): “All inside boundary” on plates with edge fillets / side walls – the outer contour is now the boundary of the grown region itself (interior holes/islands filled), never beyond it; near the outer edge points with strongly deviating normals are rejected. Walls and fillets no longer enter the plane (before e.g. flatness 3.049 instead of ~0.1).',
+    'Search distance default for All inside boundary is automatic: 3 × RMS of the region-grown fit, at least 0.1 mm (field empty = “auto …”), instead of 2 mm.',
+    'Unified extraction parameters – identical in the Creation Panel (new collapsible “Parameters” section, compact on phones) and in the Re-extraction (Dialog): Use outer contour, Include detected islands, Boundary exclusion distance [mm], Search distance ± (lateral extension under Advanced), Normal angle (checkbox + value), Outlier removal (checkbox + n × std. dev. – unchecked = nothing removed). New docs section with picture.',
+    'Live preview: every parameter change updates the preview (points, contour, search region) immediately in the background, confirmed by a short “updated” badge. Re-extraction shows points/RMS/flatness before applying; “Apply re-extraction” only commits.',
+    'Phone layout: the Dialog is a compact bottom panel (max ~45 % height) so the 3D view stays visible above it; on desktop it stays beside the 3D view.',
+  ] },
   { version: '2026.0.18', date: '2026-10-18', items: [
     'Tester checklist page: Help › ☑ Test checklist (also linked at the top of the documentation) opens test.html – status per item, comments, copy the result; works in iPhone Safari.',
   ] },

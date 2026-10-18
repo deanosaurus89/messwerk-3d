@@ -301,6 +301,9 @@ body.ctx-on #progress { bottom:80px; }
 .cl-filter { display:flex; gap:6px; align-items:center; padding:4px 8px; border-bottom:1px solid var(--line); font-size:12px; }
 #whatsnew { position:fixed; inset:0; z-index:60; background:rgba(20,30,40,.35); display:flex; align-items:center; justify-content:center; }
 #whatsnew .wn-box { background:#fff; border-radius:8px; padding:14px 18px; width:min(520px,94vw); max-height:80vh; overflow:auto; box-shadow:0 8px 30px rgba(0,0,0,.3); font-size:13px; }
+#props-dlg { position:fixed; inset:0; z-index:60; background:rgba(20,30,40,.35); display:flex; align-items:center; justify-content:center; }
+#props-dlg .wn-box { position:relative; background:#fff; border-radius:8px; padding:14px 18px; width:min(440px,94vw); max-height:84vh; overflow:auto; box-shadow:0 8px 30px rgba(0,0,0,.3); font-size:13px; }
+#props-dlg h3 { margin:0 28px 6px 0; } #props-dlg .ov-x { position:absolute; top:6px; right:8px; width:40px; height:40px; border:0; background:none; font-size:22px; cursor:pointer; }
 #whatsnew h3 { margin:0 0 6px; } #whatsnew ul { padding-left:18px; } #whatsnew .wn-v { color:#5b6b7c; font-size:12px; }
 #bbox-info { pointer-events:auto; cursor:default; } #bbox-info .bb-d { display:none; } #bbox-info:hover .bb-d, #bbox-info.open .bb-d { display:inline; }
 #dev-legend small { display:block; margin-top:2px; color:#3c4a58; } #dev-legend .bar.stepped { background:linear-gradient(90deg,#00f 0 10%,#06f 10% 20%,#0bf 20% 30%,#0db 30% 40%,#0c0 40% 60%,#9d0 60% 70%,#fc0 70% 80%,#f80 80% 90%,#f00 90%); }
@@ -387,3 +390,38 @@ input.ted:disabled { background:#f1f3f5; }
 }
 .lbl .lbl-pin { position:absolute; top:-9px; right:-9px; border:1px solid var(--c); background:#fff; border-radius:9px; font-size:10px; line-height:12px; padding:1px 2px; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.25); }
 @media (pointer:coarse) { .lbl .lbl-pin { font-size:13px; padding:3px 4px; top:-13px; right:-13px; border-radius:12px; } }
+
+/* ± sign toggle next to numeric fields that may be negative (iPhone decimal keypad has no minus) */
+.num-pm { min-width:28px; height:28px; margin:0 2px 0 3px; padding:0 4px; border:1px solid #b9c4d0; border-radius:6px; background:#f4f7fa; color:#1b2633; font-size:15px; line-height:1; cursor:pointer; vertical-align:middle; }
+.num-pm:active { background:#dde6ef; }
+@media (pointer: coarse) { .num-pm { min-width:36px; height:34px; font-size:17px; } }
+
+.help-q { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; margin-left:4px; padding:0; border:1px solid #8aa0b6; border-radius:50%; background:#fff; color:#1565c0; font-weight:700; font-size:12px; cursor:pointer; vertical-align:middle; }
+@media (pointer: coarse) { .help-q { width:28px; height:28px; font-size:15px; } }
+
+/* live parameter change: 'updating… / preview updated' badge */
+.upd-flash { position:absolute; top:4px; right:44px; z-index:5; padding:2px 8px; border-radius:10px; background:#2e7d32; color:#fff; font-size:12px; font-weight:600; pointer-events:none; animation:updfade 1.8s ease-out forwards; }
+.upd-flash.pending { background:#1565c0; animation:none; }
+@keyframes updfade { 0% { opacity:0; transform:translateY(-3px); } 10% { opacity:1; transform:none; } 70% { opacity:1; } 100% { opacity:0; } }
+.cp-params { margin-top:4px; border-top:1px solid #dde3ea; padding-top:3px; font-size:13px; }
+.cp-params summary { cursor:pointer; font-weight:600; color:#1565c0; padding:2px 0; }
+.cp-params .cp-pg { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:3px 0; }
+.cp-params .cp-pg label { display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
+.cp-params input[data-exn] { width:3.6em; }
+
+/* phone portrait: the Dialog is a compact bottom sheet (max ~45 % height) so live parameter changes are visible in
+   the 3D view above it; nav cube, gear, CS indicator move above the sheet */
+@media (max-width:700px) {
+  #dialog-pane { top:auto; left:0; right:0; bottom:0; width:auto; height:45%; max-height:45%; transform:translateY(105%); border-left:none; border-top:1px solid var(--line); box-shadow:0 -4px 16px rgba(0,0,0,.3); border-radius:10px 10px 0 0; }
+  body.show-dialog #dialog-pane { transform:none; }
+  #dialog { font-size:13px; padding:6px 8px; }
+  body.show-dialog #navcube { bottom:calc(45% + 6px); }
+  body.show-dialog #view-gear { bottom:calc(45% + 96px); }
+  body.show-dialog #cs-ind { bottom:calc(45% + 36px); }
+  body.show-dialog #bbox-info { bottom:calc(45% + 8px); }
+  body.show-dialog #ctx-panel { bottom:calc(45% + 6px); }
+  body.show-dialog #navcube, body.show-dialog #view-gear, body.show-dialog #cs-ind, body.show-dialog #bbox-info { z-index:21; }
+}
+#dialog .reex .row.chk { display:flex; align-items:center; gap:6px; }
+#dialog .reex .row.chk label { display:flex; align-items:center; gap:6px; text-align:left; flex:1; }
+#dialog .reex .rx-live { margin:6px 0; padding:4px 6px; background:#eef4fb; border-radius:4px; }
