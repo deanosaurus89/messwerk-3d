@@ -40,7 +40,7 @@ describe('Bezugssystem A|B|C', () => {
     const top = F(5, 'Ebene 4', 'Ebene', fit('Ebene', [50, 30, 40], [0, 0, 1]));
     const pts: Vec3[] = []; for (let i = 0; i <= 10; i++) pts.push([i * 10, 30, 40 + i * 0.002]);
     const m = map(); m.set(5, top);
-    const r = evaluate({ id: 2, kind: 'Parallelität', featureIds: [5], nominal: 0, tolUp: 0.05, tolLo: 0, datumIds: [1] }, m, { points: () => pts });
+    const r = evaluate({ id: 2, kind: 'Parallelität', featureIds: [5], nominal: 0, tolUp: 0.05, tolLo: 0, datumIds: [1] }, m, { points: (id: number) => (id === 5 ? pts : null) });
     expect(r.measured!).toBeCloseTo(0.02, 9);
   });
   it('Koaxialität und Rundlauf', () => {

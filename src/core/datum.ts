@@ -11,6 +11,7 @@ import type { Control, Feature } from './features';
 import type { GeomType } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { medianLine, orientNominal, orientZone } from './median';
+import { SimCtx, simulateDatums } from './datumsim';
 
 export type DatumKind = 'plane' | 'axis' | 'point';
 export const datumKind = (t: GeomType): DatumKind | null =>
@@ -79,7 +80,7 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
   Symmetrie: [1, 1], Rundlauf: [1, 1], Gesamtrundlauf: [1, 1], 'Profil (Bezug)': [1, 3],
 };
 
-export interface EvalCtx { points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
+export interface EvalCtx extends SimCtx { points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
 /** TED components the user must enter for a control (indices into basic): Neigung → angle; Position/Profile →
  *  the DRF components that matter (plane: along its normal; axis: the two ⟂ to the nominal axis; point/sphere: all). */
 export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: Feature[]): number[] {
@@ -112,7 +113,7 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
   const [mn] = DATUM_COUNT[kind];
   if (ds.length < mn) return { value: null, flag: 'Bezug fehlt' };
   if (ds.some((d) => d!.id === f.id)) return { value: null, flag: 'feature is its own datum' };
-  const D = ds as Feature[];
+  const D = simulateDatums(ds as Feature[], ctx).feats; // ISO 5459 contact datums (or Gauss in least-squares mode)
   const m = f.measured, D0 = D[0], k0 = datumKind(D0.type);
   const pts = () => ctx.points?.(f.id) ?? null;
   if (missingBasic(c, f, D)) return { value: null, flag: NOMINAL_MISSING, detail: 'Enter the theoretically exact dimensions (TED) from the drawing' };
