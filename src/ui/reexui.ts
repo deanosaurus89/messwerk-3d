@@ -1,9 +1,9 @@
 // Re-extraction UI (feature dialog section). The SAME extraction parameter set as the Creation Panel: outer contour,
 // islands, boundary exclusion distance, search distance ± (+ lateral extension under Advanced), normal angle criterion
 // and outlier removal (each with an on/off checkbox). Every change recomputes the result LIVE in the worker (debounced)
-// and shows the search region + the captured points; “Apply re-extraction” only commits.
+// and shows the search region + the captured points; “Apply extraction” only commits.
 import { t as tt } from '../i18n';
-import { REEX_DEFAULT, ReexParams, SearchRegion, lateralAuto, normReex } from '../core/reextract';
+import { REEX_DEFAULT, ReexParams, SearchRegion, normReex } from '../core/reextract';
 import type { Feature } from '../core/features';
 import type { FitResult } from '../core/fit';
 import type { Vec3 } from '../core/linalg';
@@ -12,7 +12,7 @@ import { parseNum } from './numfield';
 type RxFeature = Feature & { indices: Uint32Array; src?: Uint32Array; dev?: Float32Array; hit?: unknown; anchor?: { pts: Vec3[] };
   fp?: { k: number; nf: { on: boolean; angleDeg: number }; inset?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean } } };
 interface ReexOut { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
-interface Host { call(req: unknown): Promise<ReexOut>; renderAll(): void; renderScene(): void; toast(t: string): void; invalidate(id: number): void; recompute(): void; autosave(): void; flash(sel: string, pending?: boolean): void; fmt(v: number, d?: number): string }
+interface Host { call(req: unknown): Promise<ReexOut>; renderAll(): void; renderScene(): void; showZone(): boolean; setShowZone(on: boolean): void; toast(t: string): void; invalidate(id: number): void; recompute(): void; autosave(): void; flash(sel: string, pending?: boolean): void; fmt(v: number, d?: number): string }
 let H: Host;
 export function initReexUI(h: Host) { H = h; }
 export const REEX_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Kreis', 'Langloch', 'Linie', 'Torus'];
@@ -37,7 +37,7 @@ function paramsFor(f: RxFeature): ReexParams {
 }
 let cur: ReexParams = { ...REEX_DEFAULT };
 const raisedTipText = () => tt('Exclude raised: raised regions inside the outer contour that belong to another feature (boss, sphere, step – surface rising above the search distance with steep walls, a flat top or higher than 2.5 mm) are shown in magenta. OFF (default) = they count to the plane (e.g. flatness incl. bumps and spatter). ON = they are excluded as a whole. ? = documentation with a picture.');
-const exclTipText = () => tt('Boundary exclusion distance [mm]: points closer than this to the boundary are excluded – the outer contour, holes/openings and (with islands off) island edges. Removes edge roundings, burrs and chamfer starts. 0 = off.');
+const exclTipText = () => tt('Boundary exclusion distance ± [mm]: positive = the zone shrinks inward by this distance (points near the outer contour and holes are excluded – edge roundings, burrs, chamfer starts); negative = the zone grows outward by this distance. 0 = exactly the original contour. The preview (zone + points) updates immediately.');
 export function reexHTML(f: RxFeature): string {
   if (f.cons || !REEX_TYPES.includes(f.type) || !f.measured) return '';
   const p = paramsFor(f), plane = f.type === 'Ebene';
@@ -46,19 +46,20 @@ export function reexHTML(f: RxFeature): string {
   const chk = (k: string, on: boolean | undefined, lbl: string, tip: string, extra = '') => `<div class="row chk" title="${tip}"><label><input type="checkbox" data-rxc="${k}" ${on ? 'checked' : ''}> ${lbl}</label>${extra}</div>`;
   const q = (sec: string, t: string) => `<button type="button" class="help-q" data-doc-sec="${sec}" title="${t}">?</button>`;
   return `<details class="reex" ${f.reex || drafts.has(f.id) ? 'open' : ''}><summary>🔁 ${tt('Extraction (re-extract)')}</summary>
-    <p class="note">${tt('Same parameters as in the Creation Panel. The current actual geometry is the start; points are re-collected inside ONE search region around it. Every change updates the preview at once (points + search region); “Apply” overwrites the actual geometry, the initial method stays in the provenance.')}</p>
+    <p class="note">${tt('Same parameters as in the Creation Panel. The current actual geometry is the start; points are re-collected inside ONE search region around it. Every change updates the preview at once (points + search region); “Apply extraction” overwrites the actual geometry, the initial method stays in the provenance.')}</p>
     ${plane ? chk('fill', p.fill, tt('Use outer contour (All inside boundary)'), tt('Every point inside the outer contour of the current points within ± search distance is taken (bumps, spatter, burrs, craters); openings, walls and edge fillets stay out.')) : ''}
     ${plane && p.fill ? chk('islands', p.islands !== false, tt('Include detected islands'), tt('Include interior regions inside the outer contour that are not part of the current points (bump patches, spatter rings). Off = only the region of the current points.')) : ''}
     ${plane && p.fill ? chk('excludeRaised', p.excludeRaised, '⛰ ' + tt('Exclude raised features'), raisedTipText(), q('fill', tt('All inside boundary & Exclude raised – documentation'))) : ''}
-    ${plane ? row(exclTipText(), tt('Boundary exclusion distance [mm]'), num('inset', p.inset ?? 0) + q('excl', tt('Boundary exclusion distance – documentation'))) : ''}
+    ${plane ? row(exclTipText(), tt('Boundary exclusion distance ± [mm]'), num('inset', p.inset ?? 0, '0').replace('data-num="abs"', 'data-num="signed"').replace('inputmode="decimal"', 'inputmode="text"') + q('excl', tt('Boundary exclusion distance – documentation'))) : ''}
     ${row(tt('Thickness of the search region normal to the actual geometry: points farther than ± this distance from the surface/curve are not collected. Also the band of “All inside boundary”.'), tt('Search distance ± [mm]'), num('maxDist', p.maxDist))}
     ${row(tt('Normal angle criterion: the surface normal must agree with the geometry normal within this angle (rejects edges, chamfers, adjacent faces). Unchecked = no angle criterion.'), `<input type="checkbox" data-rxc="angleOn" ${p.angleOn !== false ? 'checked' : ''}> ${tt('Max. normal angle [°]')}`, num('maxAngleDeg', p.maxAngleDeg, '', p.angleOn === false))}
     ${row(tt('Outlier removal: points whose deviation from the fitted geometry is larger than n × the standard deviation (RMS) of all deviations are removed – i.e. the points with the largest deviation. Unchecked = nothing is removed.'), `<input type="checkbox" data-rxc="sigmaOn" ${p.sigmaOn !== false ? 'checked' : ''}> ${tt('Exclude outliers beyond [n × RMS]')}`, num('sigma', p.sigma, '', p.sigmaOn === false))}
     <details class="rx-adv" ${advOpen ? 'open' : ''}><summary>${tt('Advanced')}</summary>
-      ${row(tt('How far the search region reaches beyond the actual contour / ends of the geometry (sideways, in the surface). Empty = automatic: = search distance, at least 0.5 mm.'), tt('Lateral extension [mm]'), num('margin', p.margin ?? '', tt('auto ({0})', String(lateralAuto(p)))))}
+      ${row(tt('How far the search zone reaches beyond the original contour / ends of the geometry (sideways, in the surface). Default 0 = the zone follows the original region exactly. A value > 0 grows the zone by a constant distance all around – that is why its corners then become rounded.'), tt('Lateral extension [mm]'), num('margin', p.margin ?? 0, '0'))}
     </details>
-    <div class="rx-live note" id="rx-live">${tt('Change a value – the preview (points + search region) updates immediately.')}</div>
-    <div class="row"><button class="btn primary" id="rx-run">✓ ${f.reex ? tt('Apply re-extraction again') : tt('Apply re-extraction')}</button></div></details>`;
+    <div class="row chk" title="${tt('Show the extraction zone (transparent body) while this dialog is open. Unchecking hides it for ALL features until you check it again (remembered; also View › Zone and the ⚙ menu).')}"><label><input type="checkbox" data-rxz ${H.showZone() ? 'checked' : ''}> ${tt('Show extraction zone')}</label></div>
+    <div class="rx-live note" id="rx-live">${tt('Change a value and press Enter (or leave the field) – the preview (zone + points) updates immediately. Nothing is changed until “Apply extraction”.')}</div>
+    <div class="row"><button class="btn primary" id="rx-run" title="${tt('Runs the extraction with the values shown and overwrites the actual geometry; every click uses the current values again.')}">✓ ${tt('Apply extraction')}</button></div></details>`;
 }
 let liveT = 0, liveSeq = 0, pendingLive = false;
 const keyOf = (p: ReexParams) => JSON.stringify(p);
@@ -84,11 +85,12 @@ export function bindReex(d: HTMLElement, f: RxFeature) {
   if (det?.open && reexPrev?.id !== f.id) live(f, d);
   d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => (i.onchange = () => {
     const k = i.dataset.rx!, v = parseNum(i.value);
-    if (k === 'margin' && v == null) { cur.margin = null; reexP.margin = null; }
-    else if (v != null && isFinite(v) && v >= 0) { (cur as any)[k] = v; (reexP as any)[k] = v; } else { i.value = String((cur as any)[k] ?? ''); return; }
-    const m = d.querySelector<HTMLInputElement>('[data-rx="margin"]'); if (m) m.placeholder = tt('auto ({0})', String(lateralAuto(cur)));
+    if ((k === 'margin' || k === 'inset') && v == null) { (cur as any)[k] = 0; (reexP as any)[k] = 0; i.value = '0'; }
+    else if (v != null && isFinite(v) && (v >= 0 || k === 'inset')) { (cur as any)[k] = v; (reexP as any)[k] = v; } else { i.value = String((cur as any)[k] ?? ''); return; }
     live(f, d);
   }));
+  // Enter = update the preview at once (zone + points); the extraction itself only runs with “Apply extraction”
+  d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); i.onchange?.(new Event('change')); }));
   d.querySelectorAll<HTMLInputElement>('[data-rxc]').forEach((i) => (i.onchange = () => {
     const k = i.dataset.rxc!; (cur as any)[k] = i.checked; (reexP as any)[k] = i.checked;
     if (k === 'angleOn' || k === 'sigmaOn') { const n = d.querySelector<HTMLInputElement>(`[data-rx="${k === 'angleOn' ? 'maxAngleDeg' : 'sigma'}"]`); if (n) n.disabled = !i.checked; }
@@ -100,6 +102,7 @@ export function bindReex(d: HTMLElement, f: RxFeature) {
     live(f, d);
   }));
   if (pendingLive) { pendingLive = false; live(f, d); }
+  d.querySelector<HTMLInputElement>('[data-rxz]')?.addEventListener('change', (e) => H.setShowZone((e.target as HTMLInputElement).checked));
   d.querySelector('#rx-run')?.addEventListener('click', () => runReextract(f));
 }
 async function runReextract(f: RxFeature) {

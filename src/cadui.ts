@@ -250,7 +250,7 @@ export function cadDialog(d: HTMLElement): boolean {
 export function initCad(ctx: CadCtx) {
   X = ctx; ctx.viewer.scene.add(group); ctx.viewer.scene.add(overlay);
   const canvas = ctx.viewer.renderer.domElement; let down: { x: number; y: number; t: number } | null = null;
-  canvas.addEventListener('pointerdown', (e) => { if (!cadActive() || e.button !== 0) { down = null; return; } down = { x: e.clientX, y: e.clientY, t: performance.now() }; }, true);
+  canvas.addEventListener('pointerdown', (e) => { if (!cadActive() || e.button !== 0 || document.body.classList.contains('nav-pause')) { down = null; return; } down = { x: e.clientX, y: e.clientY, t: performance.now() }; }, true);
   canvas.addEventListener('pointermove', (e) => {
     if (!cadActive() || e.pointerType !== 'mouse' || e.buttons) return;
     if (cad.tool && cad.tool !== 'offset' && cad.tool !== 'export' && cad.draft.length && cutStage === 'draw') { const sn = nearFirst(e.clientX, e.clientY); if (sn !== snapFirst) { snapFirst = sn; X.viewer.renderer.domElement.style.cursor = sn ? 'pointer' : ''; } drawOverlay(sn ? cad.draft[0] : worldAt(e.clientX, e.clientY)); }

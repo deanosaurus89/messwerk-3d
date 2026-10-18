@@ -6,6 +6,16 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.20', date: '2026-10-19', items: [
+    'Fix: Click & grow on desktop – the mouse wheel changed the analysis area instead of zooming; after a zoom the cursor showed a brush-like circle and growing was limited to it. The wheel now zooms; Shift+wheel changes the analysis area.',
+    'Fix: “All inside boundary” via the Creation Panel button now also switches outlier removal off (as the Parameters checkbox does) – before, bumps were dropped again and flatness ignored them.',
+    'Desktop navigation pause: press Space in any tool to rotate/pan/zoom freely (indicator “Navigation (Space to resume)”); Space again continues with exactly the same tool, panel and selection. Ignored while typing.',
+    'Re-extraction: the zone is exactly the original region by default (lateral extension 0, no hidden margin); Boundary exclusion distance ± (positive shrinks, negative grows the zone); Enter in a field updates the preview at once; button renamed “Apply extraction”.',
+    'Extraction zone is only shown while the feature dialog / Creation Panel is open; “Show extraction zone” (dialog checkbox, View › Zone, ⚙ menu) is a remembered global preference.',
+    'Cylinder, cone, sphere: “＋ Add region” (union of several clicked regions) and Parameters › “Boundary from: Point selection / Fitted geometry” – a zone around the fitted shape collects all points of the surface; Boundary exclusion distance ± shortens/extends it.',
+    'Datum controls: new controls start with only the Primary slot (required, no automatic prefill); Secondary appears after Primary, Tertiary after Secondary.',
+    'Coordinate system creation: three slots Primary / Secondary / Tertiary, each with a geometry and an Axis (±X/±Y/±Z); smart defaults (primary plane normal → +Z out of the material, secondary → X, tertiary → remaining axis); the triad follows each step; Flip and Rotate 90° buttons; origin/offsets under Advanced.',
+  ] },
   { version: '2026.0.19', date: '2026-10-18', items: [
     'Re-extraction: ONE search region instead of three distances – “Search distance ± [mm]” (thickness normal to the geometry, also the band of All inside boundary, now a checkbox) and, under Advanced, “Lateral extension [mm]” (beyond the actual contour; empty = automatic). Old projects are migrated. Creation Panel uses the same term.',
     '“Show search region” draws a closed body: plane → prism with side faces along the contour, cylinder/cone → shell with end rings, circle/slot → closed ring body, line → closed tube, sphere/torus → shell.',

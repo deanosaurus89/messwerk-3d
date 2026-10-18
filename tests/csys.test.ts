@@ -46,6 +46,25 @@ describe('free step order', () => {
     const r = computeCSys(cs, feats as any); expect(r.error).toBeUndefined(); expect(r.frame!.o[0]).toBeCloseTo(20, 9); expect(r.frame!.o[1]).toBeCloseTo(30, 9);
   });
   it('secondary before primary works', () => {
-    const cs = newCSys(2, 'B'); cs.secondary.fid = 3; expect(computeCSys(cs, feats as any).error).toBeUndefined(); expect(nextEmptyField(cs, 's')).toBe('X');
+    const cs = newCSys(2, 'B'); cs.secondary.fid = 3; expect(computeCSys(cs, feats as any).error).toBeUndefined(); expect(nextEmptyField(cs, 's')).toBe('t');
+  });
+});
+
+import { rotate90, smartAxis } from '../src/core/csys';
+describe('three slots: smart axes, rotate 90°, tertiary', () => {
+  const feats = new Map([[1, F(1, 'Ebene', [0, 0, 10], [0, 0, -1])], [2, F(2, 'Ebene', [0, -5, 5], [0, 1, 0])], [4, F(4, 'Ebene', [-3, 0, 5], [1, 0, 0])]]);
+  it('primary plane → +Z out of material, secondary → X, tertiary → Y and locks its translation', () => {
+    const cs = newCSys(1, 'A');
+    cs.primary.fid = 1; smartAxis(cs, 'p', feats.get(1) as any, [0, 0, 1]); expect(cs.primary.axis).toBe('Z'); expect(cs.primary.flip).toBe(false); expect(cs.primary.inv).toBe(true);
+    cs.secondary.fid = 2; smartAxis(cs, 's', feats.get(2) as any, [0, -1, 0]); expect(cs.secondary.axis).toBe('X'); expect(cs.secondary.flip).toBe(false); expect(cs.secondary.inv).toBe(true); expect(cs.tertiary!.axis).toBe('Y');
+    cs.tertiary!.fid = 4; suggestOrigin(cs, feats as any);
+    const r = computeCSys(cs, feats as any); expect(r.error).toBeUndefined(); expect(r.dof).toBe(6);
+    expect(r.frame!.R[2][2]).toBeCloseTo(1, 9);                 // +Z out of material (up)
+    expect(r.frame!.R[0][1]).toBeCloseTo(-1, 9);                // +X = out of the secondary face (−Y global)
+    expect(cs.origin.Z.fid).toBe(1); expect(cs.origin.X.fid).toBe(2); expect(cs.origin.Y.fid).toBe(4);
+  });
+  it('rotate 90° cycles the secondary axis about the primary, tertiary follows', () => {
+    const cs = newCSys(2, 'B'); rotate90(cs); expect([cs.secondary.axis, cs.secondary.flip, cs.tertiary!.axis]).toEqual(['Y', false, 'X']);
+    rotate90(cs); expect([cs.secondary.axis, cs.secondary.flip]).toEqual(['X', true]); rotate90(cs); rotate90(cs); expect([cs.secondary.axis, cs.secondary.flip]).toEqual(['X', false]);
   });
 });
