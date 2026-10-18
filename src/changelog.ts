@@ -11,6 +11,7 @@ export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
     'TED fields are labelled by drawing meaning (“from B”, “from C”); the tooltip shows the DRF axis and its direction in the display CS, and a DRF triad is drawn while the control is selected.',
     'Fix: “All inside boundary” keeps interior islands (spatter rings around holes, bump patches, strips next to slots). Band 2 mm plus the tips of taller bumps; the outer contour is drawn as a bold blue line; raised features (boss, sphere, pad) show in magenta and stay in unless you choose ⛰ Exclude raised.',
     'Circle / slot / line: Creation Panel now has ▱ Full plane | ◎ Local ring (with gap/width) for the aux plane, plus ⬚ All inside boundary for the full aux plane – live preview.',
+    'Position on a circle (or slot): only the fitted centre counts; the zone is a cylinder Øt perpendicular to the circle’s auxiliary plane at the TED point (as in PolyWorks); value = 2 × centre offset. New Analyze view “Circle position”: nominal point, actual centre, zone cylinder, offset arrow with value, Location × exaggeration, DRF triad.',
     'Annotations: a dragged annotation stays pinned (🔒); tap the 🔒 to unpin. View › ↺ Reset positions (also in the ⚙ menu): selected or all.',
     'Phones: nav cube, ⚙ menu and CS indicator stay visible above an open Control Properties panel.',
     'The 0.16 preview features are finished and verified on desktop and iPhone:',
