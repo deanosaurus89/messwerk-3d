@@ -929,6 +929,7 @@ async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (!fromControl) state.an.ctrl = null;
   if (!keepView) state.an.derivePrev = null;
   // a fit mode without pending preview would hide the analysis panel – leave it
+  if (state.mode?.kind === 'con' && !state.preview) state.mode = null;
   if (state.mode?.kind === 'fit' && !state.preview) { state.mode = null; clearBrush(); clearAuxHover(); viewer.controls.enabled = true; viewer.showCursor(null, 1); }
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
   if (!r) return;
