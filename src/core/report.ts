@@ -20,7 +20,7 @@ export function sizeText(f: Feature): string {
     case 'Langloch': return `${f4(m.length)} × ${f4(m.width)}`;
     case 'Torus': return `⌀ ${f4(m.diameter)} / tube ⌀ ${f4(2 * m.minorRadius!)}`;
     case 'Abstand': return `${f4(m.distance)}`;
-    case 'Linie': return `L ${f4(m.length)}`;
+    case 'Linie': case 'Linienzug': return `L ${f4(m.length)}`;
     case 'Winkel': return `∠ ${f4(m.angle)}°`;
     default: return '';
   }

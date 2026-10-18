@@ -453,6 +453,12 @@ export class Viewer {
         const d = new THREE.Vector3(...f.direction!).normalize(), y = new THREE.Vector3().crossVectors(n, d);
         obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(d, y, n)); break;
       }
+      case 'Linienzug': {
+        const P = (f.pts ?? []).map((p) => new THREE.Vector3(p[0] - c.x, p[1] - c.y, p[2] - c.z)), grp = new THREE.Group();
+        if (P.length >= 2) grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(P, false, 'centripetal', 0), Math.max(8, 4 * P.length), s / (selected ? 350 : 500), 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })));
+        for (const p of P) { const m = new THREE.Mesh(new THREE.SphereGeometry(s / (selected ? 250 : 350), 8, 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })); m.position.copy(p); grp.add(m); }
+        obj = grp; break;
+      }
       case 'Linie': {
         const L = (f.length || s * 0.1) / 2, d = new THREE.Vector3(...f.direction!).normalize();
         obj = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(d.clone().multiplyScalar(-L), d.clone().multiplyScalar(L)), 1, s / (selected ? 350 : 500), 6),

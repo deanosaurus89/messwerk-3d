@@ -18,7 +18,7 @@ export function classesOf(t: GeomType): Cls[] {
     case 'Kugel': return ['sphere', 'point', 'any'];
     case 'Langloch': return ['slot', 'point', 'line', 'any'];
     case 'Torus': return ['torus', 'line', 'point', 'any'];
-    case 'Abstand': case 'Winkel': case 'Freiformfläche': return [];
+    case 'Abstand': case 'Winkel': case 'Freiformfläche': case 'Linienzug': return [];
   }
 }
 export interface Slot { label: string; cls: Cls[] }

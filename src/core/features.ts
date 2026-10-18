@@ -13,7 +13,9 @@ export interface Feature {
   measured?: FitResult;      // Ist-Komponente
   nominal?: FitResult;       // Soll-Komponente (spätere CAD-Erweiterung)
   pointCount: number;
-  method: 'Klick' | 'Pinsel' | 'Konstruiert' | 'Anker';
+  method: 'Klick' | 'Pinsel' | 'Konstruiert' | 'Anker' | 'Abgeleitet';
+  /** derived from an analysis (Derive feature from Analyze): recomputed from the parent's points when it changes */
+  derived?: { key: string; parent: number; error?: string };
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
   aux?: AuxPlane;            // Hilfsebene (Projektionsebene) für Kreis/Langloch
   datum?: string;            // Bezugsbuchstabe (A, B, C …)
@@ -56,12 +58,12 @@ export interface ControlResult { measured: number | null; deviation: number | nu
 
 export const FORM_NAME: Record<GeomType, string> = {
   Ebene: 'Flatness', Kreis: 'Roundness', Zylinder: 'Cylindricity', Langloch: 'Profile',
-  Kegel: 'Cone form', Kugel: 'Sphere form', Torus: 'Torus form', Punkt: 'Form', Linie: 'Straightness', Freiformfläche: 'Surface profile', Abstand: 'Form', Winkel: 'Form',
+  Kegel: 'Cone form', Kugel: 'Sphere form', Torus: 'Torus form', Punkt: 'Form', Linie: 'Straightness', Linienzug: 'Form', Freiformfläche: 'Surface profile', Abstand: 'Form', Winkel: 'Form',
 };
 
 /** ISO-1101-Symbol der Formtoleranz je Merkmalstyp. */
 export const FORM_SYMBOL: Record<GeomType, string> = {
-  Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Linie: '⏤', Abstand: '',
+  Ebene: '⏥', Kreis: '○', Zylinder: '⌭', Langloch: '⌒', Kegel: '⌓', Kugel: '⌓', Torus: '⌓', Punkt: '', Linie: '⏤', Linienzug: '', Abstand: '',
  Freiformfläche: '⌓', Winkel: '',
 };
 
@@ -93,6 +95,7 @@ export function controlCatalog(t: GeomType): CatalogGroup[] {
       { kind: 'Rohrdurchmesser', label: 'Tube Ø (2r)', symbol: '⌀', note: 'Minor diameter' }, { kind: 'Rohrradius', label: 'Tube radius r', symbol: 'r' }] },
       pos, dir('axis'), D(['Position', 'Koaxialität', 'Rundlauf', 'Parallelität', 'Rechtwinkligkeit', 'Profil (Bezug)'])];
     case 'Punkt': return [pos, D(['Position'])];
+    case 'Linienzug': return [{ group: 'Size', items: [{ kind: 'Länge', label: 'Length', symbol: '⟷', note: 'total length of all segments' }] }];
     case 'Linie': return [form('two parallel lines in the auxiliary plane'), { group: 'Size', items: [{ kind: 'Länge', label: 'Length', symbol: '↔' }] }, pos, dir('direction'), D(['Parallelität', 'Rechtwinkligkeit', 'Neigung', 'Position'])];
     case 'Freiformfläche': return [form('Surface profile without datum: deviation to the fitted B-spline surface (max − min)')];
     case 'Winkel': return [{ group: 'Angle', items: [{ kind: 'Winkelwert', label: 'Angle [°]', symbol: '∠' }] }];

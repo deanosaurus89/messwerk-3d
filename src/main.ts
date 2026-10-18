@@ -39,6 +39,7 @@ import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
+import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING, hasTedAngle } from './core/datum';
@@ -87,7 +88,7 @@ const state = {
   mode: null as Mode,
   preview: null as Preview | null,
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -197,6 +198,15 @@ for (const t of TYPES) {
     w.append(b, dd); typeBtns.appendChild(w);
   } else typeBtns.appendChild(b);
 }
+{ // Polyline: no nominal on the polygon model → only From CAD reference (later) or Derived from Analyze
+  const b = document.createElement('button'); b.className = 'big'; b.id = 'btn-polyline'; b.innerHTML = `<span class="ico">${ICON['Linienzug']}</span>${typeName('Linienzug')}`;
+  b.title = tt('Polyline (connected line segments). Not from the polygon model (it has no nominal there): derive it in Analyze (e.g. the median line of a bore) – From CAD reference comes later');
+  b.onclick = (e) => { e.stopPropagation(); ctxMenu.className = 'ctx-menu'; const items: [string, (() => void) | null][] = [[tt('From CAD reference (later)'), null],
+    [`🔗 ${tt('Derived from Analyze')}`, () => { (document.querySelector('.tab[data-tab="analyze"]') as HTMLButtonElement)?.click(); toast(tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).')); }]];
+    ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
+    ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
+    const r = b.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px'; };
+  typeBtns.appendChild(b); }
 { const w = document.createElement('span'); w.className = 'split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾'; dd.title = tt('Choose the creation method');
   dd.onclick = (e) => { e.stopPropagation(); splitMenu(dd, 'Abstand'); }; w.append($('#btn-distance'), dd); typeBtns.appendChild(w); }
 function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand') {
@@ -677,7 +687,7 @@ function commitPreview() {
 const defaultFp = (): FitParamsUI => ({ k: 3, nf: { on: false, angleDeg: 30, maxPct: 10 }, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, aux: state.opts.aux, ring: { ...state.opts.ring } });
 /** Merkmal mit seinen Fit-Parametern neu berechnen (Extraktion + Fit) und alles Abhängige aktualisieren. */
 async function refitFeature(f: FeatureView, type: GeomType = f.type) {
-  if (f.type === 'Abstand' || f.cons) { recomputeDistances(); renderAll(); return; }
+  if (f.type === 'Abstand' || f.cons || f.derived) { recomputeDistances(); renderAll(); return; }
   const fp = (f.fp ??= defaultFp());
   try {
     if (type === 'Freiformfläche') {
@@ -739,13 +749,18 @@ function updateDistancePreview() {
   state.preview = a && b ? { fit: computeDistance(a.measured!, b.measured!), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: [a.id, b.id] } : null;
 }
 /** Abstände nach Änderung eines Bezugsmerkmals neu berechnen. */
+const deriveSrc = new WeakMap<Feature, { m: unknown; P: unknown }>();
 function recomputeDistances() {
   // all derived features (distances, constructions) in parent-first order, so chains update completely
   const byId = new Map(state.features.map((f) => [f.id, f]));
   const order = recomputeOrder(state.features.map((f) => ({ id: f.id, refs: hardParentsOf(f) })).filter((x) => x.refs.length));
   for (const id of order) {
     const f = byId.get(id)!; const ps = hardParentsOf(f).map((r) => byId.get(r)?.measured);
-    if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); continue; }
+    if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); if (f.derived) f.derived.error = tt('Parent feature missing'); continue; }
+    if (f.derived) { const par = byId.get(f.derived.parent)!, P = featPoints(par.id), hit = deriveSrc.get(f);
+      if (hit && hit.m === par.measured && hit.P === P) continue;
+      try { f.measured = runDerive(f.derived.key, par, P); f.derived.error = undefined; deriveSrc.set(f, { m: par.measured, P }); } catch (e: any) { f.derived.error = tt(e.message); }
+      continue; }
     if (f.type === 'Abstand' && !f.cons) { f.measured = computeDistance(ps[0]!, ps[1]!); continue; }
     if (f.cons) {
       try { const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params); f.measured = r; f.cons.error = undefined; }
@@ -867,6 +882,7 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
 async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (!state.data) { toast(tt('Load a polygon model first.')); return; }
   if (!fromControl) state.an.ctrl = null;
+  if (!keepView) state.an.derivePrev = null;
   // a fit mode without pending preview would hide the analysis panel – leave it
   if (state.mode?.kind === 'fit' && !state.preview) { state.mode = null; clearBrush(); clearAuxHover(); viewer.controls.enabled = true; viewer.showCursor(null, 1); }
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
@@ -875,7 +891,7 @@ async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (kind === 'axis' && r.axes?.length && !keepView) sideView(viewer, r.axes);
   renderAll();
 }
-function analyzeOff() { state.an.on = false; state.an.res = null; state.an.ctrl = null; viewer.setModelOpacity(1); renderAll(); }
+function analyzeOff() { state.an.on = false; state.an.res = null; state.an.ctrl = null; state.an.derivePrev = null; viewer.setModelOpacity(1); renderAll(); }
 /** Form tolerance t of a single analysed feature (Form control), else null. */
 function anTol(r: AnResult): number | null {
   if (r.feats?.length !== 1) return null;
@@ -952,14 +968,42 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
       if (mo && f) mo.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); upd(); } }]]); };
     } };
 }
+/** Parent feature for “Derive feature”: the analysed control's feature, or the single analysed feature. */
+function deriveParent(): FeatureView | undefined {
+  const a = state.an, C = a.ctrl != null ? state.controls.find((c) => c.id === a.ctrl) : undefined;
+  const id = C?.featureIds[0] ?? (a.ids.length === 1 ? a.ids[0] : a.res?.axes ? state.sel.find((i) => state.features.some((f) => f.id === i && (f.type === 'Zylinder' || f.type === 'Kegel'))) : undefined);
+  return state.features.find((f) => f.id === id && f.indices.length);
+}
+function deriveHtml(): string {
+  const p = deriveParent(), dv = p ? derivesFor(p.type) : [];
+  if (state.an.derivePrev) return `<span class="an-derive"><b>🔗 ${tt(DERIVES.find((d) => d.key === state.an.derivePrev!.key)!.label)}</b><button class="btn primary" data-dv="add" title="${tt('Create the previewed geometry as a feature in the tree; it is recomputed automatically when the parent feature changes')}">＋ ${tt('Add to tree')}</button><button class="btn" data-dv="x" title="${tt('Discard the preview')}">✕</button></span>`;
+  return `<button class="btn" data-dv="menu" ${dv.length ? '' : 'disabled'} title="${tt('Derive feature from Analyze: preview dependent geometry (flatness zone planes, derived median line as Polyline, minimum-zone axis) and add it to the tree')}">🔗 ${tt('Derive')}</button>`;
+}
+function bindDerive(el: HTMLElement) {
+  el.querySelectorAll<HTMLButtonElement>('[data-dv]').forEach((b) => (b.onclick = (e) => {
+    const p = deriveParent(), a = state.an; if (!p) return;
+    if (b.dataset.dv === 'x') { a.derivePrev = null; renderAll(); return; }
+    if (b.dataset.dv === 'add') { addDerived(a.derivePrev!.key, p); a.derivePrev = null; renderAll(); return; }
+    showMenu((e as MouseEvent).clientX, (e as MouseEvent).clientY, derivesFor(p.type).map((d) => [tt(d.label), () => {
+      try { a.derivePrev = { key: d.key, parent: p.id, fit: runDerive(d.key, p, featPoints(p.id)) }; renderAll(); } catch (er: any) { toast(tt(er.message)); } }] as [string, () => void]));
+  }));
+}
+/** Create a derived feature (method “Derived from Analyze”, chain icon, auto recompute). */
+function addDerived(key: string, p: FeatureView) {
+  const fit = runDerive(key, p, featPoints(p.id)), t = fit.type, n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
+  const f: FeatureView = { id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, measured: fit, pointCount: 0, method: 'Abgeleitet', derived: { key, parent: p.id }, refs: [p.id],
+    color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: new Uint32Array(0), candidates: [], src: new Uint32Array(0), fp: defaultFp() } as FeatureView;
+  state.features.push(f); deriveSrc.set(f, { m: p.measured, P: featPoints(p.id) });
+  toast(`✔ ${tt('{0} created', f.name)} (🔗 ${tt('derived from {0}', p.name)})`);
+}
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
   const cp = ctrlPanel();
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
     controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
       <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
-    bind: (el) => { cp.bind(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${deriveHtml()}`,
+    bind: (el) => { cp.bind(el); bindDerive(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
       const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else if (b.dataset.a === 'hide') { a.axHide = !a.axHide; renderAll(); } else { a.trans = !a.trans; renderAll(); } })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
@@ -973,9 +1017,9 @@ function analysisSpec(): CtxSpec | null {
       <label title="${tt('Exaggeration: arrow length = deviation × this factor (deviations are often µm, invisible at 1×)')}">× <input id="an-ex" type="number" min="1" step="10" value="${a.exag}"></label>
       <button data-a="zones" class="${a.zones ? 'on' : ''}" ${a.kind === 'form' ? '' : 'disabled'} title="${tt('Show the bounding surfaces of the form zone (ISO 1101), e.g. two parallel planes for flatness, two coaxial cylinders for cylindricity')}">▤ ${tt('Zone')}</button>
       <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model under the color map')}">◌ ${tt('Transparent')}</button>
-      <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
+      <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${deriveHtml()}`,
     bind: (el) => {
-      cp.bind(el);
+      cp.bind(el); bindDerive(el);
       const num = (id: string, f: (v: number) => void, neg = false) => { const i = el.querySelector<HTMLInputElement>(id); if (!i) return; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && (neg || v >= 0)) { f(v); renderScene(); } }; };
       num('#an-sc', (v) => (a.scale = v)); num('#an-st', (v) => (a.steps = Math.round(v))); num('#an-ex', (v) => (a.exag = Math.max(1, v))); num('#an-c0', (v) => (a.c0 = v), true);
       const cm = el.querySelector<HTMLSelectElement>('#an-cm')!; cm.onchange = () => { a.center = cm.value as any; renderAll(); };
@@ -1294,7 +1338,7 @@ function renderTree() {
     const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
     const tag = distSlots.includes(f.id) ? ` <span class="sub">[${distSlots.indexOf(f.id) === 0 ? 'A' : 'B'}]</span>` : '';
     const sel = state.sel.includes(f.id), vis = !state.hidden.has(f.id), lab = !state.hiddenLabels.has(f.id);
-    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="${tt('Datum {0}', f.datum)}">${f.datum}</span>` : ''}${f.refs?.length ? ` <span class="chain" title="${tt('Constructed from')}: ${f.refs.map(nameOf).join(', ')}">🔗</span>` : ''}${f.cons?.error ? ` <span class="sub" title="${f.cons.error}">⚠</span>` : ''}${tag}`,
+    const fnode = node(`<span class="tw">▾</span><span style="color:${hex(f.color)}">${ico}</span>${f.name}${f.datum ? `<span class="dflag sm" title="${tt('Datum {0}', f.datum)}">${f.datum}</span>` : ''}${f.refs?.length ? ` <span class="chain" title="${tt('Constructed from')}: ${f.refs.map(nameOf).join(', ')}">🔗</span>` : ''}${f.cons?.error || f.derived?.error ? ` <span class="sub" title="${f.cons?.error ?? f.derived?.error}">⚠</span>` : ''}${tag}`,
       'indent2' + (vis ? '' : ' hidden-feat'), (e) => selectFeature(f.id, e.ctrlKey || e.metaKey || e.shiftKey), sel, f.id,
       eyeBtn(vis, () => { vis ? state.hidden.add(f.id) : state.hidden.delete(f.id); renderTree(); renderScene(); }));
     fnode.appendChild(eyeBtn(lab, () => { lab ? state.hiddenLabels.add(f.id) : state.hiddenLabels.delete(f.id); renderTree(); renderScene(); }, true));
@@ -1698,6 +1742,7 @@ function renderScene() {
   { const R = reexPreview((id) => state.features.some((x) => x.id === id)); if (R) viewer.addRegion(R); }
   if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), offsetLabel(x));
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
+  if (state.an.on && state.an.derivePrev) viewer.addPrimitive(state.an.derivePrev.fit, 0xd81b60, true);
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
@@ -3038,6 +3083,8 @@ function provenanceHTML(f: FeatureView): string {
     if (p.seed) rows.push([tt('Seed point'), p.seed.map((v) => fmt(v, 3)).join(' ')]);
     if (p.params) rows.push([tt('Max. angle'), fmt(p.params.maxAngleDeg ?? 0, 1) + '°'], [tt('Area r'), p.params.radius ? fmt(p.params.radius, 2) + ' mm' : tt('unlimited')]);
     if (p.aux) rows.push([tt('Auxiliary plane'), `${p.aux.source} (${p.aux.points} ${tt('pts')})`]); }
+  else if (p.kind === 'derived') { const d = DERIVES.find((x) => x.key === p.key); rows.push([tt('Method'), `🔗 ${tt('Derived from Analyze')}`], [tt('Derivation'), d ? tt(d.label) : p.key], [tt('Parent'), nameOf(p.parents[0])]);
+    if (p.error) rows.push([tt('Error'), `⚠ ${p.error}`]); rows.push([tt('Update'), tt('recomputed automatically when the parent changes')]); }
   else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }
   else return '';
   if (f.reex) rows.push([tt('Then: re-extraction'), tt('max. dist. {0} mm · {1}σ · {2}° · margin {3} mm → {4} pts ({5} before, {6} removed)', f.reex.maxDist, f.reex.sigma, f.reex.maxAngleDeg, f.reex.margin, f.reex.points, f.reex.before, f.reex.removed)]);

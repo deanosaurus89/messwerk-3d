@@ -14,7 +14,7 @@ export function t(s: string, ...a: (string | number)[]): string {
 /** Display names of the internal feature types (internal keys stay stable for project files). */
 const TYPE: Record<string, string> = {
   auto: 'Auto', Ebene: 'Plane', Kreis: 'Circle', Zylinder: 'Cylinder', Langloch: 'Slot', Kegel: 'Cone', Kugel: 'Sphere', Torus: 'Torus',
-  Punkt: 'Point', Linie: 'Line', Freiformfläche: 'Freeform surface', Abstand: 'Distance', Winkel: 'Angle',
+  Punkt: 'Point', Linie: 'Line', Linienzug: 'Polyline', Freiformfläche: 'Freeform surface', Abstand: 'Distance', Winkel: 'Angle',
 };
 export const typeName = (x: GeomType | 'auto' | string) => t(TYPE[x] ?? x);
 /** Display names of the internal control kinds. */
@@ -27,5 +27,5 @@ const KIND: Record<string, string> = {
 };
 export const kindName = (k: string) => t(KIND[k] ?? k);
 /** Method names (internal keys 'Klick' | 'Pinsel' | 'Konstruiert'). */
-const METHOD: Record<string, string> = { Klick: 'Click & grow', Pinsel: 'Brush', Konstruiert: 'Construction', Anker: 'Anchor' };
+const METHOD: Record<string, string> = { Klick: 'Click & grow', Pinsel: 'Brush', Konstruiert: 'Construction', Anker: 'Anchor', Abgeleitet: 'Derived from Analyze' };
 export const methodName = (m: string) => t(METHOD[m] ?? m);

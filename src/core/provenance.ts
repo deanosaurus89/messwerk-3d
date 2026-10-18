@@ -10,10 +10,12 @@ export type Provenance =
   | { kind: 'construction'; key: string; parents: number[]; params: Record<string, number>; error?: string }
   | { kind: 'anchor'; pts: Vec3[] }
   | { kind: 'distance'; parents: [number, number] }
+  | { kind: 'derived'; key: string; parents: [number]; error?: string }
   | { kind: 'cad'; ref: string };
 
 /** Derive the provenance record; `extra` carries UI-side fields (seed hit, extraction parameters). */
 export function provenanceOf(f: Feature, extra?: { seed?: Vec3; params?: ExtractParams }): Provenance {
+  if (f.derived) return { kind: 'derived', key: f.derived.key, parents: [f.derived.parent], error: f.derived.error };
   if (f.cons) return { kind: 'construction', key: f.cons.key, parents: [...f.cons.refs], params: { ...(f.cons.params ?? {}) }, error: f.cons.error };
   if (f.anchor || f.method === 'Anker') return { kind: 'anchor', pts: f.anchor?.pts ?? [] };
   if (f.type === 'Abstand' && f.refs?.length === 2) return { kind: 'distance', parents: [f.refs[0], f.refs[1]] };
@@ -24,7 +26,7 @@ export function provenanceOf(f: Feature, extra?: { seed?: Vec3; params?: Extract
 /** Parents a feature depends on (for recompute order, cascade delete and the 🔗 chain). */
 export function parentsOf(f: Feature): number[] {
   const p = provenanceOf(f);
-  if (p.kind === 'construction' || p.kind === 'distance') return [...p.parents];
+  if (p.kind === 'construction' || p.kind === 'distance' || p.kind === 'derived') return [...p.parents];
   if (p.kind === 'mesh' && p.aux?.refId != null) return [p.aux.refId];
   return [];
 }
@@ -32,7 +34,7 @@ export function parentsOf(f: Feature): number[] {
  *  reference is soft – the mesh feature keeps its points if that plane goes away. */
 export function hardParentsOf(f: Feature): number[] {
   const p = provenanceOf(f);
-  return p.kind === 'construction' || p.kind === 'distance' ? [...p.parents] : [];
+  return p.kind === 'construction' || p.kind === 'distance' || p.kind === 'derived' ? [...p.parents] : [];
 }
 /** All features that (transitively) depend hard on `ids` – what a cascade delete removes in addition. */
 export function dependentsOf(fs: Feature[], ids: Iterable<number>): Set<number> {

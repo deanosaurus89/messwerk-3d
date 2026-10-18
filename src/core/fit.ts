@@ -1,7 +1,7 @@
 // Ausgleichsrechnung (kleinste Quadrate) für Regelgeometrien + automatische Typwahl.
 import { Vec3, add, basis, cross, dot, eigSym3, levenbergMarquardt, norm, scale, sub, unit } from './linalg';
 
-export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Linie' | 'Freiformfläche' | 'Abstand' | 'Winkel';
+export type GeomType = 'Ebene' | 'Kreis' | 'Zylinder' | 'Langloch' | 'Kegel' | 'Kugel' | 'Torus' | 'Punkt' | 'Linie' | 'Linienzug' | 'Freiformfläche' | 'Abstand' | 'Winkel';
 export const GEOM_TYPES: GeomType[] = ['Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Kegel', 'Kugel', 'Torus', 'Punkt'];
 
 /** Gemessene (Ist-)Geometrie. */
@@ -17,6 +17,8 @@ export interface FitResult {
   halfAngle?: number;    // Kegel, rad
   minorRadius?: number;  // Torus: Rohr-(Neben-)radius r (radius = Hauptradius R)
   apex?: Vec3;
+  /** polyline (Linienzug): vertices in order (world) */
+  pts?: Vec3[];
   rms: number;           // Standardabweichung der orth. Abstände
   form: number;          // Formabweichung max-min
   maxPos: number;        // größte positive Abweichung (außerhalb Material bzw. vom Mittel weg)

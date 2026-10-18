@@ -12,6 +12,7 @@ export const ICON: Record<string, string> = {
   Torus: s('<ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="11.5" rx="4" ry="1.6"/>'),
   Punkt: s('<path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>'),
   Linie: s('<path d="M3 19L21 5"/><circle cx="7" cy="16" r="1.6" fill="currentColor"/><circle cx="17" cy="8" r="1.6" fill="currentColor"/><path d="M2 22h20" stroke-dasharray="2 2" opacity=".6"/>'),
+  Linienzug: s('<path d="M3 18 L8 9 L13 14 L21 5"/><circle cx="3" cy="18" r="1.4" fill="currentColor"/><circle cx="8" cy="9" r="1.4" fill="currentColor"/><circle cx="13" cy="14" r="1.4" fill="currentColor"/><circle cx="21" cy="5" r="1.4" fill="currentColor"/>'),
   eye: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   eyeOff: s('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" opacity=".35"/><path d="M4 4l16 16"/>'),
   aux: s('<path d="M3 16 L8 11 H21 L16 16 Z" stroke-dasharray="2 2"/><circle cx="12" cy="10" r="3.5"/>'),
