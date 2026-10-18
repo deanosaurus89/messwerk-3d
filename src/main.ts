@@ -2093,6 +2093,7 @@ function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({
 try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; } } catch { /* */ }
 $('#btn-options').onclick = () => openOptions();
 $('#btn-whatsnew').onclick = () => showWhatsNew();
+$('#btn-testlist').onclick = () => { window.open('test.html', '_blank', 'noopener'); };
 $('#btn-toggle-trim').onclick = () => { state.trimGeo = !state.trimGeo; renderAll(); };
 $('#ver-box').textContent = versionText();
 setTimeout(() => maybeShowWhatsNew(), 1500);

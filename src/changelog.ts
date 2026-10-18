@@ -6,6 +6,9 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.18', date: '2026-10-18', items: [
+    'Tester checklist page: Help › ☑ Test checklist (also linked at the top of the documentation) opens test.html – status per item, comments, copy the result; works in iPhone Safari.',
+  ] },
   { version: '2026.0.17', date: '2026-10-18', items: [
     'Fix: TED suggestions are computed in the same datum frame as the evaluation (contact datums). Before, they came from the least-squares datums, so an accepted suggestion could show a position error (e.g. 1.966 NOK) instead of ~0. If you confirmed (✓) suggestions in 0.16, clear those fields once to get the corrected suggestion.',
     'TED fields are labelled by drawing meaning (“from B”, “from C”); the tooltip shows the DRF axis and its direction in the display CS, and a DRF triad is drawn while the control is selected.',

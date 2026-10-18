@@ -103,6 +103,6 @@ export const DOC_SECTIONS: { id: string; title: string; html: () => string }[] =
     <li>${tt('View ribbon › ↺ Reset positions (also in the ⚙ menu above the nav cube): unpins the selected features, or all annotations if nothing is selected.')}</li></ul>` },
 ];
 export function docsHtml(): string {
-  return `<div class="doc-toc">${DOC_SECTIONS.map((s) => `<a href="#doc-${s.id}" data-doc="${s.id}">${tt(s.title)}</a>`).join('')}</div>`
+  return `<p class="doc-test"><a href="test.html" target="_blank" rel="noopener" title="${tt('Checklist for testers: status per item, comments, copy the result')}">☑ ${tt('Test checklist')}</a></p><div class="doc-toc">${DOC_SECTIONS.map((s) => `<a href="#doc-${s.id}" data-doc="${s.id}">${tt(s.title)}</a>`).join('')}</div>`
     + DOC_SECTIONS.map((s) => `<section id="doc-${s.id}"><h3>${tt(s.title)}</h3>${s.html()}</section>`).join('');
 }
