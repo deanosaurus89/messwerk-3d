@@ -365,6 +365,7 @@ input.ted:disabled { background:#f1f3f5; }
 
 .dslots { display:inline-flex; gap:2px; align-items:center; } .dslots select { max-width:110px; font-size:12px; } .dslots .dmod { max-width:44px; }
 
-#help-backdrop { position:absolute; inset:0; z-index:7; background:rgba(20,30,40,0.28); }
+#help-backdrop { position:absolute; inset:0; z-index:66; background:rgba(20,30,40,0.28); }
 #help-backdrop.hidden { display:none; }
 #help-view #hv-close { min-width:40px; min-height:36px; font-size:20px; font-weight:700; line-height:1; }
+#help-view { z-index:67; }
