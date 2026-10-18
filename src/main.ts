@@ -882,7 +882,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   const c = C && C.kind !== 'Geradheit Achse' && C.datumIds?.length ? C : null;
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
-  const rb = c ? resolveBasic(c, f, DS) : null, miss = !!rb?.missing.length;
+  const rb = c ? resolveBasic(c, f, DS, ctx) : null, miss = !!rb?.missing.length;
   let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, rb!.basic, f.measured!.normal, f, c.dia) : undefined;
   if (nominal && miss) nominal = { dir: nominal.dir };
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
@@ -1016,7 +1016,7 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const f = state.features.find((x) => x.id === c.featureIds[0]);
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
   const r = evaluate(c, featMap(), ctx);
-  const spec = f ? tedSpec(c, f, ds) : [];
+  const spec = f ? tedSpec(c, f, ds, ctx) : [];
   const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(r)} ${stHtml(r)}` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
@@ -1229,16 +1229,38 @@ function stHtml(r: { status: string; flag?: string }): string {
   return `<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status as any)}</span>`;
 }
 /** One TED input: confirmed value (normal), suggestion from the actual part (grey italic + ✓), optional or not applicable. */
+/** Direction (world vector) described in the current display CS, e.g. "+X (Global (WCS))" or "≈ −Y, 3.2° off". */
+/** Control whose datum reference frame is being edited: selected control, analysed control, or the Position/Profile
+ *  control of the selected feature (Control Properties). */
+function drfControl(): Control | undefined {
+  const pick = (c?: Control) => (c && c.datumIds?.length && isDatumControl(c.kind) ? c : undefined);
+  return pick(state.controls.find((c) => c.id === (state.selControl ?? state.an.ctrl)))
+    ?? (state.sel.length === 1 ? state.controls.find((c) => c.featureIds[0] === state.sel[0] && (c.kind === 'Position' || c.kind === 'Profil (Bezug)') && c.datumIds?.length) : undefined);
+}
+/** DRF triad (origin + axes of the datum system, contact datums as in the evaluation) while a datum control is edited. */
+function renderDrfTriad() {
+  const c = drfControl(); if (!c) return;
+  const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)); if (ds.some((d) => !d?.measured || !d.datum)) return;
+  try { const F = buildDRF(simulateDatums(ds as Feature[], ctx).feats); viewer.addTriad(F.o, [F.x, F.y, F.z], `DRF ${F.text}`, false, true); } catch { /* incomplete DRF */ }
+}
+function dirName(w: number[]): string {
+  const fr = activeFrame(), d = fr ? csDir(fr, w as Vec3) : w, i = [0, 1, 2].reduce((q, k) => (Math.abs(d[k]) > Math.abs(d[q]) ? k : q), 0);
+  const L = Math.hypot(d[0], d[1], d[2]) || 1, off = (Math.acos(Math.min(1, Math.abs(d[i]) / L)) * 180) / Math.PI;
+  return `${off > 0.5 ? '≈ ' : ''}${d[i] < 0 ? '−' : '+'}${'XYZ'[i]} ${tt('of {0}', activeCsName())}${off > 0.5 ? ` (${fmt(off, 1)}° ${tt('off')})` : ''}`;
+}
+/** TED field label by drawing meaning: “from B” (location measured from datum B) – DRF axis + display direction in the tooltip. */
+function tedLabel(t: TedField): string { return t.from && t.k <= 2 ? tt('from {0}', t.from) : t.label; }
+function tedDirTip(t: TedField): string { return t.dirW && t.k <= 2 ? ` · ${tt('DRF axis {0} = {1}', 'XYZ'[t.k], dirName(t.dirW))}` : ''; }
 function tedEl(c: Control, t: TedField, after: () => void, inline = false): HTMLElement {
   const wrap = document.createElement(inline ? 'label' : 'span'); wrap.className = 'ted-f ' + t.state;
   const conf = c.basic?.[t.k] != null && isFinite(c.basic[t.k]!), sug = !conf && t.state === 'req' && t.sug != null;
-  if (inline) wrap.append(t.label + ' ');
+  if (inline) wrap.append(tedLabel(t) + ' ');
   const i = document.createElement('input'); i.inputMode = 'decimal'; i.className = 'ted' + (sug ? ' sug' : '') + (t.state === 'req' && !conf && !sug ? ' req' : '');
   i.dataset.ted = String(t.k);
   i.value = conf ? String(c.basic![t.k]) : sug ? String(t.sug) : '';
   i.placeholder = t.state === 'free' ? tt('n/a') : t.state === 'opt' ? tt('optional') : tt('required');
   i.disabled = t.state === 'free';
-  i.title = tt(t.why) + (sug ? ' · ' + tt('Suggested from the actual part (unconfirmed): tick ✓ to confirm, or type the drawing value') : '');
+  i.title = tt(t.why) + tedDirTip(t) + (sug ? ' · ' + tt('Suggested from the actual part (unconfirmed): tick ✓ to confirm, or type the drawing value') : '');
   const set = (v: number | null) => { const b = c.basic ?? []; while (b.length <= t.k) b.push(null); b[t.k] = v; c.basic = b; after(); };
   i.onchange = () => { const s2 = i.value.replace(',', '.').trim(), v = s2 === '' ? null : Number(s2); if (v != null && !isFinite(v)) return; set(v); };
   wrap.appendChild(i);
@@ -1252,8 +1274,8 @@ function tedConfirmAll(c: Control, spec: TedField[], after: () => void): HTMLBut
 }
 function tedInputs(c: Control, f: FeatureView, lab: (t: string, el: HTMLElement) => void) {
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i));
-  const spec = tedSpec(c, f, ds);
-  for (const t of spec) lab(t.label, tedEl(c, t, () => renderAll()));
+  const spec = tedSpec(c, f, ds, ctx);
+  for (const t of spec) lab(tedLabel(t), tedEl(c, t, () => renderAll()));
   const all = tedConfirmAll(c, spec, () => renderAll()); if (all) lab('', all);
 }
 /** Ⓜ/Ⓛ applies to the position of a feature of size (cylinder, circle, bolt-circle pattern). */
@@ -1883,6 +1905,7 @@ function renderScene() {
     for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
   }
   renderCsTriads();
+  renderDrfTriad();
   // Labels
   const fm = featMap();
   const focus = anFocusIds();

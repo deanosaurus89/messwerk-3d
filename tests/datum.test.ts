@@ -169,3 +169,38 @@ describe('Orientation zone shape: Ø vs. two parallel planes', () => {
     c.dia = false; const p = evaluate(c, m, ctx); expect(p.detail).toContain('two planes'); expect(p.measured!).toBeLessThanOrEqual(d + 1e-9); expect(p.measured!).toBeGreaterThan(0.02);
   });
 });
+
+describe('TED suggestions in the evaluation frame (rotated part, contact datums)', () => {
+  // part rotated: A (top face) normal = world +Y, B normal = world −Z, C normal = world −X; scanned planes with burrs
+  // so that the ISO 5459 contact planes differ clearly from the least-squares fits
+  const pl = (c: Vec3, u: Vec3, v: Vec3, n: Vec3, burr: number) => { const P: Vec3[] = [];
+    for (let i = -10; i <= 10; i++) for (let j = -10; j <= 10; j++) { const h = (i * 7 + j * 13) % 5 === 0 ? burr : 0; P.push([0, 1, 2].map((k) => c[k] + 3 * i * u[k] + 3 * j * v[k] + h * n[k]) as Vec3); }
+    return P; };
+  const PA = pl([40, 20, -30], [1, 0, 0], [0, 0, 1], [0, 1, 0], 0.4), PB = pl([40, 10, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.5), PC = pl([0, 10, -30], [0, 1, 0], [0, 0, 1], [-1, 0, 0], 0.6);
+  const lsq = (P: Vec3[], n: Vec3) => { const c = [0, 1, 2].map((k) => P.reduce((a, p) => a + p[k], 0) / P.length) as Vec3; return fit('Ebene', c, n); };
+  const A2 = F(11, 'Plane 1', 'Ebene', lsq(PA, [0, 1, 0]), 'A'), B2 = F(12, 'Plane 4', 'Ebene', lsq(PB, [0, 0, 1]), 'B'), C2 = F(13, 'Plane 5', 'Ebene', lsq(PC, [-1, 0, 0]), 'C');
+  const t = (0.17 * Math.PI) / 180;
+  const H2 = F(14, 'Circle 2', 'Kreis', fit('Kreis', [46.8, 20, -63.1], [Math.sin(t), Math.cos(t), 0], { radius: 3, diameter: 6 }));
+  const S = F(15, 'Cylinder 9', 'Zylinder', fit('Zylinder', [25, 12, 0], [0, 0, 1], { radius: 2, diameter: 4, length: 10 })); // hole in face B: axis ⟂ A
+  const pts = new Map<number, Vec3[]>([[11, PA], [12, PB], [13, PC]]);
+  const nrm = new Map<number, Vec3[]>([[11, PA.map(() => [0, 1, 0] as Vec3)], [12, PB.map(() => [0, 0, 1] as Vec3)], [13, PC.map(() => [-1, 0, 0] as Vec3)]]);
+  const cx = { points: (id: number) => pts.get(id) ?? null, normals: (id: number) => nrm.get(id) ?? null } as any;
+  const m2 = new Map([A2, B2, C2, H2, S].map((f) => [f.id, f]));
+  it('a suggestion from the actual part evaluates to ~0 (same frame as the contact-datum evaluation)', () => {
+    const c: Control = { id: 7, kind: 'Position', featureIds: [14], nominal: 0, tolUp: 0.1, tolLo: 0, datumIds: [11, 12, 13] };
+    const r = evaluate(c, m2, cx); expect(r.flag).toBe('Nominal unconfirmed'); expect(r.measured!).toBeLessThan(0.002);
+    const spec = tedSpec(c, H2, [A2, B2, C2], cx).filter((s) => s.state === 'req');
+    expect(spec.map((s) => s.from).sort()).toEqual(['B', 'C']); // hole axis ∥ A normal: dimensions from B and C, none along the axis
+    c.basic = [0, 1, 2].map((k) => spec.find((s) => s.k === k)?.sug ?? null);
+    const r2 = evaluate(c, m2, cx); expect(r2.flag).toBeUndefined(); expect(r2.measured!).toBeLessThan(0.002);
+    // the least-squares suggestion (old behaviour) would be off by the burr height
+    const old = tedSpec({ kind: 'Position' }, H2, [A2, B2, C2]).filter((s) => s.state === 'req');
+    expect(Math.max(...old.map((o) => Math.abs(o.sug! - spec.find((s) => s.k === o.k)!.sug!)))).toBeGreaterThan(0.2);
+  });
+  it('hole whose axis is not DRF Z: fields follow the axis (from A and C), suggestion → ~0', () => {
+    const c: Control = { id: 8, kind: 'Position', featureIds: [15], nominal: 0, tolUp: 0.1, tolLo: 0, datumIds: [11, 12, 13] };
+    const spec = tedSpec(c, S, [A2, B2, C2], cx).filter((s) => s.state === 'req' && s.k <= 2);
+    expect(spec.map((s) => s.from).sort()).toEqual(['A', 'C']);
+    expect(evaluate(c, m2, cx).measured!).toBeLessThan(0.002);
+  });
+});

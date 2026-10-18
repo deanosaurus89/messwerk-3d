@@ -101,7 +101,11 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
 
 export interface EvalCtx extends SimCtx { /** all controls (size nominal/tolerances for Ⓜ/Ⓛ) */ controls?: Control[]; points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
 /** One TED input of a datum control: index into basic, label, state and why (tooltip), suggestion from the actual part. */
-export interface TedField { k: number; label: string; state: 'req' | 'opt' | 'free'; why: string; sug: number | null; }
+export interface TedField { k: number; label: string; state: 'req' | 'opt' | 'free'; why: string; sug: number | null;
+  /** location fields: datum letter(s) the dimension is measured from (drawing meaning, e.g. 'B') */
+  from?: string;
+  /** location fields: world direction of the DRF axis (for 'DRF X = world +Y' hints and the DRF triad) */
+  dirW?: Vec3; }
 const r3 = (v: number) => Math.round(v * 1000) / 1000 + 0;
 const AX = 'XYZ';
 /**
@@ -110,8 +114,10 @@ const AX = 'XYZ';
  * shown; coordinates along free DRF translations are not applicable. Each required field carries the actual value as
  * suggestion (unconfirmed until the user ticks ✓ or types the drawing value).
  */
-export function tedSpec(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): TedField[] {
+export function tedSpec(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[], ctx?: SimCtx): TedField[] {
   if (!f?.measured || ds.some((d) => !d?.measured)) return [];
+  // suggestions in the SAME frame as the evaluation: simulated (contact) datums, not the least-squares fits
+  if (ctx && ds.length) ds = simulateDatums(ds as Feature[], ctx).feats;
   const m = f.measured;
   if (c.kind === 'Neigung') {
     const D = ds[0]; if (!D) return [{ k: 0, label: '[∠°]', state: 'req', why: 'Angle between the feature and the datum from the drawing', sug: null }];
@@ -131,9 +137,16 @@ export function tedSpec(c: { kind: string; basic?: (number | null)[] }, f: Featu
   const n = nominalDirLocal(F, m.normal, angB), loc = toLocal(F, m.center);
   const what = k === 'plane' ? 'plane normal' : 'axis';
   const sugAt = (i: number) => r3(n.angled ? loc[i] - (loc[n.ax] * n.g[i]) / n.g[n.ax] : loc[i]);
+  // which datum the location along DRF axis i is measured from (the datum whose plane is ⟂ to that axis, or an
+  // axis/point datum that locks it); nothing about world axes is assumed
+  const axW = (i: number) => [F.x, F.y, F.z][i];
+  const fromOf = (i: number) => { const w = axW(i), L: string[] = [];
+    for (const D of ds as Feature[]) { const dk = datumKind(D.type), dn = unit(D.measured!.normal);
+      if (dk === 'plane' ? Math.abs(dot(dn, w)) > 0.9 : dk === 'axis' ? Math.abs(dot(dn, w)) < 0.3 : dk === 'point') { if (D.datum) L.push(D.datum); if (dk === 'plane') break; } }
+    return L.slice(0, 1).join('') || undefined; };
   const comp = (i: number, req: string) => F.freeT.includes(i)
-    ? out.push({ k: i, label: `[${AX[i]}]`, state: 'free', why: `Not applicable: the datums ${F.text} do not lock the location along ${AX[i]} – the zone may move in that direction`, sug: null })
-    : out.push({ k: i, label: `[${AX[i]}]`, state: 'req', why: req, sug: sugAt(i) });
+    ? out.push({ k: i, label: `[${AX[i]}]`, state: 'free', why: `Not applicable: the datums ${F.text} do not lock the location along ${AX[i]} – the zone may move in that direction`, sug: null, dirW: axW(i) })
+    : out.push({ k: i, label: `[${AX[i]}]`, state: 'req', why: req, sug: sugAt(i), from: fromOf(i), dirW: axW(i) });
   if (k === 'plane') comp(n.ax, `Required: location of the plane along its normal (${AX[n.ax]}) from the datum origin – locked by ${F.text}`);
   else if (directional) { for (const i of [0, 1, 2]) if (i !== n.ax) comp(i, `Required: location of the ${n.angled ? 'axis where it meets the DRF plane ⟂ ' + AX[n.ax] : 'axis'} along ${AX[i]} (⟂ to the axis ∥ ${AX[n.ax]}) – locked by ${F.text}. The coordinate along the axis is not needed.`); }
   else for (const i of [0, 1, 2]) comp(i, `Required: location of the centre along ${AX[i]} – locked by ${F.text}`);
@@ -152,12 +165,12 @@ export function tedSpec(c: { kind: string; basic?: (number | null)[] }, f: Featu
   return out;
 }
 /** Indices of the required TED components (see tedSpec). */
-export function requiredBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): number[] {
-  return tedSpec(c, f, ds).filter((t) => t.state === 'req').map((t) => t.k);
+export function requiredBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[], ctx?: SimCtx): number[] {
+  return tedSpec(c, f, ds, ctx).filter((t) => t.state === 'req').map((t) => t.k);
 }
 /** Effective TED: confirmed values (user) plus suggestions for required fields still unconfirmed. */
-export function resolveBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): { basic: (number | null)[]; unconfirmed: TedField[]; missing: TedField[] } {
-  const spec = tedSpec(c, f, ds), basic = [...(c.basic ?? [])]; while (basic.length < 7) basic.push(null);
+export function resolveBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[], ctx?: SimCtx): { basic: (number | null)[]; unconfirmed: TedField[]; missing: TedField[] } {
+  const spec = tedSpec(c, f, ds, ctx), basic = [...(c.basic ?? [])]; while (basic.length < 7) basic.push(null);
   const unconfirmed: TedField[] = [], missing: TedField[] = [];
   for (const t of spec) if (t.state === 'req' && (basic[t.k] == null || !isFinite(basic[t.k]!))) { if (t.sug != null) { basic[t.k] = t.sug; unconfirmed.push(t); } else missing.push(t); }
   return { basic, unconfirmed, missing };
@@ -212,7 +225,7 @@ const elemSize = (f: Feature) => { const m = f.measured!; return f.type === 'Lan
 /** Wert einer Toleranz mit Bezug (Toleranzzonenbreite bzw. -durchmesser in mm). */
 export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: EvalCtx = {}): DatumEval {
   const f = feats.get(c.featureIds[0]), ds = (c.datumIds ?? []).map((id) => feats.get(id));
-  const rb = resolveBasic(c, f, ds);
+  const rb = ds.some((d) => !d) ? { missing: [], unconfirmed: [], basic: [] } : resolveBasic(c, f, ds, ctx);
   if (rb.missing.length || !rb.unconfirmed.length) return evalDatumControl0(c, feats, ctx);
   const r = evalDatumControl0({ ...c, basic: rb.basic }, feats, ctx);
   if (r.value == null || r.flag) return r;
