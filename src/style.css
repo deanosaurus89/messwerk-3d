@@ -361,3 +361,5 @@ input.ted:disabled { background:#f1f3f5; }
 .bonus { color:#2e7d32; font-weight:600; margin-left:2px; }
 #dev-legend .bar.half { background:linear-gradient(90deg,#00ff00,#ffbf00 50%,#ff0000); }
 .an-derive { display:inline-flex; gap:4px; align-items:center; padding:1px 6px; border:1px dashed #d81b60; border-radius:4px; }
+
+.dslots { display:inline-flex; gap:2px; align-items:center; } .dslots select { max-width:110px; font-size:12px; } .dslots .dmod { max-width:44px; }

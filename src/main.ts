@@ -43,7 +43,7 @@ import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, NOMINAL_MISSING, NOMINAL_UNCONFIRMED, isPattern, tedSpec, resolveBasic, TedField } from './core/datum';
-import { datumText, isZoneControl, MOD_SYM, parseDatumText } from './core/features';
+import { datumText, isZoneControl, MOD_SYM } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
@@ -1127,6 +1127,33 @@ function diaButton(c: Control, f: FeatureView, after: () => void): HTMLButtonEle
   b.title = on ? tt('Ø in the feature control frame: cylindrical tolerance zone. Click for a zone between two parallel planes') : tt('No Ø: zone between two parallel planes (worst direction if the drawing gives none). Click for a cylindrical Ø zone');
   b.onclick = (e) => { e.stopPropagation(); c.dia = !on; after(); }; return b;
 }
+/** Datum reference frame input as slots: primary (placeholder) → secondary appears once filled → tertiary.
+ *  Each slot lists the defined datums; datum features of size get a material modifier (Ⓜ/Ⓛ → datum shift). */
+function datumSlots(c: Control, f: FeatureView, after: () => void): HTMLElement {
+  const box = document.createElement('span'); box.className = 'dslots';
+  const mx = DATUM_COUNT[c.kind as keyof typeof DATUM_COUNT]?.[1] ?? 1, ids = c.datumIds ?? [], NAMES = [tt('Primary'), tt('Secondary'), tt('Tertiary')];
+  const commit = (n: number[], mods: ('M' | 'L' | null)[]) => { c.datumIds = n; c.datumMods = mods.some(Boolean) ? mods.slice(0, n.length) : undefined; after(); };
+  for (let i = 0; i < mx && i <= ids.length; i++) {
+    if (i > 0) box.append('|');
+    const sel = document.createElement('select'); sel.className = 'dslot'; sel.dataset.slot = String(i);
+    sel.title = tt('{0} datum (drawing order). Only datums defined in the tree are listed', NAMES[i]);
+    const avail = datumFeatures().filter((d) => d.id !== f.id && !ids.slice(0, i).includes(d.id));
+    sel.innerHTML = `<option value="">${NAMES[i]}…</option>` + avail.map((d) => `<option value="${d.id}" ${ids[i] === d.id ? 'selected' : ''}>${d.datum} · ${d.name}</option>`).join('');
+    sel.onchange = () => { const v = sel.value ? +sel.value : null, n = ids.slice(0, i), mods = (c.datumMods ?? []).slice(0, i);
+      if (v != null) { n.push(v); mods.push(null); for (const id of ids.slice(i + 1)) if (id !== v) { n.push(id); mods.push(null); } }
+      if (!n.length) { toast(tt('A datum control needs at least a primary datum.')); after(); return; }
+      commit(n, mods); };
+    box.appendChild(sel);
+    const d = ids[i] != null ? state.features.find((x) => x.id === ids[i]) : undefined;
+    if (d && c.kind === 'Position' && (d.type === 'Zylinder' || d.type === 'Kreis')) {
+      const m = document.createElement('select'); m.className = 'dmod'; m.title = tt('Material modifier of this datum: Ⓜ/Ⓛ lets the datum frame shift by the departure of the datum feature from its MMC/LMC size');
+      const cur = c.datumMods?.[i] ?? ''; m.innerHTML = ['', 'M', 'L'].map((v) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${v ? MOD_SYM[v as 'M' | 'L'] : '–'}</option>`).join('');
+      m.onchange = () => { const mods = ids.map((_, j) => c.datumMods?.[j] ?? null); mods[i] = (m.value || null) as any; commit(ids.slice(), mods); };
+      box.appendChild(m);
+    }
+  }
+  return box;
+}
 /** Status badge; an unconfirmed nominal keeps the verdict but marks it as provisional. */
 function stHtml(r: { status: string; flag?: string }): string {
   if (r.flag === NOMINAL_UNCONFIRMED) return `<span class="st ${r.status} unconf" title="${tt('Computed with TED suggested from the actual part – confirm ✓ or enter the drawing values')}">${statusText(r.status as any)}?</span> <span class="flag unconf">${tt('Nominal unconfirmed')}</span>`;
@@ -1159,14 +1186,6 @@ function tedInputs(c: Control, f: FeatureView, lab: (t: string, el: HTMLElement)
   const spec = tedSpec(c, f, ds);
   for (const t of spec) lab(t.label, tedEl(c, t, () => renderAll()));
   const all = tedConfirmAll(c, spec, () => renderAll()); if (all) lab('', all);
-}
-function parseDatumRef(txt: string): number[] | null { return parseDatumMods(txt)?.ids ?? null; }
-/** Datum reference with material modifiers, e.g. "A|B(M)|C" or "A|BⓂ|C". */
-function parseDatumMods(txt: string): { ids: number[]; mods: ('M' | 'L' | null)[] } | null {
-  const { letters, mods } = parseDatumText(txt);
-  const ids = letters.map((l) => state.features.find((f) => f.datum === l)?.id);
-  if (ids.some((x) => x == null)) return null;
-  return { ids: ids as number[], mods };
 }
 /** Ⓜ/Ⓛ applies to the position of a feature of size (cylinder, circle, bolt-circle pattern). */
 const modApplies = (c: Control, f?: FeatureView) => !!f && c.kind === 'Position' && (f.type === 'Zylinder' || f.type === 'Kreis');
@@ -1635,10 +1654,7 @@ function renderTable() {
         const ed = document.createElement('span'); ed.className = 'cat-ed datum-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0))));
-        const di = document.createElement('input'); di.className = 'dref'; di.value = datumText(c, fm); di.title = tt('Datums primary|secondary|tertiary, e.g. A|B|C');
-        di.title = tt('Datums primary|secondary|tertiary, e.g. A|B|C. A datum feature of size at maximum/least material: B(M) or B(L) → datum shift');
-        di.onchange = () => { const p = parseDatumMods(di.value); if (!p) { toast(tt('Unknown datum letter: {0}', di.value)); } else { c.datumIds = p.ids; c.datumMods = p.mods.some(Boolean) ? p.mods : undefined; } renderAll(); };
-        lab(tt('Datum'), di);
+        lab(tt('Datums'), datumSlots(c, f, () => renderAll()));
         tedInputs(c, f, lab);
         if (diaInfo(c, f).applies) lab(tt('Zone'), diaButton(c, f, () => renderAll()));
         if (modApplies(c, f)) lab(tt('Material'), modButton(c, () => renderAll()));
