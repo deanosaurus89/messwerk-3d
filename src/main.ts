@@ -88,7 +88,7 @@ const state = {
   mode: null as Mode,
   preview: null as Preview | null,
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -898,6 +898,7 @@ async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (state.mode?.kind === 'fit' && !state.preview) { state.mode = null; clearBrush(); clearAuxHover(); viewer.controls.enabled = true; viewer.showCursor(null, 1); }
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
   if (!r) return;
+  if (!keepView) state.an.otherLabels = false; // entering Analyze: annotations of unrelated features hidden (restored on exit)
   state.an.kind = kind; state.an.res = r; state.an.on = true; pe.cmp = false;
   if (kind === 'axis' && r.axes?.length && !keepView) sideView(viewer, r.axes);
   renderAll();
@@ -982,12 +983,21 @@ function deriveParent(): FeatureView | undefined {
   const id = C?.featureIds[0] ?? (a.ids.length === 1 ? a.ids[0] : a.res?.axes ? state.sel.find((i) => state.features.some((f) => f.id === i && (f.type === 'Zylinder' || f.type === 'Kegel'))) : undefined);
   return state.features.find((f) => f.id === id && f.indices.length);
 }
+/** In Analyze: features whose annotations stay visible (analysed feature(s) + datum features of the control); null = all. */
+function anFocusIds(): Set<number> | null {
+  const a = state.an; if (!a.on || a.otherLabels) return null;
+  const C = a.ctrl != null ? state.controls.find((c) => c.id === a.ctrl) : undefined;
+  const ids = C ? [...C.featureIds, ...(C.datumIds ?? [])] : a.ids.length ? a.ids : state.sel;
+  return new Set(ids);
+}
+const otherLabelsHtml = () => `<button data-ol class="${state.an.otherLabels ? 'on' : ''}" title="${tt('Annotations of features not involved in this analysis are hidden while analysing. Show them again (they are always restored when Analyze is closed)')}">🏷 ${tt('Show other annotations')}</button>`;
 function deriveHtml(): string {
   const p = deriveParent(), dv = p ? derivesFor(p.type) : [];
   if (state.an.derivePrev) return `<span class="an-derive"><b>🔗 ${tt(DERIVES.find((d) => d.key === state.an.derivePrev!.key)!.label)}</b><button class="btn primary" data-dv="add" title="${tt('Create the previewed geometry as a feature in the tree; it is recomputed automatically when the parent feature changes')}">＋ ${tt('Add to tree')}</button><button class="btn" data-dv="x" title="${tt('Discard the preview')}">✕</button></span>`;
   return `<button class="btn" data-dv="menu" ${dv.length ? '' : 'disabled'} title="${tt('Derive feature from Analyze: preview dependent geometry (flatness zone planes, derived median line as Polyline, minimum-zone axis) and add it to the tree')}">🔗 ${tt('Derive')}</button>`;
 }
 function bindDerive(el: HTMLElement) {
+  el.querySelectorAll<HTMLButtonElement>('[data-ol]').forEach((b) => (b.onclick = () => { state.an.otherLabels = !state.an.otherLabels; renderAll(); }));
   el.querySelectorAll<HTMLButtonElement>('[data-dv]').forEach((b) => (b.onclick = (e) => {
     const p = deriveParent(), a = state.an; if (!p) return;
     if (b.dataset.dv === 'x') { a.derivePrev = null; renderAll(); return; }
@@ -1010,7 +1020,7 @@ function analysisSpec(): CtxSpec | null {
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
     controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
       <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show the tolerance zone (green, Ø t or two planes) and the required zone of the control (orange)')}">▭ ${tt('Zones')}</button><button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${deriveHtml()}`,
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show the tolerance zone (green, Ø t or two planes) and the required zone of the control (orange)')}">▭ ${tt('Zones')}</button><button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
     bind: (el) => { cp.bind(el); bindDerive(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
       const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else if (b.dataset.a === 'hide') { a.axHide = !a.axHide; renderAll(); } else if (b.dataset.a === 'zones') { a.axZones = !a.axZones; renderAll(); } else if (b.dataset.a === 'env') { a.axEnv = !a.axEnv; renderAll(); } else { a.trans = !a.trans; renderAll(); } })); },
@@ -1025,7 +1035,7 @@ function analysisSpec(): CtxSpec | null {
       <label title="${tt('Exaggeration: arrow length = deviation × this factor (deviations are often µm, invisible at 1×)')}">× <input id="an-ex" type="number" min="1" step="10" value="${a.exag}"></label>
       <button data-a="zones" class="${a.zones ? 'on' : ''}" ${a.kind === 'form' ? '' : 'disabled'} title="${tt('Show the bounding surfaces of the form zone (ISO 1101), e.g. two parallel planes for flatness, two coaxial cylinders for cylindricity')}">▤ ${tt('Zone')}</button>
       <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model under the color map')}">◌ ${tt('Transparent')}</button>
-      <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${deriveHtml()}`,
+      <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
     bind: (el) => {
       cp.bind(el); bindDerive(el);
       const num = (id: string, f: (v: number) => void, neg = false) => { const i = el.querySelector<HTMLInputElement>(id); if (!i) return; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && (neg || v >= 0)) { f(v); renderScene(); } }; };
@@ -1805,7 +1815,8 @@ function renderScene() {
   renderCsTriads();
   // Labels
   const fm = featMap();
-  const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id)).map((f) => {
+  const focus = anFocusIds();
+  const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id) && (!focus || focus.has(f.id))).map((f) => {
     const m = f.measured!;
     const anchor = (f.type === 'Abstand' ? m.p1!.map((v, i) => (v + m.p2![i]) / 2) : m.center) as V3;
     return { id: f.id, anchor, html: labelHTML(f, fm), color: hex(f.color), offset: state.labelOffsets.get(f.id) ?? null, selected: state.sel.includes(f.id) };
