@@ -88,12 +88,33 @@ export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: F
   if (c.kind !== 'Position' && c.kind !== 'Profil (Bezug)') return [];
   if (!f?.measured || !ds.length || ds.some((d) => !d?.measured)) return [0, 1, 2];
   const F = buildDRF(ds), k = datumKind(f.type);
-  const nl = dirLocal(F, unit(f.measured.normal)), ax = [0, 1, 2].reduce((a, i) => (Math.abs(nl[i]) > Math.abs(nl[a]) ? i : a), 0);
+  const ax = nominalDirLocal(F, f.measured.normal, (c as { basic?: (number | null)[] }).basic).ax;
   if (k === 'plane') return [ax];
   if (k === 'axis' && f.type !== 'Torus') return [0, 1, 2].filter((i) => i !== ax);
   return [0, 1, 2];
 }
 export const NOMINAL_MISSING = 'Nominal missing';
+const DEG = Math.PI / 180;
+/** TED angles of the nominal direction (Position): basic[3] = θ from DRF Z, basic[4] = φ about Z from DRF X (degrees). */
+export const hasTedAngle = (basic?: (number | null)[]) => basic?.[3] != null || basic?.[4] != null;
+/**
+ * Nominal direction (axis direction or plane normal) in DRF-local coordinates. With TED angles θ/φ it is
+ * (sinθ cosφ, sinθ sinφ, cosθ) – any oblique direction; without them it is the DRF axis nearest to the actual direction.
+ * `ax` = dominant component (the coordinate along which the TED point is not needed).
+ */
+export function nominalDirLocal(F: DRF, actual: Vec3, basic?: (number | null)[]): { g: Vec3; ax: number; angled: boolean } {
+  const a = unit(dirLocal(F, unit(actual))), big = (v: Vec3) => [0, 1, 2].reduce((q, k) => (Math.abs(v[k]) > Math.abs(v[q]) ? k : q), 0);
+  if (hasTedAngle(basic)) { const t = (basic![3] ?? 0) * DEG, p = (basic![4] ?? 0) * DEG; let g: Vec3 = [Math.sin(t) * Math.cos(p), Math.sin(t) * Math.sin(p), Math.cos(t)]; if (dot(g, a) < 0) g = scale(g, -1); return { g, ax: big(g), angled: true }; }
+  const ax = big(a), g: Vec3 = [0, 0, 0]; g[ax] = 1; return { g, ax, angled: false };
+}
+/** Nominal of a Position control in the DRF: direction (local + world) and TED point (local). Non-required components:
+ *  parallel nominal → actual value (does not matter), oblique nominal → 0 (the TED point lies on that DRF plane). */
+export function positionNominal(F: DRF, f: Feature, basic?: (number | null)[]): { g: Vec3; ax: number; angled: boolean; b: Vec3; dirW: Vec3; pointW: Vec3 } {
+  const n = nominalDirLocal(F, f.measured!.normal, basic), loc = toLocal(F, f.measured!.center);
+  const b = [0, 1, 2].map((i) => (basic?.[i] ?? (n.angled ? 0 : loc[i])) as number) as Vec3;
+  const W = (v: Vec3): Vec3 => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
+  return { ...n, b, dirW: W(n.g), pointW: add(F.o, W(b)) };
+}
 export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: Feature[]): boolean {
   return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
 }
@@ -146,30 +167,26 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
       return { value: elemSize(f) * Math.sin(err), detail: `angle error ${(err * 180 / Math.PI).toFixed(4)}° over ${elemSize(f).toFixed(2)} mm` };
     }
     case 'Position': {
-      const F = buildDRF(D);
-      const loc = toLocal(F, m.center), b: Vec3 = [B(0, loc[0]), B(1, loc[1]), B(2, loc[2])], d = sub(loc, b); // non-required components (e.g. along the axis) do not matter
+      const F = buildDRF(D), N = positionNominal(F, f, c.basic), { g, b } = N, tag = N.angled ? `oblique nominal θ ${B(3)}° φ ${B(4)}°` : `nominal ∥ ${'XYZ'[N.ax]}`;
+      const loc = toLocal(F, m.center);
       if (f.type === 'Ebene') {
-        const nl = dirLocal(F, dirOf(f)), ax = [0, 1, 2].reduce((a, k) => (Math.abs(nl[k]) > Math.abs(nl[a]) ? k : a), 0);
-        const nn: Vec3 = [0, 0, 0]; nn[ax] = 1;
-        const P = pts(); if (!P) return { value: 2 * Math.abs(d[ax]) + m.form };
-        let mx = 0; for (const q of P) mx = Math.max(mx, Math.abs(toLocal(F, q)[ax] - b[ax]));
-        return { value: 2 * mx, detail: `Ebene ⟂ ${'XYZ'[ax]} (DRF ${F.text})` };
+        const P = pts(); if (!P) return { value: 2 * Math.abs(dot(sub(loc, b), g)) + m.form };
+        let mx = 0; for (const q of P) mx = Math.max(mx, Math.abs(dot(sub(toLocal(F, q), b), g)));
+        return { value: 2 * mx, detail: `plane, ${tag} (DRF ${F.text})` };
       }
       if (datumKind(f.type) === 'axis' && f.type !== 'Torus') {
-        // Soll-Achse: durch das theoretisch genaue Maß, Richtung = nächstliegende DRF-Achse; ganze Ist-Achse (Endpunkte) muss in Ø-Zone
-        const a = unit(dirLocal(F, dirOf(f))), ax = [0, 1, 2].reduce((q, k) => (Math.abs(a[k]) > Math.abs(a[q]) ? k : q), 0);
-        const g: Vec3 = [0, 0, 0]; g[ax] = 1;
-        // cylinder/cone with points: derived median line (section centres, ISO 12180-1) must lie in the Ø zone
+        // nominal axis through the TED point with the nominal direction; the derived median line must lie in the Ø zone
+        const a = unit(dirLocal(F, dirOf(f)));
         const P = f.type === 'Zylinder' || f.type === 'Kegel' ? pts() : null;
         const ML = P && P.length >= 64 ? medianLine(m, P) : [];
         if (ML.length >= 2) { let mx = 0; for (const q of ML) mx = Math.max(mx, norm(orth(sub(toLocal(F, q), b), g)));
-          return { value: 2 * mx, detail: `derived median line (${ML.length} sections) in Ø zone around nominal axis ∥ ${'XYZ'[ax]} (DRF ${F.text})` }; }
+          return { value: 2 * mx, detail: `derived median line (${ML.length} sections) in Ø zone around the ${tag} (DRF ${F.text})` }; }
         const L = f.type === 'Zylinder' || f.type === 'Kegel' ? m.length || 0 : 0;
         let mx = 0;
         for (const s of [-0.5, 0.5]) { const e = add(loc, scale(a, s * L)); mx = Math.max(mx, norm(orth(sub(e, b), g))); }
-        return { value: 2 * mx, detail: `zylindrische Zone um Soll-Achse ∥ ${'XYZ'[ax]} (DRF ${F.text}, axis end points – no points)` };
+        return { value: 2 * mx, detail: `Ø zone around the ${tag} (DRF ${F.text}, axis end points – no points)` };
       }
-      return { value: 2 * norm(d), detail: `spherical zone SØ (DRF ${F.text})` };
+      return { value: 2 * norm(sub(loc, b)), detail: `spherical zone SØ (DRF ${F.text})` };
     }
     case 'Koaxialität': case 'Konzentrizität': case 'Rundlauf': case 'Gesamtrundlauf': {
       if (k0 !== 'axis' && !(kind === 'Konzentrizität' && k0 === 'point')) return { value: null, flag: 'datum must be an axis' };

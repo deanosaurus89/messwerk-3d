@@ -115,3 +115,28 @@ describe('Orientation / coaxiality / straightness of axis from the derived media
     for (const t of ['Zylinder', 'Kegel'] as const) expect(controlCatalog(t).flatMap((g) => g.items.map((i) => i.kind))).toContain('Geradheit Achse');
   });
 });
+
+import { positionNominal } from '../src/core/datum';
+describe('Oblique TEDs (θ/φ) for position', () => {
+  // hole tilted 30° from Z towards +X, passing through (20,20,0) on datum A (z=0)
+  const th = 30 * Math.PI / 180, dir: Vec3 = [Math.sin(th), 0, Math.cos(th)];
+  const P: Vec3[] = []; const [u, v] = [[Math.cos(th), 0, -Math.sin(th)] as Vec3, [0, 1, 0] as Vec3];
+  for (let i = 0; i < 4000; i++) { const t = (20 * i) / 4000, a = i * 0.37; P.push([20 + 0.01 + dir[0] * t + 5 * (Math.cos(a) * u[0] + Math.sin(a) * v[0]), 20 + dir[1] * t + 5 * (Math.cos(a) * u[1] + Math.sin(a) * v[1]), dir[2] * t + 5 * (Math.cos(a) * u[2] + Math.sin(a) * v[2])]); }
+  const ctr: Vec3 = [20.01 + dir[0] * 10, 20, dir[2] * 10];
+  const Zo = F(11, 'Zo', 'Zylinder', fit('Zylinder', ctr, dir, { radius: 5, diameter: 10, length: 20 }));
+  const m = new Map([A, B, C, Zo].map((f) => [f.id, f])), ctx = { points: (id: number) => (id === 11 ? P : null) } as any;
+  const A0 = F(1, 'Ebene 1', 'Ebene', fit('Ebene', [50, 30, 0], [0, 0, 1]), 'A'); m.set(1, A0);
+  it('nominal direction from θ/φ, TED point on the datum plane; offset 0.01 in X → Ø ≈ 0.02·cos30°', () => {
+    const c = ctl('Position', [1, 2, 3], { basic: [20, 20, null, 30, 0] }); c.featureIds = [11];
+    const r = evaluate(c, m, ctx); expect(r.detail).toContain('oblique');
+    expect(r.measured!).toBeCloseTo(2 * 0.01 * Math.cos(th), 4);
+  });
+  it('without angles the nominal snaps to the nearest DRF axis (Z) → large value', () => {
+    const c = ctl('Position', [1, 2, 3], { basic: [20, 20, null] }); c.featureIds = [11];
+    expect(evaluate(c, m, ctx).measured!).toBeGreaterThan(5);
+  });
+  it('positionNominal: θ=90, φ=90 → nominal ∥ Y', () => {
+    const N = positionNominal({ o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], text: '', free: [] }, Zo, [1, 2, 3, 90, 90]);
+    expect(N.ax).toBe(1); expect(N.g[1]).toBeCloseTo(1, 12); expect(N.b).toEqual([1, 2, 3]);
+  });
+});

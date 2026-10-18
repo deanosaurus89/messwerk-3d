@@ -39,7 +39,7 @@ import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
-import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING } from './core/datum';
+import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING, hasTedAngle } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -810,7 +810,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
   const miss = c ? missingBasic(c, f, DS) : false;
-  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
+  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic, f.measured!.normal, f) : undefined;
   if (nominal && miss) nominal = { dir: nominal.dir };
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
     `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
@@ -932,8 +932,8 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
   const req = f ? requiredBasic(c, f, ds) : [];
   const r = evaluate(c, featMap(), ctx);
-  const ted = (c.kind === 'Position' || c.kind === 'Profil (Bezug)' ? ['X', 'Y', 'Z'] : c.kind === 'Neigung' ? ['∠°'] : []).map((a, k) =>
-    `<label title="${req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)')}">[${a}] <input data-ted="${k}" class="ted${req.includes(k) && c.basic?.[k] == null ? ' req' : ''}" inputmode="decimal" placeholder="${req.includes(k) ? tt('required') : tt('optional')}" value="${c.basic?.[k] ?? ''}"></label>`).join('');
+  const ted = tedFields(c, req).map(([a, k, tip]) =>
+    `<label title="${tip ?? (req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)'))}">${a} <input data-ted="${k}" class="ted${req.includes(k) && c.basic?.[k] == null ? ' req' : ''}" inputmode="decimal" placeholder="${req.includes(k) ? tt('required') : tt('optional')}" value="${c.basic?.[k] ?? ''}"></label>`).join('');
   const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b> <span class="st ${r.status}">${statusText(r.status)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
@@ -1063,14 +1063,24 @@ function defaultDatums(kind: ControlKind, fid: number): number[] {
 }
 /** TED inputs (theoretically exact dimensions) of a datum control: empty until entered, required ones marked;
  *  'Use actual as nominal' only in the ⋯ menu. */
+/** TED input fields of a control: [label, index into basic, tooltip override]. Position: X Y Z + optional angles θ/φ. */
+function tedFields(c: Control, req: number[]): [string, number, string | null][] {
+  const ang = hasTedAngle(c.basic);
+  const xyz = (['X', 'Y', 'Z'] as const).map((a, k) => [`[${a}]`, k, !req.includes(k) && ang ? tt('Coordinate of the TED point along the oblique nominal direction (empty = 0: the point lies on that DRF plane)') : null] as [string, number, string | null]);
+  if (c.kind === 'Position') return [...xyz,
+    ['[θ°]', 3, tt('Oblique nominal direction (TED angle): angle from the DRF Z axis in degrees. Empty θ and φ = parallel to the nearest DRF axis')],
+    ['[φ°]', 4, tt('Oblique nominal direction (TED angle): angle about Z, measured from the DRF X axis, in degrees')]];
+  if (c.kind === 'Profil (Bezug)') return xyz;
+  if (c.kind === 'Neigung') return [['[∠°]', 0, null]];
+  return [];
+}
 function tedInputs(c: Control, f: FeatureView, lab: (t: string, el: HTMLElement) => void) {
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
   const req = requiredBasic(c, f, ds);
   const inp = (k: number) => { const i = numInput(c.basic?.[k] ?? null, (x) => { const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = x; c.basic = b; });
     i.placeholder = req.includes(k) ? tt('required') : tt('optional'); i.classList.add('ted'); if (req.includes(k) && c.basic?.[k] == null) i.classList.add('req');
     i.title = req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)'); return i; };
-  if (c.kind === 'Position' || c.kind === 'Profil (Bezug)') ['X', 'Y', 'Z'].forEach((a, k) => lab(`[${a}]`, inp(k)));
-  if (c.kind === 'Neigung') lab('[∠°]', inp(0));
+  for (const [l, k, tip] of tedFields(c, req)) { const i = inp(k); if (tip) i.title = tip; lab(l, i); }
   if (req.length) { const m = document.createElement('button'); m.className = 'btn ted-more'; m.textContent = '⋯'; m.title = tt('More');
     m.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); renderAll(); } }]]); };
     lab('', m); }

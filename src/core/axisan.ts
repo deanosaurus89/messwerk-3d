@@ -9,7 +9,7 @@
 //  - straightness of the median line: same as orientation, but with the fitted direction.
 import { FitResult, fitCircle2D } from './fit';
 import { Vec3, add, basis, dot, norm, scale, sub, unit } from './linalg';
-import { buildDRF } from './datum';
+import { buildDRF, positionNominal } from './datum';
 import { lsqLine, medianLine, minCircle, orientNominal, orientZone, straightnessMZ } from './median';
 export { medianLine, minCircle };
 import type { Feature } from './features';
@@ -65,15 +65,14 @@ export function displayPoint(an: AxisAnalysis, p: Vec3, formEx: number, locEx = 
 }
 /** Display position of a point on the nominal axis/zone: real, or with the location exaggeration around the nominal axis. */
 export const nominalFoot = (an: AxisAnalysis, p: Vec3): Vec3 => add(an.origin, scale(an.dir, dot(sub(p, an.origin), an.dir)));
-/** Nominal axis for a control: Position → through the basic dimensions in the full DRF (A|B|C), direction = the
- *  DRF axis closest to the actual axis; orientation → direction only (zone floats); coaxiality → datum axis. */
-export function axisNominal(kind: string, DS: Feature[], basic: Vec3 | undefined, a: Vec3): { dir: Vec3; point?: Vec3; planeN?: Vec3 } | undefined {
+/** Nominal axis for a control: Position → through the basic dimensions in the full DRF (A|B|C), direction = TED
+ *  angles θ/φ or the DRF axis closest to the actual axis; orientation → direction only (zone floats); coaxiality → datum axis. */
+export function axisNominal(kind: string, DS: Feature[], basic: (number | null)[] | undefined, a: Vec3, f?: Feature): { dir: Vec3; point?: Vec3; planeN?: Vec3 } | undefined {
   const D = DS[0]?.measured; if (!D) return undefined;
   const g = D.normal;
   if (kind === 'Position') {
-    const F = buildDRF(DS), al = [F.x, F.y, F.z], k = [0, 1, 2].reduce((q, i) => (Math.abs(dot(a, al[i])) > Math.abs(dot(a, al[q])) ? i : q), 0);
-    const b = basic ?? [0, 0, 0];
-    return { dir: al[k], point: add(F.o, add(scale(F.x, b[0]), add(scale(F.y, b[1]), scale(F.z, b[2])))) };
+    const N = positionNominal(buildDRF(DS), f ?? ({ measured: { center: D.center, normal: a } } as Feature), basic);
+    return { dir: N.dirW, point: N.pointW };
   }
   if (kind === 'Koaxialität') return { dir: g, point: D.center };
   return orientNominal(kind, D.type === 'Ebene', g, a, kind === 'Neigung' ? (basic?.[0] ?? 0) : 0);
