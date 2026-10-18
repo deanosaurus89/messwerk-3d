@@ -50,11 +50,31 @@ describe('unified search region (0.19)', () => {
     expect(q.maxDist).toBe(3); expect(q.fill).toBe(true); expect(q.margin).toBe(0.5); expect('fillBand' in q).toBe(false);
     const r = normReex({ maxDist: 0.2, sigma: 3, maxAngleDeg: 30, margin: 1, fillBand: 0 }); expect(r.fill).toBeFalsy(); expect(r.maxDist).toBe(0.2);
   });
-  it('lateral extension: automatic = search distance, at least 0.5 mm', () => {
-    expect(lateralOf(normReex({ maxDist: 0.1 }))).toBe(0.5); expect(lateralOf(normReex({ maxDist: 2 }))).toBe(2); expect(lateralOf(normReex({ maxDist: 2, margin: 0.2 }))).toBe(0.2);
+  it('lateral extension: default 0 (zone = original contour), explicit value extends', () => {
+    expect(lateralOf(normReex({ maxDist: 0.1 }))).toBe(0); expect(lateralOf(normReex({ maxDist: 2, margin: null }))).toBe(0); expect(lateralOf(normReex({ maxDist: 2, margin: 0.2 }))).toBe(0.2);
     const fit: any = { type: 'Zylinder', center: [0, 0, 0], normal: [0, 0, 1], radius: 5, length: 10 };
     const R = buildRegion(fit, Float32Array.from([5, 0, -5, 0, 5, 5]), Uint32Array.from([0, 1]), { maxDist: 0.1, sigma: 3, maxAngleDeg: 30 });
-    expect(inRegion(R, [5, 0, 5.45])).toBe(true); expect(inRegion(R, [5, 0, 5.6])).toBe(false);
+    expect(inRegion(R, [5, 0, 4.95])).toBe(true); expect(inRegion(R, [5, 0, 5.2])).toBe(false);
+    const R2 = buildRegion(fit, Float32Array.from([5, 0, -5, 0, 5, 5]), Uint32Array.from([0, 1]), { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0.5 });
+    expect(inRegion(R2, [5, 0, 5.45])).toBe(true);
+  });
+  it('plane zone follows the original region exactly; exclusion distance ± shrinks / grows it', () => {
+    // 20×20 mm patch of 1 mm quads (the original region), mesh continues to 30×30
+    const pos: number[] = [], tris: number[] = [], n = 31, id = (i: number, j: number) => j * n + i;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pos.push(i, j, 0);
+    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) tris.push(id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j), id(i + 1, j + 1), id(i, j + 1));
+    const cur: number[] = []; for (let j = 0; j <= 20; j++) for (let i = 0; i <= 20; i++) cur.push(id(i, j));
+    const fit: any = { type: 'Ebene', center: [10, 10, 0], normal: [0, 0, 1] }, P = Float32Array.from(pos), C = Uint32Array.from(cur), T = Uint32Array.from(tris);
+    const base = { maxDist: 0.1, sigma: 3, maxAngleDeg: 30 };
+    const R0 = buildRegion(fit, P, C, base, [], T);
+    expect(inRegion(R0, [19.8, 10, 0])).toBe(true); expect(inRegion(R0, [20.6, 10, 0])).toBe(false); expect(inRegion(R0, [20.6, 20.6, 0])).toBe(false); // no hidden margin
+    const Rin = buildRegion(fit, P, C, { ...base, inset: 2 }, [], T);
+    expect(inRegion(Rin, [17.5, 10, 0])).toBe(true); expect(inRegion(Rin, [19, 10, 0])).toBe(false);
+    const Rout = buildRegion(fit, P, C, { ...base, inset: -2 }, [], T);
+    expect(inRegion(Rout, [21.5, 10, 0])).toBe(true); expect(inRegion(Rout, [23, 10, 0])).toBe(false);
+    const nrm = new Float32Array(pos.length); for (let k = 2; k < nrm.length; k += 3) nrm[k] = 1;
+    const out = reextract(fit, P, nrm, C, { ...base, inset: -2 }, [], T); expect(out.indices.length).toBeGreaterThan(C.length);
+    const inn = reextract(fit, P, nrm, C, { ...base, inset: 2 }, [], T); expect(inn.indices.length).toBeLessThan(C.length);
   });
   it('outlier removal 0 = off keeps all points; n × RMS removes the largest deviations', () => {
     const pos: number[] = [], nrm: number[] = [];

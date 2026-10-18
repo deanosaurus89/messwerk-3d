@@ -1,11 +1,11 @@
 <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MessWerk 3D – Testliste 2026.0.19</title><style>
+<title>MessWerk 3D – Testliste 2026.0.20</title><style>
 body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:12px;background:#f3f5f8;color:#1b2633}h1{font-size:18px}
 .it{background:#fff;border-radius:10px;padding:10px;margin:10px 0;box-shadow:0 1px 3px #0002}.v{color:#789;font-size:12px}.t{margin:6px 0}
 .s label{display:inline-block;margin:4px 10px 4px 0;font-size:15px}textarea{width:100%;box-sizing:border-box;min-height:44px;font-size:15px;display:none}
 .it.need textarea{display:block}.it.err textarea{border:2px solid #c62828}button{font-size:17px;padding:12px 18px;border:0;border-radius:10px;background:#1565c0;color:#fff;width:100%}
 #out{width:100%;min-height:120px;margin-top:10px;font-size:13px;box-sizing:border-box}</style></head><body>
-<h1>MessWerk 3D – Testliste 2026.0.19</h1><p>Je Punkt Status wählen. Bei ⚠️/❌ bitte kurz notieren, was nicht passt. Eingaben werden lokal im Browser gespeichert.</p>
+<h1>MessWerk 3D – Testliste 2026.0.20</h1><p>Je Punkt Status wählen. Bei ⚠️/❌ bitte kurz notieren, was nicht passt. Eingaben werden lokal im Browser gespeichert.</p>
 <div class="it" data-id="C"><div class="h"><b>C</b> <span class="v">0.14/0.16</span></div><div class="t">Analyze über Baum, Ribbon und ◐; Live-Edit Toleranz/TED mit OK/NOK-Wechsel; fremde Beschriftungen aus, „Show other annotations“</div>
 <div class="s"><label><input type="radio" name="C" value="ok">✅ Vollständig</label><label><input type="radio" name="C" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="C" value="fail">❌ Geht nicht</label><label><input type="radio" name="C" value="skip" checked>⏸ Nicht getestet</label></div>
 <textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div><div class="it" data-id="D"><div class="h"><b>D</b> <span class="v">0.14/0.16</span></div><div class="t">Achsansicht: Medianlinie an echter Lage, Überhöhung, Versatzpfeil, ▭ Zones, ◎ Envelope (lila)</div>
@@ -63,6 +63,30 @@ body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:12px;backgr
 <div class="it" data-id="Z"><div class="h"><b>Z</b> <span class="v">0.19</span></div><div class="t">Layout: Desktop – Dialog neben der 3D-Ansicht (verdeckt sie nicht); iPhone – Dialog als Panel unten (max. ~45 % Höhe), 3D-Ansicht oben sichtbar, Navigationswürfel darüber</div>
 <div class="s"><label><input type="radio" name="Z" value="ok">✅ Vollständig</label><label><input type="radio" name="Z" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="Z" value="fail">❌ Geht nicht</label><label><input type="radio" name="Z" value="skip" checked>⏸ Nicht getestet</label></div>
 <textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AA"><div class="h"><b>AA</b> <span class="v">0.20</span></div><div class="t">Desktop Click & grow (Ebene, Zylinder, Kegel, Kugel, Auto): mehrere Klicks nacheinander, dazwischen zoomen/drehen – Modus bleibt, jeder Klick neue Vorschau; Analysebereich nur mit Shift+Mausrad</div>
+<div class="s"><label><input type="radio" name="AA" value="ok">✅ Vollständig</label><label><input type="radio" name="AA" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AA" value="fail">❌ Geht nicht</label><label><input type="radio" name="AA" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AB"><div class="h"><b>AB</b> <span class="v">0.20</span></div><div class="t">Desktop LEERTASTE = Navigationspause in jedem Werkzeug (Anzeige oben), nochmal Leertaste = gleicher Zustand; in Eingabefeldern normal tippen</div>
+<div class="s"><label><input type="radio" name="AB" value="ok">✅ Vollständig</label><label><input type="radio" name="AB" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AB" value="fail">❌ Geht nicht</label><label><input type="radio" name="AB" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AC"><div class="h"><b>AC</b> <span class="v">0.20</span></div><div class="t">„Alle innerhalb Rand“-Knopf schaltet Ausreißerfilter ab; Ebenheit enthält Beulen/Spritzer, keine Wand-/Verrundungspunkte</div>
+<div class="s"><label><input type="radio" name="AC" value="ok">✅ Vollständig</label><label><input type="radio" name="AC" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AC" value="fail">❌ Geht nicht</label><label><input type="radio" name="AC" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AD"><div class="h"><b>AD</b> <span class="v">0.20</span></div><div class="t">Re-Extraktion: Zone = exakt ursprünglicher Bereich; Rand-Ausschluss ± (+ schrumpft, − wächst); Enter aktualisiert Vorschau; „Apply extraction“ übernimmt</div>
+<div class="s"><label><input type="radio" name="AD" value="ok">✅ Vollständig</label><label><input type="radio" name="AD" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AD" value="fail">❌ Geht nicht</label><label><input type="radio" name="AD" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AE"><div class="h"><b>AE</b> <span class="v">0.20</span></div><div class="t">Extraktionszone nur sichtbar solange der Dialog offen ist; Häkchen „Show extraction zone“ (global, bleibt gemerkt), synchron mit Ansicht › Zone und ⚙-Menü</div>
+<div class="s"><label><input type="radio" name="AE" value="ok">✅ Vollständig</label><label><input type="radio" name="AE" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AE" value="fail">❌ Geht nicht</label><label><input type="radio" name="AE" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AF"><div class="h"><b>AF</b> <span class="v">0.20</span></div><div class="t">Zylinder/Kegel/Kugel: „＋ Add region“ (weitere Flächen anklicken) und Parameter › „Boundary from: Fitted geometry“ mit Rand-Ausschluss ± (Zone sichtbar, live)</div>
+<div class="s"><label><input type="radio" name="AF" value="ok">✅ Vollständig</label><label><input type="radio" name="AF" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AF" value="fail">❌ Geht nicht</label><label><input type="radio" name="AF" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AG"><div class="h"><b>AG</b> <span class="v">0.20</span></div><div class="t">Neue Prüfmerkmale mit Bezug: nur Primär (Pflicht, rot), keine Vorbelegung; Sekundär/Tertiär erscheinen nacheinander</div>
+<div class="s"><label><input type="radio" name="AG" value="ok">✅ Vollständig</label><label><input type="radio" name="AG" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AG" value="fail">❌ Geht nicht</label><label><input type="radio" name="AG" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AH"><div class="h"><b>AH</b> <span class="v">0.20</span></div><div class="t">Koordinatensystem: 3 Slots Primär/Sekundär/Tertiär mit Geometrie + Achse (±X/Y/Z), Primär-Ebene → +Z aus dem Material, Dreibein springt live, Flip / Rotate 90°</div>
+<div class="s"><label><input type="radio" name="AH" value="ok">✅ Vollständig</label><label><input type="radio" name="AH" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AH" value="fail">❌ Geht nicht</label><label><input type="radio" name="AH" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
 <button id="go">Ergebnis kopieren</button><textarea id="out" readonly placeholder="Ergebnis erscheint hier – falls Kopieren nicht klappt, hier markieren und kopieren."></textarea>
 <script>
 const K='mw3d-test-0.17b';const st=JSON.parse(localStorage.getItem(K)||'{}');
@@ -71,7 +95,7 @@ document.querySelectorAll('.it').forEach(el=>{const id=el.dataset.id,ta=el.query
  const upd=()=>{const s=el.querySelector('input:checked').value;el.classList.toggle('need',s==='warn'||s==='fail'||ta.value);st[id]={s,c:ta.value};localStorage.setItem(K,JSON.stringify(st))};
  el.querySelectorAll('input').forEach(i=>i.onchange=upd);ta.oninput=upd;upd()});
 const L={ok:'✅',warn:'⚠️',fail:'❌',skip:'⏸'};
-document.getElementById('go').onclick=()=>{let bad=false,lines=['Testergebnis MessWerk 3D 2026.0.19'];
+document.getElementById('go').onclick=()=>{let bad=false,lines=['Testergebnis MessWerk 3D 2026.0.20'];
  document.querySelectorAll('.it').forEach(el=>{const id=el.dataset.id,s=el.querySelector('input:checked').value,c=el.querySelector('textarea').value.trim();
   const e=(s==='warn'||s==='fail')&&!c;el.classList.toggle('err',e);if(e)bad=true;lines.push(`${id} ${L[s]}${c?' – '+c:''}`)});
  if(bad){alert('Bitte bei ⚠️/❌ einen Kommentar eintragen.');return}

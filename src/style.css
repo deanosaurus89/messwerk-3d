@@ -425,3 +425,7 @@ input.ted:disabled { background:#f1f3f5; }
 #dialog .reex .row.chk { display:flex; align-items:center; gap:6px; }
 #dialog .reex .row.chk label { display:flex; align-items:center; gap:6px; text-align:left; flex:1; }
 #dialog .reex .rx-live { margin:6px 0; padding:4px 6px; background:#eef4fb; border-radius:4px; }
+.dslot.req { border:2px solid #d32f2f; background:#fff5f5; }
+.req-l { color:#d32f2f; font-weight:600; font-size:11px; } .cs-adj { flex-wrap:wrap; gap:6px; } .cs-flip { padding:3px 8px; margin-left:6px; }
+#nav-pause-ind { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:9; background:#22303f; color:#fff; padding:6px 14px; border-radius:16px; font-weight:600; font-size:13px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+body.nav-pause #scene canvas { cursor:grab; }

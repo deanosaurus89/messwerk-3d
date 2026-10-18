@@ -199,8 +199,10 @@ export class Viewer {
         const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => pts.push(...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray());
         const wall = (i0: number, j0: number, i1: number, j1: number) => { const a = P(i0, j0, -R.d), b = P(i1, j1, -R.d), c = P(i1, j1, R.d), d = P(i0, j0, R.d); quad(a, b, c, d);
           edge.push(...a.toArray(), ...b.toArray(), ...d.toArray(), ...c.toArray()); };
+        // top/bottom: one quad per horizontal run of cells (keeps fine grids light)
+        for (let j = 0; j < R.hgt; j++) for (let i = 0; i < R.w; i++) if (on(i, j) && !on(i - 1, j)) { let e = i; while (on(e + 1, j)) e++;
+          for (const z of [-R.d, R.d]) quad(P(i, j, z), P(e + 1, j, z), P(e + 1, j + 1, z), P(i, j + 1, z)); }
         for (let j = 0; j < R.hgt; j++) for (let i = 0; i < R.w; i++) if (on(i, j)) {
-          for (const z of [-R.d, R.d]) quad(P(i, j, z), P(i + 1, j, z), P(i + 1, j + 1, z), P(i, j + 1, z));
           if (!on(i, j - 1)) wall(i, j, i + 1, j); if (!on(i + 1, j)) wall(i + 1, j, i + 1, j + 1); if (!on(i, j + 1)) wall(i + 1, j + 1, i, j + 1); if (!on(i - 1, j)) wall(i, j + 1, i, j);
         }
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const m = new THREE.Mesh(g, mat); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m);
