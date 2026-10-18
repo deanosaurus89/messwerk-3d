@@ -23,7 +23,8 @@ export function memberDia(m: PosMember, w: number, tr: Vec3): number {
   for (const q of m.ML) mx = Math.max(mx, norm(orth(sub(q, p), g)));
   return 2 * mx;
 }
-export interface PosResult { dia: number[]; excess: number; worst: number; w: number; tr: Vec3; }
+export interface PosResult { dia: number[]; excess: number; worst: number; w: number; tr: Vec3; /** per member: its transformed nominal (local point + direction) */ nom: { p: Vec3; g: Vec3 }[]; }
+export const nominalAfter = (m: PosMember, w: number, tr: Vec3) => ({ p: add(rotZ(m.nomP, w), tr), g: rotZ(m.g, w) });
 
 function solve(members: PosMember[], fr: PosFreedom): PosResult {
   const nT = fr.freeT.length, nS = fr.shiftR > 0 ? 2 : 0, nR = fr.freeR ? 1 : 0, n = nT + nS + nR;
@@ -46,14 +47,14 @@ function solve(members: PosMember[], fr: PosFreedom): PosResult {
     if (best.v < ev(x0).e) x = best.x; else x = x0;
   }
   const r = ev(x), u = unpack(x), worst = r.d.reduce((bi, v, i) => (v - members[i].t > r.d[bi] - members[bi].t ? i : bi), 0);
-  return { dia: r.d, excess: r.e, worst, w: u.w, tr: u.tr };
+  return { dia: r.d, excess: r.e, worst, w: u.w, tr: u.tr, nom: members.map((m) => nominalAfter(m, u.w, u.tr)) };
 }
 /** Evaluate members: `cz` (common zone / simultaneous) → one transform for all; otherwise each member separately. */
 export function evalPositionGroup(members: PosMember[], fr: PosFreedom, cz = true): PosResult {
   if (cz || members.length === 1) return solve(members, fr);
   const rs = members.map((m) => solve([m], fr)), dia = rs.map((r) => r.dia[0]);
   const worst = dia.reduce((bi, v, i) => (v - members[i].t > dia[bi] - members[bi].t ? i : bi), 0);
-  return { dia, excess: Math.max(...rs.map((r) => r.excess)), worst, w: rs[worst].w, tr: rs[worst].tr };
+  return { dia, excess: Math.max(...rs.map((r) => r.excess)), worst, w: rs[worst].w, tr: rs[worst].tr, nom: rs.map((r) => r.nom[0]) };
 }
 /** Bonus tolerance from the material modifier (ISO 2692). `d` = actual mating size (Ⓜ) or minimum-material size (Ⓛ). */
 export function bonus(mod: 'M' | 'L', hole: boolean, d: number, nominal: number, tolUp: number, tolLo: number): { bonus: number; limit: number; beyond: boolean } {

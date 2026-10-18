@@ -43,7 +43,7 @@ import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, NOMINAL_MISSING, NOMINAL_UNCONFIRMED, isPattern, tedSpec, resolveBasic, TedField } from './core/datum';
-import { datumText, isZoneControl, MOD_SYM } from './core/features';
+import { datumText, isZoneControl, MOD_SYM, ControlResult } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
 import { Tour, TourStep } from './training';
@@ -840,7 +840,9 @@ type AnKind = 'form' | 'mesh' | 'axis';
 const AXIS_CTRL = ['Position', 'Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Koaxialität', 'Geradheit Achse'];
 /** Which analysis view a control gets: axis view, surface colour map, or none (dimensions). */
 function ctrlAnalysisKind(c: Control): 'axis' | 'form' | null {
-  const f = state.features.find((x) => x.id === c.featureIds[0]); if (!f || !f.indices.length || !f.measured) return null;
+  const f = state.features.find((x) => x.id === c.featureIds[0]); if (!f || !f.measured) return null;
+  if (c.kind === 'Position' && isPattern(f)) return 'axis'; // bolt-circle pattern: axis view of every hole
+  if (!f.indices.length) return null;
   if ((f.type === 'Zylinder' || f.type === 'Kegel') && AXIS_CTRL.includes(c.kind)) return 'axis';
   if ((isZoneControl(c.kind) || isDatumControl(c.kind)) && f.type !== 'Abstand' && f.type !== 'Winkel') return 'form';
   return null;
@@ -849,6 +851,16 @@ const ctrlTitle = (c: Control) => { const f = state.features.find((x) => x.id ==
 /** Axis analysis of one cylinder/cone for one control (or against its own fitted axis). */
 function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   const pts = featPoints(f.id) ?? []; // same point sample as the Controls table → identical values
+  if (C?.kind === 'Position' && C.datumIds?.length) {
+    // the table evaluation (free DOF, datum shift, pattern CZ/SZ, Ⓜ/Ⓛ) gives per hole its nominal axis and permitted t → same in the view
+    const r = evaluate(C, featMap(), ctx), mi = r.members?.findIndex((m) => m.fid === f.id) ?? -1;
+    if (mi >= 0 && r.flag !== NOMINAL_MISSING) {
+      const m = r.members![mi], many = r.members!.length > 1;
+      const an = analyzeAxis(f.measured!, pts, { dir: m.dirW, point: m.nomW }, m.tol > 0 ? m.tol : null, 0,
+        `${f.name} · ${kindName(C.kind)} → ${C.datumIds.map(nameOf).join('|')}${many ? ` · ${tt('hole {0} of {1}', mi + 1, r.members!.length)}${mi === r.worst ? ' · ' + tt('worst margin') : ''}` : ''}${m.bonus > 1e-12 ? ` · t ${fmt(C.tolUp, 4)} + ${tt('bonus')} ${fmt(m.bonus, 4)}` : ''} · ${tt('margin')} ${sgn(m.margin, 4)}${r.flag === NOMINAL_UNCONFIRMED ? ` · ⚠ ${tt('Nominal unconfirmed')}` : ''}`);
+      an.zone = m.dia; return an;
+    }
+  }
   const c = C && C.kind !== 'Geradheit Achse' && C.datumIds?.length ? C : null;
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
@@ -896,7 +908,8 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   },
   axis: async () => {
     const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
-    let fs = C ? state.features.filter((f) => f.id === C.featureIds[0]) : state.features.filter((f) => state.sel.includes(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
+    const pat = C ? state.features.find((f) => f.id === C.featureIds[0] && isPattern(f)) : undefined;
+    let fs = pat ? pat.cons!.refs.map((id) => state.features.find((f) => f.id === id)).filter((f): f is FeatureView => !!f?.measured && !!f.indices.length) : C ? state.features.filter((f) => f.id === C.featureIds[0]) : state.features.filter((f) => state.sel.includes(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
     if (!fs.length) fs = state.features.filter((f) => !state.hidden.has(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length).slice(0, 1);
     if (!fs.length) { toast(tt('Axis analysis needs a cylinder or cone – create one first.')); return null; }
     const axes = fs.map((f) => axisFor(f, C ?? null));
@@ -988,10 +1001,11 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(r)} ${stHtml(r)}` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
-      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label><span data-teds></span><span data-dia></span> ${st}</span>`,
+      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${c.datumIds?.length ? '<span data-dsl></span>' : ''}<span data-teds></span><span data-dia></span> ${st}${membersHtml(c, r)}</span>`,
     bind: (el) => {
       const upd = () => { void analyzeControl(c.id, true); };
       const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = Number(t.value.replace(',', '.')); if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; upd(); } };
+      const dsl = el.querySelector('.an-ctrl [data-dsl]'); if (dsl && f) dsl.appendChild(datumSlots(c, f, upd));
       const tz = el.querySelector('.an-ctrl [data-teds]'); if (tz) for (const t of spec) tz.appendChild(tedEl(c, t, upd, true));
       if (tz) { const all = tedConfirmAll(c, spec, upd); if (all) tz.appendChild(all); }
       const dz = el.querySelector('.an-ctrl [data-dia]'); if (dz && f && diaInfo(c, f).applies) dz.appendChild(diaButton(c, f, upd));
@@ -1234,6 +1248,14 @@ function czButton(c: Control, after: () => void): HTMLButtonElement {
   const on = c.cz !== false, b = document.createElement('button'); b.className = 'btn cz-tg' + (on ? ' on' : ''); b.textContent = on ? 'CZ' : 'SZ';
   b.title = on ? tt('Common zone (CZ): all holes of the pattern are checked together, the pattern may only move as one. Click for separate zones') : tt('Separate zones (SZ): each hole is checked on its own. Click for a common zone (CZ)');
   b.onclick = (e) => { e.stopPropagation(); c.cz = !on; after(); }; return b;
+}
+/** Per-hole table of a Position control (pattern and/or Ⓜ/Ⓛ): Ø, permitted t (+bonus), margin; worst-margin hole marked. */
+function membersHtml(c: Control, r: ControlResult, open = false): string {
+  const M = r.members; if (!M || (M.length < 2 && !c.mod)) return '';
+  const rows = M.map((m, i) => `<tr class="${i === r.worst ? 'worst' : ''}${m.margin < 0 ? ' nio' : ''}"><td>${i === r.worst ? '▶ ' : ''}${m.name}</td><td>${fmt(m.dia, 4)}</td><td>${fmt(c.tolUp, 4)}${c.mod ? ` + ${fmt(m.bonus, 4)}` : ''}</td><td>${fmt(m.tol, 4)}</td><td>${sgn(m.margin, 4)}</td></tr>`).join('');
+  const w = M[r.worst ?? 0];
+  return `<details class="pm" ${open ? 'open' : ''}><summary title="${tt('Per hole: measured position Ø, permitted tolerance (t + bonus from Ⓜ/Ⓛ) and margin = permitted − measured. ▶ = hole with the smallest margin (decides OK/NOK)')}">${M.length > 1 ? tt('{0} holes', M.length) + ' · ' : ''}${tt('worst margin')} ${sgn(w.margin, 4)}${M.length > 1 ? ` (${w.name})` : ''}</summary>
+    <table><thead><tr><th>${tt('Hole')}</th><th>Ø</th><th>t${c.mod ? ' + ' + tt('bonus') : ''}</th><th>${tt('permitted')}</th><th>${tt('margin')}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 /** Text after the value in the frame: Ⓜ/Ⓛ and CZ. */
 const frameMods = (c: Control, f?: FeatureView) => `${c.mod ? MOD_SYM[c.mod] : ''}${f && isPattern(f) && c.cz !== false ? ' CZ' : ''}`;
@@ -1702,6 +1724,7 @@ function renderTable() {
         ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : diaInfo(c, f).on ? 'Ø' : ''}${fmt(c.tolUp, 3)}${frameMods(c, f)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
           <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}${bonusText(r)}</span>${r.flag === NOMINAL_UNCONFIRMED ? stHtml(r) : `<span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`}`);
         if (r.detail) ed.title = r.detail;
+        const mh = membersHtml(c, r); if (mh) ed.insertAdjacentHTML('beforeend', mh);
         row.appendChild(ed);
       } else if (c && r) {
         const ed = document.createElement('span'); ed.className = 'cat-ed';

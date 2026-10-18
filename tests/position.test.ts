@@ -73,6 +73,12 @@ describe('pattern position', () => {
     expect(r.measured!).toBeCloseTo(2 * 20 * 2 * Math.sin(rot / 2), 4); expect(r.status).toBe('IO');
     expect(r.detail).toContain('pattern of 4');
   });
+  it('per-hole members: Ø, margin, worst-margin hole and the nominal axis on the pitch circle', () => {
+    const r = evaluate(pc([1, 2, 3], [50, 50, null, null, null, 40, 0]), patternMap(rot));
+    expect(r.members!.length).toBe(4); const w = r.members![r.worst!];
+    expect(w.margin).toBeCloseTo(0.1 - r.measured!, 9); expect(Math.min(...r.members!.map((m) => m.margin))).toBeCloseTo(w.margin, 9);
+    for (const m of r.members!) expect(Math.hypot(m.nomW[0] - 50, m.nomW[1] - 50)).toBeCloseTo(20, 6);
+  });
   it('datum A only: location and rotation float → ~0', () => {
     const r = evaluate(pc([1], [null, null, null, null, null, 40, null]), patternMap(rot, [0.3, -0.2, 0]));
     expect(r.measured!).toBeLessThan(1e-3);

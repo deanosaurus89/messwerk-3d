@@ -200,7 +200,10 @@ export function positionNominal(F: DRF, f: Feature, basic?: (number | null)[]): 
 export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): boolean {
   return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
 }
-export interface DatumEval { value: number | null; flag?: string; detail?: string; /** bonus tolerance from Ⓜ/Ⓛ (added to t) */ bonus?: number; }
+export interface PosMemberInfo { fid: number; name: string; dia: number; tol: number; bonus: number; margin: number; nomW: Vec3; dirW: Vec3 }
+export interface DatumEval { value: number | null; flag?: string; detail?: string; /** bonus tolerance from Ⓜ/Ⓛ (added to t) */ bonus?: number;
+  /** Position of axes: per member (pattern hole or the feature itself) Ø, permitted t (+bonus), margin and the nominal axis used */
+  members?: PosMemberInfo[]; worst?: number; }
 
 function range(p: Vec3[], n: Vec3) { let mn = Infinity, mx = -Infinity; for (const q of p) { const t = dot(q, n); if (t < mn) mn = t; if (t > mx) mx = t; } return mx - mn; }
 const dirOf = (f: Feature) => unit(f.measured!.normal);
@@ -274,10 +277,11 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
           return [-0.5, 0.5].map((t) => toLocal(F, add(hm.center, scale(a, t * L)))); };
         const notes: string[] = []; let flag: string | undefined;
         const tFor = (h: Feature) => { if (!c.mod) return c.tolUp; const r = featBonus(c.mod, h, ctx); if ('flag' in r) { flag = r.flag; return c.tolUp; } notes.push(r.txt); return c.tolUp + r.b; };
-        let members: PosMember[];
+        let members: PosMember[], mfs: Feature[] = [f];
         if (isPattern(f)) {
           const hs = f.cons!.refs.map((id) => feats.get(id)).filter((h): h is Feature => !!h?.measured);
           if (hs.length !== f.cons!.refs.length) return { value: null, flag: 'pattern member deleted' };
+          mfs = hs;
           const n = hs.length, pitch = (2 * Math.PI) / n, R = B(5) / 2, al = B(6) * Math.PI / 180, i1 = (N.ax + 1) % 3, i2 = (N.ax + 2) % 3;
           const used = new Set<number>();
           members = hs.map((h) => { const l = toLocal(F, h.measured!.center), ang = Math.atan2(l[i2] - b[i2], l[i1] - b[i1]);
@@ -298,7 +302,9 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
         const cz = c.cz !== false, res = evalPositionGroup(members, fr, cz), wi = res.worst;
         const dof = [...fr.freeT.map((e) => 'XYZ'[e.indexOf(1)]), ...(fr.freeR ? ['rot Z'] : []), ...(shiftR > 0 ? [`datum shift ≤ ${(2 * shiftR).toFixed(4)}`] : [])];
         const head = members.length > 1 ? `pattern of ${members.length} (${cz ? 'common zone CZ' : 'separate zones'}): Ø ${res.dia.map((d) => d.toFixed(4)).join(' / ')}, worst member ${wi + 1}` : `${members[0].ML.length > 2 ? `derived median line (${members[0].ML.length} sections)` : 'axis end points – no points'} in Ø zone around the ${tag}`;
-        return { value: res.dia[wi], bonus: members[wi].t - c.tolUp || undefined, detail: `${head} (DRF ${F.text}${dof.length ? `, free: ${dof.join(', ')}` : ''})${notes.length ? ' · ' + notes.join(' · ') : ''}` };
+        const Wd = (v: Vec3): Vec3 => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
+        const info: PosMemberInfo[] = members.map((mm, i) => ({ fid: mfs[i].id, name: mfs[i].name, dia: res.dia[i], tol: mm.t, bonus: mm.t - c.tolUp, margin: mm.t - res.dia[i], nomW: add(F.o, Wd(res.nom[i].p)), dirW: Wd(res.nom[i].g) }));
+        return { members: info, worst: wi, value: res.dia[wi], bonus: members[wi].t - c.tolUp || undefined, detail: `${head} (DRF ${F.text}${dof.length ? `, free: ${dof.join(', ')}` : ''})${notes.length ? ' · ' + notes.join(' · ') : ''}` };
       }
       return { value: 2 * norm(sub(loc, b)), detail: `spherical zone SØ (DRF ${F.text})` };
     }

@@ -60,7 +60,7 @@ export interface Control {
   basic?: (number | null)[];  // TED (theoretically exact dimensions): position X/Y/Z in the DRF or angularity angle; null = not entered yet (never prefilled)
 }
 
-export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; /** Ⓜ/Ⓛ bonus tolerance */ bonus?: number; }
+export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; /** Ⓜ/Ⓛ bonus tolerance */ bonus?: number; /** position: per member (hole) values */ members?: import('./datum').PosMemberInfo[]; worst?: number; }
 
 export const FORM_NAME: Record<GeomType, string> = {
   Ebene: 'Flatness', Kreis: 'Roundness', Zylinder: 'Cylindricity', Langloch: 'Profile',
@@ -212,7 +212,7 @@ export function evaluate(c: Control, feats: Map<number, Feature>, ctx: EvalCtx =
     const r = evalDatumControl(c, feats, ctx);
     if (r.value == null) return { measured: null, deviation: null, status: '—', flag: r.flag, detail: r.detail };
     const ok = r.value <= c.tolUp + (r.bonus ?? 0) + 1e-12;
-    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail, bonus: r.bonus, flag: r.flag };
+    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail, bonus: r.bonus, flag: r.flag, members: r.members, worst: r.worst };
   }
   const m = measuredValue(c, feats, ctx);
   if (m == null) return { measured: null, deviation: null, status: '—' };
