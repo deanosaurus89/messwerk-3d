@@ -136,7 +136,7 @@ describe('Oblique TEDs (θ/φ) for position', () => {
     expect(evaluate(c, m, ctx).measured!).toBeGreaterThan(5);
   });
   it('positionNominal: θ=90, φ=90 → nominal ∥ Y', () => {
-    const N = positionNominal({ o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], text: '', free: [] }, Zo, [1, 2, 3, 90, 90]);
+    const N = positionNominal({ o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], text: '', free: [], freeT: [], freeR: false }, Zo, [1, 2, 3, 90, 90]);
     expect(N.ax).toBe(1); expect(N.g[1]).toBeCloseTo(1, 12); expect(N.b).toEqual([1, 2, 3]);
   });
 });

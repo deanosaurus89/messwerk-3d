@@ -51,10 +51,16 @@ export interface Control {
   datumIds?: number[];        // Bezüge (Merkmal-IDs) in Reihenfolge primär|sekundär|tertiär
   /** orientation of an axis: Ø (cylindrical) zone; false = zone between two parallel planes; undefined = default of the case (see zoneIsDia) */
   dia?: boolean;
+  /** material modifier on the tolerance (ISO 2692): Ⓜ maximum / Ⓛ least material requirement */
+  mod?: 'M' | 'L';
+  /** material modifiers on the datums (same order as datumIds) → datum shift */
+  datumMods?: ('M' | 'L' | null)[];
+  /** pattern: common zone (CZ, default) or separate zones */
+  cz?: boolean;
   basic?: (number | null)[];  // TED (theoretically exact dimensions): position X/Y/Z in the DRF or angularity angle; null = not entered yet (never prefilled)
 }
 
-export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; }
+export interface ControlResult { measured: number | null; deviation: number | null; status: 'IO' | 'NIO' | '—'; flag?: string; detail?: string; /** Ⓜ/Ⓛ bonus tolerance */ bonus?: number; }
 
 export const FORM_NAME: Record<GeomType, string> = {
   Ebene: 'Flatness', Kreis: 'Roundness', Zylinder: 'Cylindricity', Langloch: 'Profile',
@@ -197,8 +203,8 @@ export function evaluate(c: Control, feats: Map<number, Feature>, ctx: EvalCtx =
   if (isDatumControl(c.kind)) {
     const r = evalDatumControl(c, feats, ctx);
     if (r.value == null) return { measured: null, deviation: null, status: '—', flag: r.flag, detail: r.detail };
-    const ok = r.value <= c.tolUp + 1e-12;
-    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail };
+    const ok = r.value <= c.tolUp + (r.bonus ?? 0) + 1e-12;
+    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail, bonus: r.bonus };
   }
   const m = measuredValue(c, feats, ctx);
   if (m == null) return { measured: null, deviation: null, status: '—' };

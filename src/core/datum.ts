@@ -11,7 +11,8 @@ import type { Control, Feature } from './features';
 import type { GeomType } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { medianLine, orientNominal, orientZone, resolveOrient } from './median';
-import { SimCtx, simulateDatums } from './datumsim';
+import { SimCtx, simulateDatums, matingSize } from './datumsim';
+import { PosMember, bonus as mmBonus, evalPositionGroup } from './position';
 
 export type DatumKind = 'plane' | 'axis' | 'point';
 export const datumKind = (t: GeomType): DatumKind | null =>
@@ -19,41 +20,56 @@ export const datumKind = (t: GeomType): DatumKind | null =>
     : t === 'Kugel' || t === 'Punkt' ? 'point' : null;
 export const DATUM_LETTERS = 'ABCDEFGHJKLMNPRST'.split('');
 
-export interface DRF { o: Vec3; x: Vec3; y: Vec3; z: Vec3; text: string; free: string[]; }
+export interface DRF { o: Vec3; x: Vec3; y: Vec3; z: Vec3; text: string; free: string[];
+  /** DRF-local axes (0 = X, 1 = Y, 2 = Z) along which the origin is NOT fixed by the datums (free translations) */
+  freeT: number[];
+  /** rotation about Z not fixed by the datums */
+  freeR: boolean; }
 
 const orth = (v: Vec3, z: Vec3) => sub(v, scale(z, dot(v, z)));
 const canonAxis = (a: Vec3): Vec3 => { const i = [0, 1, 2].reduce((m, k) => (Math.abs(a[k]) > Math.abs(a[m]) + 1e-9 ? k : m), 2); return a[i] < 0 ? scale(a, -1) : a; };
 
+/**
+ * Datum reference frame. Also reports which DOF stay free (ISO 5459): with A only, X/Y translation and rotation about Z
+ * are free; A|B (plane) leaves the translation along B; A|B (hole) leaves the rotation; A|B|C fixes everything.
+ * A bolt-circle pattern used as datum fixes origin AND rotation (its mean angular position).
+ */
 export function buildDRF(ds: Feature[]): DRF {
   const W: Vec3[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   let o: Vec3 = [0, 0, 0], z: Vec3 | null = null, u: Vec3 | null = null;
-  const free: string[] = [];
-  const A = ds[0];
+  const free: string[] = [], fixed: Vec3[] = [];
+  const A = ds[0]; let primaryAxis = false;
   if (A) {
     const m = A.measured!, k = datumKind(A.type);
     o = m.center;
-    if (k === 'plane') z = unit(m.normal); else if (k === 'axis') z = canonAxis(unit(m.normal));
+    if (k === 'plane') { z = unit(m.normal); fixed.push(z); }
+    else if (k === 'axis') { z = canonAxis(unit(m.normal)); fixed.push(...basis(z)); primaryAxis = true; if (m.pattern && m.direction) { const w = orth(unit(m.direction), z); if (norm(w) > 1e-6) u = unit(w); } }
+    else if (k === 'point') fixed.push(...W);
   }
   if (!z) { z = [0, 0, 1]; free.push('Orientierung'); }
-  let originFixedInPlane = false;
+  let originFixedInPlane = primaryAxis;
   for (const D of ds.slice(1)) {
     const m = D.measured!, k = datumKind(D.type);
+    if (k === 'plane' && Math.abs(dot(unit(m.normal), z!)) > 0.98) { // plane ⟂ primary axis: fixes the origin along Z
+      const n = unit(m.normal); o = add(o, scale(z!, dot(sub(m.center, o), n) / dot(z!, n))); fixed.push(z!); continue; }
     if (!u) {
       if (k === 'plane') {
         const w = orth(unit(m.normal), z!);
-        if (norm(w) > 1e-6) { u = unit(w); o = add(o, scale(u, dot(sub(m.center, o), unit(m.normal)) / dot(u, unit(m.normal)))); }
+        if (norm(w) > 1e-6) { u = unit(w); o = add(o, scale(u, dot(sub(m.center, o), unit(m.normal)) / dot(u, unit(m.normal)))); fixed.push(u); }
       } else if (!originFixedInPlane) {
-        // Achse/Punkt: Ursprung in der Ebene auf B legen
-        const d = orth(sub(m.center, o), z!); o = add(o, d); originFixedInPlane = true;
+        // axis/point (or pattern): origin in the plane on B
+        const d = orth(sub(m.center, o), z!); o = add(o, d); originFixedInPlane = true; fixed.push(...basis(z!));
+        if (m.pattern && m.direction) { const w = orth(unit(m.direction), z!); if (norm(w) > 1e-6) u = unit(w); }
       } else {
         const d = orth(sub(m.center, o), z!); if (norm(d) > 1e-6) u = unit(d);
       }
     } else {
       const v = cross(z!, u);
-      if (k === 'plane') { const n = unit(m.normal), den = dot(v, n); if (Math.abs(den) > 1e-6) o = add(o, scale(v, dot(sub(m.center, o), n) / den)); }
-      else o = add(o, scale(v, dot(sub(m.center, o), v)));
+      if (k === 'plane') { const n = unit(m.normal), den = dot(v, n); if (Math.abs(den) > 1e-6) { o = add(o, scale(v, dot(sub(m.center, o), n) / den)); fixed.push(v); } }
+      else { o = add(o, scale(v, dot(sub(m.center, o), v))); fixed.push(v); }
     }
   }
+  const freeR = !u;
   if (!u) {
     let w = orth(W[0], z!); if (norm(w) < 0.3) w = orth(W[1], z!); u = unit(w);
     if (ds.length) free.push('Drehung um z');
@@ -61,7 +77,10 @@ export function buildDRF(ds: Feature[]): DRF {
   const cand: Vec3[] = [u, cross(z!, u), scale(u, -1), scale(cross(z!, u), -1)];
   const x = cand.reduce((b, c) => (dot(c, W[0]) > dot(b, W[0]) ? c : b));
   const y = cross(z!, x);
-  return { o, x, y, z: z!, text: ds.map((d) => d.datum ?? '?').join('|'), free };
+  // free translations: DRF axes not in the span of the fixed directions
+  const S: Vec3[] = []; for (const f of fixed) { let r = f; for (const b of S) r = sub(r, scale(b, dot(r, b))); if (norm(r) > 1e-6) S.push(unit(r)); }
+  const freeT = [x, y, z!].map((e, i) => { let r = e; for (const b of S) r = sub(r, scale(b, dot(r, b))); return norm(r) > 0.9 ? i : -1; }).filter((i) => i >= 0);
+  return { o, x, y, z: z!, text: ds.map((d) => d.datum ?? '?').join('|'), free, freeT, freeR: !!ds.length && freeR };
 }
 export const toLocal = (f: DRF, p: Vec3): Vec3 => { const d = sub(p, f.o); return [dot(d, f.x), dot(d, f.y), dot(d, f.z)]; };
 export const dirLocal = (f: DRF, a: Vec3): Vec3 => [dot(a, f.x), dot(a, f.y), dot(a, f.z)];
@@ -80,7 +99,7 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
   Symmetrie: [1, 1], Rundlauf: [1, 1], Gesamtrundlauf: [1, 1], 'Profil (Bezug)': [1, 3],
 };
 
-export interface EvalCtx extends SimCtx { points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
+export interface EvalCtx extends SimCtx { /** all controls (size nominal/tolerances for Ⓜ/Ⓛ) */ controls?: Control[]; points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
 /** TED components the user must enter for a control (indices into basic): Neigung → angle; Position/Profile →
  *  the DRF components that matter (plane: along its normal; axis: the two ⟂ to the nominal axis; point/sphere: all). */
 export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: Feature[]): number[] {
@@ -89,9 +108,25 @@ export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: F
   if (!f?.measured || !ds.length || ds.some((d) => !d?.measured)) return [0, 1, 2];
   const F = buildDRF(ds), k = datumKind(f.type);
   const ax = nominalDirLocal(F, f.measured.normal, (c as { basic?: (number | null)[] }).basic).ax;
-  if (k === 'plane') return [ax];
-  if (k === 'axis' && f.type !== 'Torus') return [0, 1, 2].filter((i) => i !== ax);
-  return [0, 1, 2];
+  const fr = (i: number) => !F.freeT.includes(i); // components along free DRF translations are not needed
+  if (k === 'plane') return [ax].filter(fr);
+  if (k === 'axis' && f.type !== 'Torus') {
+    const r = [0, 1, 2].filter((i) => i !== ax && fr(i));
+    return isPattern(f) && c.kind === 'Position' ? [...r, 5, ...(F.freeR ? [] : [6])] : r;
+  }
+  return [0, 1, 2].filter(fr);
+}
+/** Bolt-circle pattern feature (constructed from member holes). */
+export const isPattern = (f: Feature) => !!f.measured?.pattern && f.cons?.key === 'bc-pattern' && !!f.cons.refs.length;
+const E3 = (i: number): Vec3 => { const e: Vec3 = [0, 0, 0]; e[i] = 1; return e; };
+/** Size limits of a feature from its Diameter control (nominal + tolerances), for Ⓜ/Ⓛ. */
+function sizeSpec(fid: number, ctx: EvalCtx) { return ctx.controls?.find((k) => k.kind === 'Durchmesser' && k.featureIds[0] === fid && k.nominal != null) ?? null; }
+/** Bonus of one feature of size for the control's modifier; flag if the size spec or points are missing. */
+function featBonus(mod: 'M' | 'L', f: Feature, ctx: EvalCtx): { b: number; txt: string } | { flag: string } {
+  const sp = sizeSpec(f.id, ctx); if (!sp) return { flag: `size nominal missing for ${mod === 'M' ? 'Ⓜ' : 'Ⓛ'} – add a Diameter control with nominal and tolerances to ${f.name}` };
+  const ms = matingSize(f, ctx, mod); if (!ms) return { flag: `${f.name}: no points/normals for the ${mod === 'M' ? 'mating' : 'minimum-material'} size` };
+  const r = mmBonus(mod, ms.hole, ms.d, sp.nominal!, sp.tolUp, sp.tolLo);
+  return { b: r.bonus, txt: `${f.name}: ${mod === 'M' ? 'mating' : 'min.-material'} size Ø ${ms.d.toFixed(4)}, ${mod === 'M' ? 'MMC' : 'LMC'} ${r.limit.toFixed(4)} → bonus ${r.bonus.toFixed(4)}${r.beyond ? ' (size beyond the limit – no bonus)' : ''}` };
 }
 export const NOMINAL_MISSING = 'Nominal missing';
 const DEG = Math.PI / 180;
@@ -118,7 +153,7 @@ export function positionNominal(F: DRF, f: Feature, basic?: (number | null)[]): 
 export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: Feature[]): boolean {
   return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
 }
-export interface DatumEval { value: number | null; flag?: string; detail?: string; }
+export interface DatumEval { value: number | null; flag?: string; detail?: string; /** bonus tolerance from Ⓜ/Ⓛ (added to t) */ bonus?: number; }
 
 function range(p: Vec3[], n: Vec3) { let mn = Infinity, mx = -Infinity; for (const q of p) { const t = dot(q, n); if (t < mn) mn = t; if (t > mx) mx = t; } return mx - mn; }
 const dirOf = (f: Feature) => unit(f.measured!.normal);
@@ -171,20 +206,44 @@ export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: E
       const loc = toLocal(F, m.center);
       if (f.type === 'Ebene') {
         const P = pts(); if (!P) return { value: 2 * Math.abs(dot(sub(loc, b), g)) + m.form };
+        if (F.freeT.includes(N.ax)) { const t = P.map((q) => dot(toLocal(F, q), g)); return { value: Math.max(...t) - Math.min(...t), detail: `plane, location free along ${'XYZ'[N.ax]} → orientation/form only (DRF ${F.text})` }; }
         let mx = 0; for (const q of P) mx = Math.max(mx, Math.abs(dot(sub(toLocal(F, q), b), g)));
         return { value: 2 * mx, detail: `plane, ${tag} (DRF ${F.text})` };
       }
       if (datumKind(f.type) === 'axis' && f.type !== 'Torus') {
-        // nominal axis through the TED point with the nominal direction; the derived median line must lie in the Ø zone
-        const a = unit(dirLocal(F, dirOf(f)));
-        const P = f.type === 'Zylinder' || f.type === 'Kegel' ? pts() : null;
-        const ML = P && P.length >= 64 ? medianLine(m, P) : [];
-        if (ML.length >= 2) { let mx = 0; for (const q of ML) mx = Math.max(mx, norm(orth(sub(toLocal(F, q), b), g)));
-          return { value: 2 * mx, detail: `derived median line (${ML.length} sections) in Ø zone around the ${tag} (DRF ${F.text})` }; }
-        const L = f.type === 'Zylinder' || f.type === 'Kegel' ? m.length || 0 : 0;
-        let mx = 0;
-        for (const s of [-0.5, 0.5]) { const e = add(loc, scale(a, s * L)); mx = Math.max(mx, norm(orth(sub(e, b), g))); }
-        return { value: 2 * mx, detail: `Ø zone around the ${tag} (DRF ${F.text}, axis end points – no points)` };
+        // members: the feature itself or the holes of a bolt-circle pattern; each member = derived median line
+        // (or axis end points) in DRF-local coordinates around its nominal axis (TED point + nominal direction)
+        const mlOf = (h: Feature): Vec3[] => { const hm = h.measured!, P = (h.type === 'Zylinder' || h.type === 'Kegel') ? ctx.points?.(h.id) ?? null : null;
+          const ML = P && P.length >= 64 ? medianLine(hm, P) : []; if (ML.length >= 2) return ML.map((q) => toLocal(F, q));
+          const L = h.type === 'Zylinder' || h.type === 'Kegel' ? hm.length || 0 : 0, a = unit(hm.normal);
+          return [-0.5, 0.5].map((t) => toLocal(F, add(hm.center, scale(a, t * L)))); };
+        const notes: string[] = []; let flag: string | undefined;
+        const tFor = (h: Feature) => { if (!c.mod) return c.tolUp; const r = featBonus(c.mod, h, ctx); if ('flag' in r) { flag = r.flag; return c.tolUp; } notes.push(r.txt); return c.tolUp + r.b; };
+        let members: PosMember[];
+        if (isPattern(f)) {
+          const hs = f.cons!.refs.map((id) => feats.get(id)).filter((h): h is Feature => !!h?.measured);
+          if (hs.length !== f.cons!.refs.length) return { value: null, flag: 'pattern member deleted' };
+          const n = hs.length, pitch = (2 * Math.PI) / n, R = B(5) / 2, al = B(6) * Math.PI / 180, i1 = (N.ax + 1) % 3, i2 = (N.ax + 2) % 3;
+          const used = new Set<number>();
+          members = hs.map((h) => { const l = toLocal(F, h.measured!.center), ang = Math.atan2(l[i2] - b[i2], l[i1] - b[i1]);
+            const k = ((Math.round((ang - al) / pitch) % n) + n) % n; used.add(k);
+            const nomP = add(b, add(scale(E3(i1), R * Math.cos(al + k * pitch)), scale(E3(i2), R * Math.sin(al + k * pitch))));
+            return { ML: mlOf(h), nomP, g, t: tFor(h) }; });
+          if (used.size !== n) return { value: null, flag: 'pattern members do not match the equal division – check Ø and start angle' };
+        } else members = [{ ML: mlOf(f), nomP: b, g, t: tFor(f) }];
+        if (flag) return { value: null, flag };
+        // datum shift: datum features of size referenced at Ⓜ/Ⓛ may shift the DRF by half their departure from MMC/LMC
+        let shiftR = 0;
+        (c.datumMods ?? []).forEach((md, i) => { const dsf = ds[i]; if (!md || !dsf) return;
+          const parts = isPattern(dsf) ? dsf.cons!.refs.map((id) => feats.get(id)).filter((h): h is Feature => !!h) : [dsf];
+          let s = Infinity; for (const h of parts) { const r = featBonus(md, h, ctx); if ('flag' in r) { flag = r.flag; return; } s = Math.min(s, (r as any).b); notes.push('datum ' + (dsf.datum ?? '') + ' ' + r.txt.replace('bonus', 'shift')); }
+          if (isFinite(s)) shiftR = Math.max(shiftR, s / 2); });
+        if (flag) return { value: null, flag };
+        const fr = { freeT: F.freeT.filter((i) => i !== N.ax).map(E3), freeR: F.freeR && (members.length > 1 || norm([b[0], b[1], 0]) > 1e-9), shiftR };
+        const cz = c.cz !== false, res = evalPositionGroup(members, fr, cz), wi = res.worst;
+        const dof = [...fr.freeT.map((e) => 'XYZ'[e.indexOf(1)]), ...(fr.freeR ? ['rot Z'] : []), ...(shiftR > 0 ? [`datum shift ≤ ${(2 * shiftR).toFixed(4)}`] : [])];
+        const head = members.length > 1 ? `pattern of ${members.length} (${cz ? 'common zone CZ' : 'separate zones'}): Ø ${res.dia.map((d) => d.toFixed(4)).join(' / ')}, worst member ${wi + 1}` : `${members[0].ML.length > 2 ? `derived median line (${members[0].ML.length} sections)` : 'axis end points – no points'} in Ø zone around the ${tag}`;
+        return { value: res.dia[wi], bonus: members[wi].t - c.tolUp || undefined, detail: `${head} (DRF ${F.text}${dof.length ? `, free: ${dof.join(', ')}` : ''})${notes.length ? ' · ' + notes.join(' · ') : ''}` };
       }
       return { value: 2 * norm(sub(loc, b)), detail: `spherical zone SØ (DRF ${F.text})` };
     }

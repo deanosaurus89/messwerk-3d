@@ -13,7 +13,7 @@ export interface FitResult {
   diameter?: number;
   length?: number;       // Langloch-Länge bzw. Zylinder/Kegel-Höhe
   width?: number;        // Langloch-Breite
-  direction?: Vec3;      // Langloch-Längsrichtung
+  direction?: Vec3;      // Langloch/Linie-Längsrichtung; Lochkreis-Muster: Richtung zum (ausgeglichenen) ersten Loch
   halfAngle?: number;    // Kegel, rad
   minorRadius?: number;  // Torus: Rohr-(Neben-)radius r (radius = Hauptradius R)
   apex?: Vec3;

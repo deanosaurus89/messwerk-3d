@@ -136,3 +136,14 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
   cache.set(key, { refs, out, info }); if (cache.size > 64) cache.delete(cache.keys().next().value!);
   return { feats: out, info };
 }
+
+/** Actual size for a material modifier (ISO 2692): Ⓜ → mating size (hole: max. inscribed, shaft: min. circumscribed),
+ *  Ⓛ → minimum-material size (hole: min. circumscribed, shaft: max. inscribed). Null if no points/normals. */
+export function matingSize(f: Feature, ctx: SimCtx, mod: 'M' | 'L'): { d: number; hole: boolean } | null {
+  const m = f.measured, P0 = ctx.points?.(f.id); if (!m || !P0 || P0.length < 8 || (f.type !== 'Zylinder' && f.type !== 'Kreis')) return null;
+  const side = outward(f, ctx.normals?.(f.id), P0); if (side.hole == null) return null;
+  const res = P0.map((q) => resid(f, q)), mu = res.reduce((a, b) => a + b, 0) / res.length, sd = Math.sqrt(res.reduce((a, b) => a + (b - mu) ** 2, 0) / res.length);
+  const P = P0.filter((_, i) => ctx.datumFilter === false || Math.abs(res[i] - mu) <= 3 * sd + 1e-12);
+  const c = contactCylinder(P, m, (mod === 'M') === side.hole, f.type === 'Kreis' ? { dir: unit(m.normal) } : {});
+  return { d: 2 * c.r, hole: side.hole };
+}

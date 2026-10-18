@@ -140,7 +140,8 @@ export const CONSTRUCTIONS: Construction[] = [
       // pitch deviation: angular position vs ideal equal division (best rotation), in degrees
       const offs = order.map(([a], k) => ((a - a0 - k * pitch + 540) % 360) - 180), mean = offs.reduce((s, x) => s + x, 0) / n;
       const pd = offs.map((x) => x - mean), pitchDev = Math.max(...pd.map(Math.abs));
-      return { ...c, pattern: { n, angles: order.map(([a]) => +a.toFixed(4)), pitch, pitchDev, radialDev: c.form } };
+      const p0 = (a0 + mean) * Math.PI / 180; // mean angular position of the first member → pattern direction (datum orientation)
+      return { ...c, direction: [0, 1, 2].map((i) => Math.cos(p0) * u[i] + Math.sin(p0) * v[i]) as Vec3, pattern: { n, angles: order.map(([a]) => +a.toFixed(4)), pitch, pitchDev, radialDev: c.form } };
     } },
   // ---------------- angle
   { key: 'an-2', out: 'Winkel', label: 'Angle between 2 features (lines, planes, cylinder/cone axes, slots, circle normals)', slots: [S('Feature 1', 'line', 'plane'), S('Feature 2', 'line', 'plane')],
