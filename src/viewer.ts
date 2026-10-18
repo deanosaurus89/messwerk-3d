@@ -4,7 +4,7 @@ import { NurbsInfo, evalCurve, evalSurface, insideTrim, tessellate } from './cor
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
-import { AxisAnalysis, exaggerate } from './core/axisan';
+import { AxisAnalysis, displayPoint, nominalFoot } from './core/axisan';
 import type { SearchRegion } from './core/reextract';
 import type { Vec3 } from './core/linalg';
 import { Labels, ViewCube } from './overlay';
@@ -216,18 +216,46 @@ export class Viewer {
   }
   /** Axis analysis: nominal axis (grey), tolerance cylinder Ø t (green), required zone envelope (orange),
    *  exaggerated actual axis (red) and section centres (red dots). All radial offsets × exag. */
-  addAxisAnalysis(an: AxisAnalysis, exag: number) {
-    const V = (p: Vec3) => new THREE.Vector3(...p), d = V(an.dir), o = V(an.origin), L = an.length * 1.15;
+  /**
+   * Axis analysis: nominal axis (grey line) with tolerance zone Ø t (green) and required zone (orange) – true size,
+   * scaled only by `locEx`; actual derived median line (red) at its REAL location, only its bend/form scaled by `formEx`;
+   * location offset as a dimension arrow with value.
+   */
+  addAxisAnalysis(an: AxisAnalysis, formEx: number, locEx = 1, offLabel = '') {
+    const V = (p: Vec3) => new THREE.Vector3(...p), d = V(an.dir), L = an.length * 1.15;
+    const mid = V(nominalFoot(an, an.mlPoint));
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
-    const tube = (a: THREE.Vector3, b: THREE.Vector3, r: number, color: number, op = 1) => { const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 1, r, 8), new THREE.MeshBasicMaterial({ color, transparent: op < 1, opacity: op, depthTest: false })); m.renderOrder = 6; this.prims.add(m); };
-    const w = Math.max(this.radius / 600, an.radius / 60);
-    tube(o.clone().addScaledVector(d, -L / 2), o.clone().addScaledVector(d, L / 2), w * 0.6, 0x777777, 0.8);
-    const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(o); m.renderOrder = 5; this.prims.add(m); };
-    if (an.tol) cyl((an.tol / 2) * exag, 0x22aa44, 0.18);
-    cyl((an.zone / 2) * exag, 0xff8c1a, 0.14);
-    const ex = (p: Vec3) => V(exaggerate(an, p, exag));
-    tube(ex(an.actualBot), ex(an.actualTop), w, 0xe53935);
-    for (const c of an.centers) { const s = new THREE.Mesh(new THREE.SphereGeometry(w * 2.2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc62828, depthTest: false })); s.position.copy(ex(c)); s.renderOrder = 7; this.prims.add(s); }
+    const line = (pts: THREE.Vector3[], color: number, dashed = false) => { const g = new THREE.BufferGeometry().setFromPoints(pts);
+      const l = new THREE.Line(g, dashed ? new THREE.LineDashedMaterial({ color, depthTest: false, dashSize: an.length / 40, gapSize: an.length / 60 }) : new THREE.LineBasicMaterial({ color, depthTest: false }));
+      if (dashed) l.computeLineDistances(); l.renderOrder = 7; l.raycast = () => {}; this.prims.add(l); };
+    // nominal axis
+    line([mid.clone().addScaledVector(d, -L / 2), mid.clone().addScaledVector(d, L / 2)], 0x555555);
+    const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(mid); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
+    if (an.tol) cyl((an.tol / 2) * locEx, 0x22aa44, 0.2);
+    cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
+    // actual median line (real location, form exaggerated around its own axis)
+    const P = an.centers.map((c) => V(displayPoint(an, c, formEx, locEx)));
+    if (P.length >= 2) line(P, 0xc62828);
+    const r = Math.max(an.radius / 90, this.radius / 1500);
+    for (const p of P) { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc62828, depthTest: false })); s.position.copy(p); s.renderOrder = 8; s.raycast = () => {}; this.prims.add(s); }
+    // its own LSQ axis (dashed)
+    const ml0 = V(displayPoint(an, an.mlPoint, formEx, locEx)), md = V(an.mlDir);
+    line([ml0.clone().addScaledVector(md, -L / 2), ml0.clone().addScaledVector(md, L / 2)], 0xe57373, true);
+    // location offset: dimension arrow nominal → actual (position mode)
+    if (an.mode === 'position') {
+      const from = mid, to = ml0, v = to.clone().sub(from), len = v.length();
+      if (len > 1e-9) { const ah = new THREE.ArrowHelper(v.clone().normalize(), from, len, 0x1565c0, Math.min(len * 0.35, an.radius / 3), Math.min(len * 0.2, an.radius / 6));
+        ah.traverse((c: any) => { if (c.material) c.material.depthTest = false; c.renderOrder = 9; c.raycast = () => {}; }); this.prims.add(ah); }
+      if (offLabel) this.addText(from.clone().lerp(to, 0.5).addScaledVector(d, an.length * 0.08).toArray(), offLabel, '#1565c0');
+    }
+  }
+  /** Text label (screen-sized sprite) at a point. */
+  addText(p: number[], text: string, color = '#22303f') {
+    const c = document.createElement('canvas'), x = c.getContext('2d')!; x.font = 'bold 30px sans-serif'; const w = Math.ceil(x.measureText(text).width) + 20; c.width = w; c.height = 46;
+    x.fillStyle = 'rgba(255,255,255,0.88)'; x.fillRect(0, 0, w, 46); x.strokeStyle = color; x.lineWidth = 3; x.strokeRect(1.5, 1.5, w - 3, 43);
+    x.font = 'bold 30px sans-serif'; x.fillStyle = color; x.textBaseline = 'middle'; x.fillText(text, 10, 24);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
+    sp.scale.set(0.022 * w / 46, 0.022, 1); sp.center.set(0, 0); sp.position.set(p[0], p[1], p[2]); sp.renderOrder = 11; sp.raycast = () => {}; this.prims.add(sp);
   }
   /** Toleranz-/Formzone (ISO 1101): Grenzflächen bei Abweichung lo und hi entlang der Normalen des Ausgleichselements. */
   addZone(f: FitResult, lo: number, hi: number) {

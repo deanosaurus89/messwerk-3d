@@ -84,7 +84,7 @@ const state = {
   mode: null as Mode,
   preview: null as Preview | null,
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -849,19 +849,23 @@ function anRange(r: AnResult): { c: number; h: number } {
   if (a.scale > 0) h = a.scale;
   return { c, h: Math.max(1e-4, h) };
 }
+/** Form exaggeration of the median line (bend around its own axis). 0 = automatic: largest bend ≈ 25 % of the radius. */
 function axisExag(r: AnResult) {
   if (state.an.axExag > 0) return state.an.axExag;
-  const z = Math.max(1e-6, ...r.axes!.map((x) => Math.max(x.zone, x.tol ?? 0) / 2)), R = Math.min(...r.axes!.map((x) => x.radius));
-  return Math.max(1, Math.round((0.6 * R) / z));
+  const z = Math.max(1e-6, ...r.axes!.map((x) => x.straightness / 2)), R = Math.min(...r.axes!.map((x) => x.radius));
+  return Math.max(1, Math.round((0.25 * R) / z));
 }
+const offsetLabel = (x: AxisAnalysis) => x.mode === 'position' ? `Δ ${fmt(x.offsetLen, 4)} mm${state.an.axLoc > 1 ? ` (${tt('shown ×{0}', state.an.axLoc)})` : ''}` : '';
 function paintAnalysis(): boolean {
   const a = state.an, r = a.res;
   if (!a.on || !r || !viewer.colors) return false;
   if (r.axes) {
     viewer.setModelOpacity(a.trans ? 0.35 : 1);
     let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
-    el.innerHTML = `<b>${r.label} · × ${axisExag(r)}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}<br>${tt('median line: {0} sections · straightness Ø {1}', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
-      + `<small><span style="color:#777">━</span> ${tt('nominal')} · <span style="color:#e53935">━</span> ${tt('actual axis')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('envelope')}</small>`;
+    const fx = axisExag(r), lx = Math.max(1, a.axLoc);
+    el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
+      + `<small>${tt('Median line at its true location; its bend is shown ×{0}.', fx)} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('Location and zones: true scale.')}</small>`
+      + `<small><span style="color:#555">━</span> ${tt('nominal axis')} · <span style="color:#c62828">━●</span> ${tt('median line')} · <span style="color:#e57373">┅</span> ${tt('its axis')} · <span style="color:#1565c0">➝</span> ${tt('offset')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('required zone')}</small>`;
     return true;
   }
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }
@@ -880,9 +884,11 @@ function paintAnalysis(): boolean {
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
-    controls: `<label title="${tt('Exaggeration of radial axis deviations (tilt, section centres, zones). 0 = automatic')}">× <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
+    controls: `<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
+      <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
       <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
     bind: (el) => { const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
+      const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else { a.trans = !a.trans; renderAll(); } })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
   return {
@@ -1545,7 +1551,7 @@ function renderScene() {
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
   { const R = reexPreview((id) => state.features.some((x) => x.id === id)); if (R) viewer.addRegion(R); }
-  if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res));
+  if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), offsetLabel(x));
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
   if (state.showPrims) for (const f of state.features) {

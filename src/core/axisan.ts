@@ -10,7 +10,7 @@
 import { FitResult, fitCircle2D } from './fit';
 import { Vec3, add, basis, dot, norm, scale, sub, unit } from './linalg';
 import { buildDRF } from './datum';
-import { medianLine, minCircle } from './median';
+import { lsqLine, medianLine, minCircle, straightnessMZ } from './median';
 export { medianLine, minCircle };
 import type { Feature } from './features';
 
@@ -20,14 +20,17 @@ export interface AxisAnalysis {
   centers: Vec3[]; devs: number[];      // derived median line points and their distance from the nominal axis
   tiltDeg: number;                      // angle actual ↔ nominal
   zone: number;                         // required Ø zone (see mode)
-  straightness: number;                 // Ø zone of the median line straightness (fitted direction, floating)
+  straightness: number;                 // Ø zone of the median line straightness – minimum zone (floating + tilted)
+  straightnessLSQ: number;              // same, zone direction fixed to the LSQ line (for comparison)
+  mlPoint: Vec3; mlDir: Vec3;           // LSQ line through the median line (its own axis)
+  offset: Vec3; offsetLen: number;      // location offset of the median line (centroid) from the nominal axis, ⟂ nominal (position mode)
   mode: 'position' | 'orientation' | 'fit';
   tol: number | null;
   label: string; length: number; radius: number;
 }
 const orth = (v: Vec3, d: Vec3): Vec3 => sub(v, scale(d, dot(v, d)));
 
-const floatingZone = (C: Vec3[], d: Vec3) => { const [u, v] = basis(d); return 2 * minCircle(C.map((c) => [dot(c, u), dot(c, v)] as [number, number])).r; };
+export const floatingZone = (C: Vec3[], d: Vec3) => { const [u, v] = basis(d); return 2 * minCircle(C.map((c) => [dot(c, u), dot(c, v)] as [number, number])).r; };
 
 export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal?: { dir: Vec3; point?: Vec3 }, tol: number | null = null, sections = 0, label = ''): AxisAnalysis {
   const a = unit(fit.normal); let d = nominal ? unit(nominal.dir) : a; if (dot(d, a) < 0) d = scale(d, -1);
@@ -41,15 +44,23 @@ export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal?: { dir: Vec3; 
     const along = dot(fit.center, d); o = add(scale(d, along), add(scale(u, mc.x), scale(v, mc.y))); }
   const devs = centers.map((C) => norm(orth(sub(C, o), d)));
   const zone = centers.length ? (mode === 'position' ? 2 * Math.max(...devs) : floatingZone(centers, d)) : 0;
-  const straightness = centers.length ? floatingZone(centers, a) : 0;
+  const st = straightnessMZ(centers, a), ml = centers.length >= 2 ? lsqLine(centers, a) : { p: fit.center, d: a };
+  const off = mode === 'position' ? orth(sub(ml.p, o), d) : [0, 0, 0] as Vec3;
   const tilt = Math.acos(Math.min(1, Math.abs(dot(a, d)))) * 180 / Math.PI;
-  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness, mode, tol, label, length: L, radius: fit.radius ?? 1 };
+  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness: st.dia, straightnessLSQ: st.diaLSQ, mlPoint: ml.p, mlDir: ml.d, offset: off, offsetLen: norm(off), mode, tol, label, length: L, radius: fit.radius ?? 1 };
 }
-/** Exaggerated display position: foot on the nominal axis + exag × radial offset. */
-export function exaggerate(an: AxisAnalysis, p: Vec3, exag: number): Vec3 {
-  const q = sub(p, an.origin), along = dot(q, an.dir), r = orth(q, an.dir);
-  return add(an.origin, add(scale(an.dir, along), scale(r, exag)));
+/**
+ * Display position of a median-line point: the line stays at its REAL location. Only its deviation from its own
+ * LSQ axis (bend/form) is scaled by `formEx`; `locEx` > 1 additionally scales the location offset from the nominal
+ * axis (shown with a label, 1 = true location).
+ */
+export function displayPoint(an: AxisAnalysis, p: Vec3, formEx: number, locEx = 1): Vec3 {
+  const foot = add(an.mlPoint, scale(an.mlDir, dot(sub(p, an.mlPoint), an.mlDir)));
+  const disp = add(foot, scale(sub(p, foot), formEx));
+  return locEx === 1 ? disp : add(disp, scale(orth(sub(foot, an.origin), an.dir), locEx - 1));
 }
+/** Display position of a point on the nominal axis/zone: real, or with the location exaggeration around the nominal axis. */
+export const nominalFoot = (an: AxisAnalysis, p: Vec3): Vec3 => add(an.origin, scale(an.dir, dot(sub(p, an.origin), an.dir)));
 /** Nominal axis for a control: Position → through the basic dimensions in the full DRF (A|B|C), direction = the
  *  DRF axis closest to the actual axis; orientation → direction only (zone floats); coaxiality → datum axis. */
 export function axisNominal(kind: string, DS: Feature[], basic: Vec3 | undefined, a: Vec3): { dir: Vec3; point?: Vec3 } | undefined {

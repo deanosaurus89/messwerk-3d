@@ -32,3 +32,44 @@ export function medianLine(fit: FitResult, pts: Vec3[], sections = 0): Vec3[] {
     out.push(add(o, add(scale(a, tm), add(scale(u, c.cx), scale(v, c.cy))))); } catch { /* skip section */ } });
   return out;
 }
+
+/** Least-squares line through points: centroid + principal direction (oriented like `hint`). */
+export function lsqLine(P: Vec3[], hint: Vec3): { p: Vec3; d: Vec3 } {
+  const n = P.length, c: Vec3 = [0, 0, 0]; for (const q of P) for (let k = 0; k < 3; k++) c[k] += q[k] / n;
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]; for (const q of P) { const w = sub(q, c); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += w[i] * w[j]; }
+  let d: Vec3 = unit(hint); for (let it = 0; it < 60; it++) { const nd: Vec3 = [0, 1, 2].map((i) => C[i][0] * d[0] + C[i][1] * d[1] + C[i][2] * d[2]) as Vec3; const l = Math.hypot(...nd); if (l < 1e-300) break; d = scale(nd, 1 / l); }
+  if (dot(d, hint) < 0) d = scale(d, -1);
+  return { p: c, d };
+}
+/** Floating cylindrical zone along direction d: diameter of the smallest circle enclosing the projected points. */
+export function floatZone(P: Vec3[], d: Vec3): { dia: number; centre: Vec3 } {
+  const [u, v] = basis(d), mc = minCircle(P.map((c) => [dot(c, u), dot(c, v)] as [number, number]));
+  return { dia: 2 * mc.r, centre: add(scale(u, mc.x), scale(v, mc.y)) };
+}
+/**
+ * Straightness of a derived median line, minimum zone (ISO 12780 / ISO 1101): the cylindrical zone may float AND
+ * tilt. Minimises the floating-zone diameter over the zone direction (two tilt angles around the LSQ line direction,
+ * Nelder–Mead). Returns the zone diameter and the optimal direction; never worse than the LSQ direction.
+ */
+export function straightnessMZ(P: Vec3[], hint: Vec3): { dia: number; dir: Vec3; diaLSQ: number } {
+  if (P.length < 2) return { dia: 0, dir: unit(hint), diaLSQ: 0 };
+  const L = lsqLine(P, hint), [u, v] = basis(L.d);
+  let ext = 0; for (const q of P) ext = Math.max(ext, Math.abs(dot(sub(q, L.p), L.d)));
+  const dirOf = (x: number[]) => unit(add(L.d, add(scale(u, x[0]), scale(v, x[1]))));
+  const f = (x: number[]) => floatZone(P, dirOf(x)).dia;
+  const diaLSQ = f([0, 0]);
+  // simplex step ≈ angle that moves the line ends by the LSQ zone radius
+  const s = Math.max(1e-9, diaLSQ / Math.max(1e-9, 2 * ext));
+  let S = [[0, 0], [s, 0], [0, s]].map((x) => ({ x, v: f(x) }));
+  for (let it = 0; it < 200; it++) {
+    S.sort((a, b) => a.v - b.v); const [b, g, w] = S;
+    if (Math.abs(w.v - b.v) <= 1e-12 * Math.max(1, b.v) && Math.hypot(w.x[0] - b.x[0], w.x[1] - b.x[1]) < s * 1e-6) break;
+    const m = [(b.x[0] + g.x[0]) / 2, (b.x[1] + g.x[1]) / 2], at = (t: number) => [m[0] + t * (w.x[0] - m[0]), m[1] + t * (w.x[1] - m[1])];
+    const r = at(-1), fr = f(r);
+    if (fr < b.v) { const e = at(-2), fe = f(e); S[2] = fe < fr ? { x: e, v: fe } : { x: r, v: fr }; }
+    else if (fr < g.v) S[2] = { x: r, v: fr };
+    else { const c = at(fr < w.v ? -0.5 : 0.5), fc = f(c); if (fc < Math.min(fr, w.v)) S[2] = { x: c, v: fc }; else S = S.map((p, i) => (i === 0 ? p : { x: [(p.x[0] + b.x[0]) / 2, (p.x[1] + b.x[1]) / 2], v: f([(p.x[0] + b.x[0]) / 2, (p.x[1] + b.x[1]) / 2]) })); }
+  }
+  S.sort((a, b) => a.v - b.v);
+  return S[0].v < diaLSQ ? { dia: S[0].v, dir: dirOf(S[0].x), diaLSQ } : { dia: diaLSQ, dir: L.d, diaLSQ };
+}
