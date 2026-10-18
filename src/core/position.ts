@@ -34,12 +34,16 @@ function solve(members: PosMember[], fr: PosFreedom): PosResult {
   };
   const ev = (x: number[]) => { const { w, tr } = unpack(x); const d = members.map((m) => memberDia(m, w, tr)); return { d, e: Math.max(...d.map((v, i) => v - members[i].t)) }; };
   let x = new Array(n).fill(0);
+  if (nS) { // start from the optimum without datum shift → the shift can only help
+    const r0 = solve(members, { ...fr, shiftR: 0 }), ws = r0.w, ts = r0.tr;
+    x = [...fr.freeT.map((e) => dot(ts, e)), 0, 0, ...(nR ? [ws] : [])];
+  }
   if (n) {
     const d0 = ev(x).d, sc = Math.max(1e-4, ...d0) / 2, R = Math.max(1, ...members.map((m) => Math.hypot(m.nomP[0], m.nomP[1])));
     const step = [...new Array(nT + nS).fill(sc), ...(nR ? [sc / R] : [])];
-    let best = nelderMead((y) => ev(y).e, x, step, 400, 1e-14);
+    const x0 = x.slice(); let best = nelderMead((y) => ev(y).e, x, step, 400, 1e-14);
     for (let k = 1; k <= 3; k++) { const s2 = step.map((s) => s / (4 * k)), r = nelderMead((y) => ev(y).e, best.x, s2, 300, 1e-14); if (r.v < best.v) best = r; }
-    if (best.v < ev(x).e) x = best.x;
+    if (best.v < ev(x0).e) x = best.x; else x = x0;
   }
   const r = ev(x), u = unpack(x), worst = r.d.reduce((bi, v, i) => (v - members[i].t > r.d[bi] - members[bi].t ? i : bi), 0);
   return { dia: r.d, excess: r.e, worst, w: u.w, tr: u.tr };
