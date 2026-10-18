@@ -231,8 +231,18 @@ export class Viewer {
     // nominal axis
     line([mid.clone().addScaledVector(d, -L / 2), mid.clone().addScaledVector(d, L / 2)], 0x555555);
     const cyl = (R: number, color: number, op: number) => { if (!(R > 0)) return; const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })); m.quaternion.copy(q); m.position.copy(mid); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
-    if (an.tol) cyl((an.tol / 2) * locEx, 0x22aa44, 0.2);
-    cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
+    if (an.planeN && an.centers.length) {
+      // zone between two parallel planes (axis ∥ plane, axis ⟂ axis): slabs centred on the median line's extent along planeN
+      const n = V(an.planeN).normalize(), t = an.centers.map((c) => n.dot(V(c))), c0 = (Math.max(...t) + Math.min(...t)) / 2;
+      const ctr = mid.clone().addScaledVector(n, c0 - n.dot(mid)), w = new THREE.Vector3().crossVectors(d, n).normalize();
+      const slab = (W: number, color: number, op: number) => { if (!(W > 0)) return; const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false }));
+        m.matrixAutoUpdate = false; m.matrix.makeBasis(n.clone().multiplyScalar(W), d.clone().multiplyScalar(L), w.clone().multiplyScalar(4 * an.radius)).setPosition(ctr); m.renderOrder = 5; m.raycast = () => {}; this.prims.add(m); };
+      if (an.tol) slab(an.tol * locEx, 0x22aa44, 0.2);
+      if (!an.missing) slab(an.zone * locEx, 0xff8c1a, 0.14);
+    } else {
+      if (an.tol) cyl((an.tol / 2) * locEx, 0x22aa44, 0.2);
+      if (!an.missing) cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
+    }
     // actual median line (real location, form exaggerated around its own axis)
     const P = an.centers.map((c) => V(displayPoint(an, c, formEx, locEx)));
     if (P.length >= 2) line(P, 0xc62828);

@@ -23,7 +23,7 @@ const KIND: Record<string, string> = {
   Form: 'Form', 'Winkel X': 'Angle to X axis', 'Winkel Y': 'Angle to Y axis', 'Winkel Z': 'Angle to Z axis', 'Std.-Abw.': 'Standard deviation',
   Rohrdurchmesser: 'Tube Ø (2r)', Rohrradius: 'Tube radius r', 'Abstand 3D': 'Distance 3D', 'Abstand X': 'Distance X', 'Abstand Y': 'Distance Y', 'Abstand Z': 'Distance Z',
   Parallelität: 'Parallelism', Rechtwinkligkeit: 'Perpendicularity', Neigung: 'Angularity', Position: 'Position', Koaxialität: 'Coaxiality', Konzentrizität: 'Concentricity',
-  Symmetrie: 'Symmetry', Rundlauf: 'Circular run-out', Gesamtrundlauf: 'Total run-out', 'Profil (Bezug)': 'Surface profile with datum', Geradheit: 'Straightness', Winkelwert: 'Angle', Teilung: 'Pitch deviation',
+  Symmetrie: 'Symmetry', Rundlauf: 'Circular run-out', Gesamtrundlauf: 'Total run-out', 'Profil (Bezug)': 'Surface profile with datum', Geradheit: 'Straightness', 'Geradheit Achse': 'Straightness of axis', Winkelwert: 'Angle', Teilung: 'Pitch deviation',
 };
 export const kindName = (k: string) => t(KIND[k] ?? k);
 /** Method names (internal keys 'Klick' | 'Pinsel' | 'Konstruiert'). */

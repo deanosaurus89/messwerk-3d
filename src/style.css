@@ -347,3 +347,7 @@ body.thumb #cs-ind { display:none !important; }
 .cat-ed input.ted::placeholder { color:#b0b8c2; font-size:11px; }
 .ted-more { padding:0 6px !important; min-width:0 !important; }
 .flag.missing, .st.missing { color:#b26a00; }
+.an-pick { align-items:center; gap:6px; } .an-pick select { max-width:260px; font:inherit; padding:3px; }
+.an-row { color:#1f5fa8; } .an-row:disabled { opacity:.3; }
+.an-ctrl { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; padding:2px 6px; border:1px solid #9ec1e8; border-radius:4px; background:#f2f7fd; }
+.an-ctrl input { width:60px; } .an-ctrl input.ted.req { border-color:#d32f2f; background:#fff4f4; }

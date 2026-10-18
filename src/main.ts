@@ -84,7 +84,7 @@ const state = {
   mode: null as Mode,
   preview: null as Preview | null,
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -783,10 +783,49 @@ function distSpec(m: DistMode): CtxSpec {
 // für Whisker). Quellen heute: Formabweichung je Merkmal (Punkte ↔ Ausgleichselement) und Polygon ↔ Original;
 // eine CAD-Quelle (Netz ↔ Sollgeometrie) lässt sich als weiterer Eintrag in AN_SOURCES ergänzen.
 type AnKind = 'form' | 'mesh' | 'axis';
+/** Controls shown in the axis view (cylinder/cone): orientation/location of the axis and straightness of the axis. */
+const AXIS_CTRL = ['Position', 'Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Koaxialität', 'Geradheit Achse'];
+/** Which analysis view a control gets: axis view, surface colour map, or none (dimensions). */
+function ctrlAnalysisKind(c: Control): 'axis' | 'form' | null {
+  const f = state.features.find((x) => x.id === c.featureIds[0]); if (!f || !f.indices.length || !f.measured) return null;
+  if ((f.type === 'Zylinder' || f.type === 'Kegel') && AXIS_CTRL.includes(c.kind)) return 'axis';
+  if ((isZoneControl(c.kind) || isDatumControl(c.kind)) && f.type !== 'Abstand' && f.type !== 'Winkel') return 'form';
+  return null;
+}
+const ctrlTitle = (c: Control) => { const f = state.features.find((x) => x.id === c.featureIds[0]); return `${f?.name ?? '?'} · ${controlLabel(c, f)}${c.datumIds?.length ? ` |${datumText(c, featMap())}|` : ''}`; };
+/** Axis analysis of one cylinder/cone for one control (or against its own fitted axis). */
+function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
+  const pts = featPoints(f.id) ?? []; // same point sample as the Controls table → identical values
+  const c = C && C.kind !== 'Geradheit Achse' && C.datumIds?.length ? C : null;
+  // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
+  const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
+  const miss = c ? missingBasic(c, f, DS) : false;
+  let nominal = c && DS.length ? axisNominal(c.kind, DS, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
+  if (nominal && miss) nominal = { dir: nominal.dir };
+  const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
+    `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
+  if (miss) { an.missing = true; an.tol = null; }
+  if (C?.kind === 'Geradheit Achse') an.zone = an.straightness; // straightness control: zone = minimum-zone straightness
+  return an;
+}
+/** Analyse exactly one control (form → colour map, axis-based → axis view). */
+async function analyzeControl(cid: number, keepView = false) {
+  const c = state.controls.find((x) => x.id === cid); if (!c) return;
+  const k = ctrlAnalysisKind(c); if (!k) { toast(tt('{0}: no analysis view for this control (dimension).', ctrlTitle(c))); return; }
+  state.an.ctrl = cid; state.sel = [...c.featureIds]; state.selControl = cid;
+  await analyze(k, keepView, true);
+}
+/** Menu entries “Analyze …” for a feature: 0 controls → form deviation; 1 → that control; several → one entry each. */
+function analyzeItems(f: FeatureView): [string, (() => void) | null][] {
+  const cs = state.controls.filter((c) => c.featureIds[0] === f.id && ctrlAnalysisKind(c));
+  if (!cs.length) return f.type === 'Abstand' ? [] : [[`◐ ${tt('Analyze form deviation')}`, () => { state.an.ctrl = null; state.sel = [f.id]; analyze('form'); }]];
+  return cs.map((c) => [`◐ ${tt('Analyze: {0}', controlLabel(c, f) + (c.datumIds?.length ? ` |${datumText(c, featMap())}|` : ''))}`, () => analyzeControl(c.id)] as [string, () => void]);
+}
 interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[]; axes?: AxisAnalysis[] }
 const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   form: async () => {
-    let fs = state.features.filter((f) => state.sel.includes(f.id) && f.type !== 'Abstand' && f.indices.length);
+    const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
+    let fs = state.features.filter((f) => (C ? f.id === C.featureIds[0] : state.sel.includes(f.id)) && f.type !== 'Abstand' && f.indices.length);
     if (!fs.length) fs = state.features.filter((f) => !state.hidden.has(f.id) && f.type !== 'Abstand' && f.indices.length);
     if (!fs.length) { toast(tt('No features to analyze – create a feature first.')); return null; }
     const parts = await busy(Promise.all(fs.map((f) => engine.call<any>({ op: 'dev', indices: f.indices, fit: f.measured! }))));
@@ -794,25 +833,16 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     let o = 0; parts.forEach((r, k) => { const f = fs[k]; idx.set(f.indices, o); dev.set(f.dev && f.dev.length === f.indices.length ? f.dev : r.dev, o); pos.set(r.pos, 3 * o); dir.set(r.dir, 3 * o); o += r.dev.length; });
     state.an.ids = fs.map((f) => f.id);
     let off = 0; const feats = fs.map((f) => { let lo = Infinity, hi = -Infinity; for (let i = off; i < off + f.indices.length; i++) { lo = Math.min(lo, dev[i]); hi = Math.max(hi, dev[i]); } off += f.indices.length; return { id: f.id, lo, hi }; });
-    return { feats, idx, dev, pos, dir, label: fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
+    return { feats, idx, dev, pos, dir, label: C ? `◐ ${ctrlTitle(C)}` : fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
   },
   axis: async () => {
-    let fs = state.features.filter((f) => state.sel.includes(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
-    if (!fs.length) fs = state.features.filter((f) => !state.hidden.has(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
+    const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
+    let fs = C ? state.features.filter((f) => f.id === C.featureIds[0]) : state.features.filter((f) => state.sel.includes(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length);
+    if (!fs.length) fs = state.features.filter((f) => !state.hidden.has(f.id) && (f.type === 'Zylinder' || f.type === 'Kegel') && f.indices.length).slice(0, 1);
     if (!fs.length) { toast(tt('Axis analysis needs a cylinder or cone – create one first.')); return null; }
-    const P = viewer.model!.geometry.getAttribute('position').array as Float32Array;
-    const axes = fs.map((f) => {
-      const pts: Vec3[] = []; const st = Math.max(1, Math.floor(f.indices.length / 20000));
-      for (let i = 0; i < f.indices.length; i += st) { const v = f.indices[i]; pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); }
-      const c = state.controls.find((c) => c.featureIds[0] === f.id && ['Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Position', 'Koaxialität'].includes(c.kind) && c.datumIds?.length);
-      // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C)
-      const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
-      const nominal = c && DS.length ? axisNominal(c.kind, DS, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
-      return analyzeAxis(f.measured!, pts, nominal, c && c.tolUp > 0 ? c.tolUp : null, 0,
-        `${f.name}${c ? ` · ${kindName(c.kind)} → ${c.datumIds!.map(nameOf).join('|')}` : ` · ${tt('vs. fitted axis')}`}`);
-    });
+    const axes = fs.map((f) => axisFor(f, C ?? null));
     state.an.ids = fs.map((f) => f.id);
-    return { idx: new Uint32Array(0), dev: new Float32Array(0), axes, label: tt('Axis analysis') };
+    return { idx: new Uint32Array(0), dev: new Float32Array(0), axes, label: C ? `◐ ${ctrlTitle(C)}` : tt('Axis analysis') };
   },
   mesh: async () => {
     if (!pe.dev) await peCompute();
@@ -822,18 +852,22 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     return { idx, dev: pe.dev, pos, dir: nrm, label: tt('Polygon model vs. original') };
   },
 };
-async function analyze(kind: AnKind) {
+async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (!state.data) { toast(tt('Load a polygon model first.')); return; }
+  if (!fromControl) state.an.ctrl = null;
+  // a fit mode without pending preview would hide the analysis panel – leave it
+  if (state.mode?.kind === 'fit' && !state.preview) { state.mode = null; clearBrush(); clearAuxHover(); viewer.controls.enabled = true; viewer.showCursor(null, 1); }
   const r = await AN_SOURCES[kind]().catch((e) => { toast(tt('Analysis failed: {0}', e.message)); return null; });
   if (!r) return;
   state.an.kind = kind; state.an.res = r; state.an.on = true; pe.cmp = false;
-  if (kind === 'axis' && r.axes?.length) sideView(viewer, r.axes);
+  if (kind === 'axis' && r.axes?.length && !keepView) sideView(viewer, r.axes);
   renderAll();
 }
-function analyzeOff() { state.an.on = false; state.an.res = null; viewer.setModelOpacity(1); renderAll(); }
+function analyzeOff() { state.an.on = false; state.an.res = null; state.an.ctrl = null; viewer.setModelOpacity(1); renderAll(); }
 /** Form tolerance t of a single analysed feature (Form control), else null. */
 function anTol(r: AnResult): number | null {
   if (r.feats?.length !== 1) return null;
+  const ac = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined; if (ac) return ac.tolUp > 0 ? ac.tolUp : null;
   const c = state.controls.find((c) => c.kind === 'Form' && c.featureIds[0] === r.feats![0].id && c.tolUp > 0);
   return c ? c.tolUp : null;
 }
@@ -863,7 +897,7 @@ function paintAnalysis(): boolean {
     viewer.setModelOpacity(a.trans ? 0.35 : 1);
     let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
     const fx = axisExag(r), lx = Math.max(1, a.axLoc);
-    el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${tt('zone')} Ø ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
+    el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${x.missing ? `<span class="st missing" title="${tt('Enter the TED in the panel below (or ⋯ → Use actual as nominal) to get the zone and OK/NOK')}">${tt('zone')}: ${tt('Nominal missing')}</span>` : `${tt('zone')} ${x.planeN ? `⟷ ${tt('(two planes)')}` : 'Ø'} ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}`}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
       + `<small>${tt('Median line at its true location; its bend is shown ×{0}.', fx)} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('Location and zones: true scale.')}</small>`
       + `<small><span style="color:#555">━</span> ${tt('nominal axis')} · <span style="color:#c62828">━●</span> ${tt('median line')} · <span style="color:#e57373">┅</span> ${tt('its axis')} · <span style="color:#1565c0">➝</span> ${tt('offset')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('required zone')}</small>`;
     return true;
@@ -881,19 +915,42 @@ function paintAnalysis(): boolean {
     <small>${tt('max')} ${sgn(mx, 4)} · ${tt('min')} ${sgn(mn, 4)} · ${tt('zone')} ${fmt(mx - mn, 4)} · σ ${fmt(Math.sqrt(s2 / Math.max(1, r.dev.length)), 4)}</small>`;
   return true;
 }
+/** Active control in analysis mode: tolerance + TED editable live (recompute + redraw on change). */
+function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
+  const c = state.an.ctrl != null ? state.controls.find((x) => x.id === state.an.ctrl) : undefined; if (!c) return { html: '', bind: () => {} };
+  const f = state.features.find((x) => x.id === c.featureIds[0]);
+  const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
+  const req = f ? requiredBasic(c, f, ds) : [];
+  const r = evaluate(c, featMap(), ctx);
+  const ted = (c.kind === 'Position' || c.kind === 'Profil (Bezug)' ? ['X', 'Y', 'Z'] : c.kind === 'Neigung' ? ['∠°'] : []).map((a, k) =>
+    `<label title="${req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)')}">[${a}] <input data-ted="${k}" class="ted${req.includes(k) && c.basic?.[k] == null ? ' req' : ''}" inputmode="decimal" placeholder="${req.includes(k) ? tt('required') : tt('optional')}" value="${c.basic?.[k] ?? ''}"></label>`).join('');
+  const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b> <span class="st ${r.status}">${statusText(r.status)}</span>` : '';
+  return {
+    html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
+      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${ted}${req.length ? `<button class="btn ted-more" data-more title="${tt('More')}">⋯</button>` : ''} ${st}</span>`,
+    bind: (el) => {
+      const upd = () => { void analyzeControl(c.id, true); };
+      const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = Number(t.value.replace(',', '.')); if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; upd(); } };
+      el.querySelectorAll<HTMLInputElement>('[data-ted]').forEach((i) => (i.onchange = () => { const k = +i.dataset.ted!, s2 = i.value.replace(',', '.').trim(), v = s2 === '' ? null : Number(s2);
+        if (v != null && !isFinite(v)) return; const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = v; c.basic = b; upd(); }));
+      const mo = el.querySelector<HTMLButtonElement>('.an-ctrl [data-more]');
+      if (mo && f) mo.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); upd(); } }]]); };
+    } };
+}
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
+  const cp = ctrlPanel();
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
-    controls: `<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
+    controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
       <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
       <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
-    bind: (el) => { const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
+    bind: (el) => { cp.bind(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
       const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else { a.trans = !a.trans; renderAll(); } })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
   return {
     title: `◐ ${tt('Analyze')}`, cls: 'an',
-    controls: `<label title="${tt('Centre of the color scale. Zone mid (default, ISO 1101): green = middle of the form zone; 0 = fitted element; custom = your value')}">${tt('Centre')} <select id="an-cm"><option value="zone" ${a.center === 'zone' ? 'selected' : ''}>${tt('Zone mid')}</option><option value="zero" ${a.center === 'zero' ? 'selected' : ''}>0</option><option value="custom" ${a.center === 'custom' ? 'selected' : ''}>${tt('Custom')}</option></select></label>
+    controls: `${cp.html}<label title="${tt('Centre of the color scale. Zone mid (default, ISO 1101): green = middle of the form zone; 0 = fitted element; custom = your value')}">${tt('Centre')} <select id="an-cm"><option value="zone" ${a.center === 'zone' ? 'selected' : ''}>${tt('Zone mid')}</option><option value="zero" ${a.center === 'zero' ? 'selected' : ''}>0</option><option value="custom" ${a.center === 'custom' ? 'selected' : ''}>${tt('Custom')}</option></select></label>
       ${a.center === 'custom' ? `<input id="an-c0" type="number" step="0.001" value="${a.c0}" inputmode="decimal" title="${tt('Custom centre [mm]')}" style="width:70px">` : ''}
       <label title="${tt('Half range of the color scale ± [mm] around the centre. 0 = automatic: zone/2, or t/2 if a form tolerance exists')}">${tt('Range ±')} <input id="an-sc" type="number" min="0" step="0.01" value="${a.scale}" inputmode="decimal"></label>
       <label title="${tt('Color classes: number of discrete color bands over the full range (each band = range / classes). 0 = continuous gradient')}">${tt('Classes')} <input id="an-st" type="number" min="0" max="40" step="1" value="${a.steps}"></label>
@@ -903,6 +960,7 @@ function analysisSpec(): CtxSpec | null {
       <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model under the color map')}">◌ ${tt('Transparent')}</button>
       <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>`,
     bind: (el) => {
+      cp.bind(el);
       const num = (id: string, f: (v: number) => void, neg = false) => { const i = el.querySelector<HTMLInputElement>(id); if (!i) return; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && (neg || v >= 0)) { f(v); renderScene(); } }; };
       num('#an-sc', (v) => (a.scale = v)); num('#an-st', (v) => (a.steps = Math.round(v))); num('#an-ex', (v) => (a.exag = Math.max(1, v))); num('#an-c0', (v) => (a.c0 = v), true);
       const cm = el.querySelector<HTMLSelectElement>('#an-cm')!; cm.onchange = () => { a.center = cm.value as any; renderAll(); };
@@ -916,7 +974,23 @@ function analysisSpec(): CtxSpec | null {
     cancel: { run: analyzeOff, title: tt('Close analysis') },
   };
 }
-document.querySelectorAll<HTMLElement>('[data-an]').forEach((b) => (b.onclick = () => analyze(b.dataset.an as AnKind)));
+document.querySelectorAll<HTMLElement>('[data-an]').forEach((b) => (b.onclick = (e) => (b.dataset.an === 'axis' ? axisButton(e as MouseEvent) : analyze(b.dataset.an as AnKind))));
+/** Axis analysis button: unambiguous – one axis control of the selected cylinder/cone → that one; several → pick; none → vs. fitted axis. */
+function axisButton(e: MouseEvent) {
+  const f = state.features.find((x) => state.sel.includes(x.id) && (x.type === 'Zylinder' || x.type === 'Kegel')) ?? state.features.find((x) => !state.hidden.has(x.id) && (x.type === 'Zylinder' || x.type === 'Kegel'));
+  const cs = f ? state.controls.filter((c) => c.featureIds[0] === f.id && ctrlAnalysisKind(c) === 'axis') : [];
+  if (cs.length === 1) { void analyzeControl(cs[0].id); return; }
+  if (cs.length > 1) { showMenu(e.clientX, e.clientY, cs.map((c) => [ctrlTitle(c), () => void analyzeControl(c.id)] as [string, () => void])); return; }
+  if (f) state.sel = [f.id]; void analyze('axis');
+}
+/** Analyze ribbon: control picker (all analysable controls). */
+function renderAnPicker() {
+  const sel = document.getElementById('an-ctrl') as HTMLSelectElement | null; if (!sel) return;
+  const cs = state.controls.filter((c) => ctrlAnalysisKind(c));
+  sel.innerHTML = cs.length ? cs.map((c) => `<option value="${c.id}" ${state.an.ctrl === c.id || state.selControl === c.id ? 'selected' : ''}>${ctrlAnalysisKind(c) === 'axis' ? '⌀ ' : '◐ '}${ctrlTitle(c)}</option>`).join('') : `<option value="">${tt('No analysable controls yet')}</option>`;
+  ($('#btn-an-ctrl') as HTMLButtonElement).disabled = !cs.length;
+}
+$('#btn-an-ctrl').onclick = () => { const v = ($('#an-ctrl') as HTMLSelectElement).value; if (v) void analyzeControl(+v); };
 document.querySelector('#btn-an-off')?.addEventListener('click', analyzeOff);
 document.querySelector('#btn-an-whisk')?.addEventListener('click', () => { state.an.whisk = !state.an.whisk; renderAll(); });
 document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state.an.trans = !state.an.trans; renderAll(); });
@@ -1504,10 +1578,15 @@ function renderTable() {
     td(r.flag === NOMINAL_MISSING ? `<span class="st missing" title="${tt('Enter the theoretically exact dimensions (TED) from the drawing in the control catalog')}">${tt('Nominal missing')}</span>` : `<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = tt('Delete');
     x.onclick = (e) => { e.stopPropagation(); state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); };
-    td(x);
+    const ak = ctrlAnalysisKind(c), an = document.createElement('button'); an.className = 'x an-row'; an.textContent = '◐'; an.disabled = !ak;
+    an.title = ak === 'axis' ? tt('Analyze this control (axis view)') : ak === 'form' ? tt('Analyze this control (colour map)') : tt('No analysis view for dimensions');
+    an.onclick = (e) => { e.stopPropagation(); void analyzeControl(c.id); };
+    const cell = td(an); cell.appendChild(x);
+    tr.oncontextmenu = (e) => { e.preventDefault(); showMenu(e.clientX, e.clientY, [[`◐ ${tt('Analyze')}`, ak ? () => void analyzeControl(c.id) : null], [`⌖ ${tt('Center')}`, () => centerOn(c.featureIds[0])], null, [`✕ ${tt('Delete')}`, () => { state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); }]]); };
     tr.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT') return; state.sel = [...c.featureIds]; state.selControl = c.id; state.addFeat = c.featureIds[0]; renderTree(); renderDialog(); renderScene(); renderTable(); };
     tb.appendChild(tr);
   }
+  renderAnPicker();
   $('#mb-sum').textContent = state.controls.length ? `${io}/${nio}` : '';
   $('#summary').innerHTML = state.controls.length ? `${state.controls.length} · <span style="color:var(--io)">${io} OK</span> · <span style="color:var(--nio)">${nio} NOK</span>` : '';
 }
@@ -1733,7 +1812,7 @@ function openContext(x: number, y: number, fid: number | null) {
     items.push([`ⓘ ${tt('Properties')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-name')?.focus(), 30); }]);
     items.push([`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
     items.push([`⌖ ${tt('Center')}`, () => centerOn(fid)]);
-    if (f.type !== 'Abstand') items.push([`◐ ${tt('Analyze form deviation')}`, () => analyze('form')]);
+    for (const it of analyzeItems(f)) items.push(it as [string, () => void]);
     if (!f.cons && REEX_TYPES.includes(f.type)) items.push([`🔁 ${tt('Re-extract …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); renderDialog(); setTimeout(() => { const el = document.querySelector<HTMLDetailsElement>('details.reex'); if (el) { el.open = true; el.scrollIntoView({ block: 'nearest' }); } }, 50); }]);
     items.push(null);
     items.push([state.hidden.has(f.id) ? `👁 ${tt('Show geometry')}` : `👁 ${tt('Hide geometry')}`, () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
@@ -2048,7 +2127,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON });
+Object.assign((window as any).__app, { ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
