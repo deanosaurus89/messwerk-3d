@@ -83,6 +83,10 @@
         <button class="big" id="btn-report2" title="Freeze the current results as a report table"><span class="ico">▤</span>Create report</button>
         <button class="big" id="btn-csv2" title="Export the control list as CSV" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>List CSV</button>
       </div><div class="glabel">Report · tick controls in the catalog below the 3D view</div></div>
+      <div class="group"><div class="btns an-pick">
+        <label title="How datum features become datums (ISO 5459). ISO 5459 (default): the datum is in contact with the datum feature from outside the material – tangent plane (minimax), maximum inscribed cylinder for holes, minimum circumscribed for shafts; secondary/tertiary datums are constrained in orientation to the previous ones. Least squares: Gauss fits (as before 2026.0.15).">Datums <select id="datum-assoc"><option value="iso">ISO 5459 (contact)</option><option value="lsq">Least squares (Gauss)</option></select></label>
+        <button class="big" id="btn-datum-info" title="Show how each datum feature was simulated (method, shift and tilt vs. the least-squares fit)"><span class="ico">ⓘ</span>Datum info</button>
+      </div><div class="glabel">Datum simulation</div></div>
     </div>
     
     <div class="panel hidden" data-tab="analyze">

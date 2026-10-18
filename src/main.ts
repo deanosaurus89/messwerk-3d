@@ -38,6 +38,7 @@ import {
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
+import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
 import { statusText } from './core/report';
@@ -83,7 +84,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false },
+  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -137,7 +138,16 @@ function featPoints(fid: number): Vec3[] | null {
   for (let i = 0; i < f.indices.length; i += step) { const v = f.indices[i]; out.push([pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]]); }
   ptsCache.set(fid, out); return out;
 }
-const ctx = { points: featPoints, get frame() { return activeFrame(); } };
+/** Vertex normals belonging to featPoints(fid) (same order) – material side for the ISO 5459 datum simulation. */
+const nrmOf = new WeakMap<Vec3[], Vec3[]>();
+function featNormals(fid: number): Vec3[] | null {
+  const P = featPoints(fid); if (!P) return null; const hit = nrmOf.get(P); if (hit) return hit;
+  const f = state.features.find((x) => x.id === fid), na = viewer.model?.geometry.getAttribute('normal')?.array as Float32Array | undefined; if (!f || !na) return null;
+  const step = Math.max(1, Math.ceil(f.indices.length / 6000)), out: Vec3[] = [];
+  for (let i = 0; i < f.indices.length; i += step) { const v = f.indices[i]; out.push([na[3 * v], na[3 * v + 1], na[3 * v + 2]]); }
+  nrmOf.set(P, out); return out;
+}
+const ctx = { points: featPoints, normals: featNormals, get datumAssoc() { return state.opts.datumAssoc; }, get frame() { return activeFrame(); } };
 let showCurves = true;
 const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
 const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
@@ -800,7 +810,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
   const miss = c ? missingBasic(c, f, DS) : false;
-  let nominal = c && DS.length ? axisNominal(c.kind, DS, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
+  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic as Vec3 | undefined, f.measured!.normal) : undefined;
   if (nominal && miss) nominal = { dir: nominal.dir };
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
     `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
@@ -989,6 +999,21 @@ function renderAnPicker() {
   const cs = state.controls.filter((c) => ctrlAnalysisKind(c));
   sel.innerHTML = cs.length ? cs.map((c) => `<option value="${c.id}" ${state.an.ctrl === c.id || state.selControl === c.id ? 'selected' : ''}>${ctrlAnalysisKind(c) === 'axis' ? '⌀ ' : '◐ '}${ctrlTitle(c)}</option>`).join('') : `<option value="">${tt('No analysable controls yet')}</option>`;
   ($('#btn-an-ctrl') as HTMLButtonElement).disabled = !cs.length;
+}
+const assocSel = $('#datum-assoc') as HTMLSelectElement;
+assocSel.onchange = () => { state.opts.datumAssoc = assocSel.value as DatumAssoc; toast(assocSel.value === 'iso' ? tt('Datums: ISO 5459 contact simulation') : tt('Datums: least-squares (Gauss) fits')); renderAll(); };
+$('#btn-datum-info').onclick = () => showDatumInfo();
+/** Table: how each datum reference frame of the controls was simulated (method, shift/tilt vs. least squares). */
+function showDatumInfo() {
+  const fm = featMap(), seqs = new Map<string, Feature[]>();
+  for (const c of state.controls) { const ds = (c.datumIds ?? []).map((i) => fm.get(i)).filter((d): d is Feature => !!d?.measured && !!d.datum); if (ds.length) seqs.set(ds.map((d) => d.id).join('|'), ds); }
+  for (const f of state.features) if (f.datum && f.measured && ![...seqs.values()].some((s) => s[0].id === f.id)) seqs.set(String(f.id), [f]);
+  const rows = [...seqs.values()].map((ds) => { const { info } = simulateDatums(ds, ctx); return ds.map((d, i) => `<tr><td>${i === 0 ? ds.map((x) => x.datum).join('|') : ''}</td><td><b>${d.datum}</b> ${['primary', 'secondary', 'tertiary'][i] ? tt(['primary', 'secondary', 'tertiary'][i]) : ''}</td><td>${d.name}</td><td>${tt(info[i].method)}</td><td>${fmt(info[i].shift, 4)}</td><td>${fmt(info[i].tilt, 4)}</td></tr>`).join(''); }).join('');
+  const el = $('#help-view'); el.classList.remove('hidden');
+  el.innerHTML = `<div class="rv-head"><b>ⓘ ${tt('Datum simulation')}</b> · ${state.opts.datumAssoc === 'lsq' ? tt('Least squares (Gauss)') : tt('ISO 5459 (contact)')}<span style="flex:1"></span><button class="btn" data-doc-link title="${tt('Explain the datum simulation')}">?</button><button class="btn" id="hv-close" title="${tt('Close')}">✕</button></div>
+    <div class="rv-body"><table class="tbl"><thead><tr><th>${tt('DRF')}</th><th>${tt('Datum')}</th><th>${tt('Feature')}</th><th>${tt('Association')}</th><th title="${tt('Distance of the simulated datum from the least-squares fit (along the normal for planes, radial for axes)')}">${tt('Shift')} [mm]</th><th title="${tt('Angle between the simulated datum and the least-squares fit')}">${tt('Tilt')} [°]</th></tr></thead><tbody>${rows || `<tr><td colspan="6">${tt('No datums defined yet.')}</td></tr>`}</tbody></table></div>`;
+  ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
+  (el.querySelector('[data-doc-link]') as HTMLButtonElement).onclick = () => showDocs('drf');
 }
 $('#btn-an-ctrl').onclick = () => { const v = ($('#an-ctrl') as HTMLSelectElement).value; if (v) void analyzeControl(+v); };
 document.querySelector('#btn-an-off')?.addEventListener('click', analyzeOff);
@@ -1586,7 +1611,7 @@ function renderTable() {
     tr.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT') return; state.sel = [...c.featureIds]; state.selControl = c.id; state.addFeat = c.featureIds[0]; renderTree(); renderDialog(); renderScene(); renderTable(); };
     tb.appendChild(tr);
   }
-  renderAnPicker();
+  renderAnPicker(); const as0 = document.getElementById('datum-assoc') as HTMLSelectElement | null; if (as0) as0.value = state.opts.datumAssoc ?? 'iso';
   $('#mb-sum').textContent = state.controls.length ? `${io}/${nio}` : '';
   $('#summary').innerHTML = state.controls.length ? `${state.controls.length} · <span style="color:var(--io)">${io} OK</span> · <span style="color:var(--nio)">${nio} NOK</span>` : '';
 }
