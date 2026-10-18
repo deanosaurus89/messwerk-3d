@@ -12,7 +12,7 @@ import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { minCircle } from './median';
 
 export type DatumAssoc = 'iso' | 'lsq';
-export interface SimCtx { points?: (id: number) => Vec3[] | null; normals?: (id: number) => Vec3[] | null; datumAssoc?: DatumAssoc; }
+export interface SimCtx { points?: (id: number) => Vec3[] | null; normals?: (id: number) => Vec3[] | null; datumAssoc?: DatumAssoc; /** ignore single spikes > 3σ before the contact association (default true) */ datumFilter?: boolean; }
 export interface SimInfo { method: string; shift: number; tilt: number; }
 
 /** Minimal Nelder–Mead (n-dim); returns best x and value. */
@@ -72,6 +72,12 @@ export function contactCylinder(P: Vec3[], m: FitResult, hole: boolean, cons: { 
   return { dir: dot(d, m.normal) < 0 ? scale(d, -1) : d, centre, r: c.r };
 }
 
+/** Signed residual of a point to the least-squares feature (plane: along the normal; cylinder/circle: radial). */
+function resid(f: Feature, q: Vec3): number {
+  const m = f.measured!, d = sub(q, m.center), a = unit(m.normal);
+  if (f.type === 'Ebene') return dot(d, a);
+  return norm(sub(d, scale(a, dot(d, a)))) - (m.radius ?? 0);
+}
 /** Outward direction of a plane / material side of a cylinder from vertex normals (if available). */
 function outward(f: Feature, N: Vec3[] | null | undefined, P: Vec3[]): { planeOut: Vec3; hole: boolean | null } {
   const m = f.measured!; let s = 0;
@@ -91,13 +97,17 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
   if (assoc === 'lsq' || !ctx.points) return { feats: ds, info: ds.map(() => ({ method: 'least squares (Gauss)', shift: 0, tilt: 0 })) };
   // cache: valid while the fits, point and normal arrays are the same objects
   const refs = ds.flatMap((d) => [d.measured, ctx.points!(d.id), ctx.normals?.(d.id) ?? null]);
-  const key = assoc + ':' + ds.map((d) => d.id).join('|'), hit = cache.get(key);
+  const key = assoc + (ctx.datumFilter === false ? '!' : '') + ':' + ds.map((d) => d.id).join('|'), hit = cache.get(key);
   if (hit && hit.refs.length === refs.length && hit.refs.every((r, i) => r === refs[i])) return { feats: hit.out, info: hit.info };
   const out: Feature[] = [], info: SimInfo[] = []; const dirs: Vec3[] = [];
   for (const D of ds) {
-    const m = D.measured!, P = ctx.points(D.id), lsq = (why: string) => { out.push(D); info.push({ method: `least squares (${why})`, shift: 0, tilt: 0 }); dirs.push(unit(m.normal)); };
-    if (!P || P.length < 8) { lsq('no points'); continue; }
-    const N = ctx.normals?.(D.id), side = outward(D, N, P);
+    const m = D.measured!, P0 = ctx.points(D.id), lsq = (why: string) => { out.push(D); info.push({ method: `least squares (${why})`, shift: 0, tilt: 0 }); dirs.push(unit(m.normal)); };
+    if (!P0 || P0.length < 8) { lsq('no points'); continue; }
+    const N0 = ctx.normals?.(D.id), side = outward(D, N0, P0);
+    // scan data: drop single spikes (> 3σ from the least-squares feature) before the contact association
+    const res = P0.map((q) => resid(D, q)), mu = res.reduce((a, b) => a + b, 0) / res.length, sd = Math.sqrt(res.reduce((a, b) => a + (b - mu) ** 2, 0) / res.length);
+    const keep = res.map((r) => ctx.datumFilter === false || Math.abs(r - mu) <= 3 * sd + 1e-12), P = P0.filter((_, i) => keep[i]), dropped = P0.length - P.length;
+    const tagN = dropped ? `, ${dropped} spike point(s) > 3σ ignored` : '';
     if (D.type === 'Ebene') {
       let n0 = side.planeOut; const cons: { about?: Vec3; fixed?: boolean } = {};
       // orientation constraints to previous datum directions: nominally ⟂ → keep exactly ⟂; nominally ∥ → keep ∥
@@ -108,7 +118,7 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
       const t = tangentPlane(P, n0, cons), c = add(m.center, scale(t.n, t.c - dot(m.center, t.n)));
       const nm = dot(t.n, m.normal) < 0 ? scale(t.n, -1) : t.n;
       out.push({ ...D, measured: { ...m, center: c, normal: nm } });
-      info.push({ method: `tangent plane, minimax outside material${cons.fixed ? ', orientation fixed by previous datums' : cons.about ? ', constrained ⟂ previous datum' : ''}`, shift: t.c - dot(m.center, t.n), tilt: Math.acos(Math.min(1, Math.abs(dot(t.n, m.normal)))) * 180 / Math.PI });
+      info.push({ method: `tangent plane, minimax outside material${cons.fixed ? ', orientation fixed by previous datums' : cons.about ? ', constrained ⟂ previous datum' : ''}${tagN}`, shift: t.c - dot(m.center, t.n), tilt: Math.acos(Math.min(1, Math.abs(dot(t.n, m.normal)))) * 180 / Math.PI });
       dirs.push(t.n); continue;
     }
     if (D.type === 'Zylinder' || D.type === 'Kreis') {
@@ -118,7 +128,7 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
       const c = contactCylinder(P, m, side.hole, { dir });
       const shift = norm(sub(sub(c.centre, m.center), scale(c.dir, dot(sub(c.centre, m.center), c.dir))));
       out.push({ ...D, measured: { ...m, center: c.centre, normal: c.dir, radius: c.r, diameter: 2 * c.r } });
-      info.push({ method: `${side.hole ? 'maximum inscribed' : 'minimum circumscribed'} ${D.type === 'Kreis' ? 'circle' : 'cylinder'}${dir && D.type !== 'Kreis' ? ', ∥ previous datum' : ''}`, shift, tilt: Math.acos(Math.min(1, Math.abs(dot(c.dir, a)))) * 180 / Math.PI });
+      info.push({ method: `${side.hole ? 'maximum inscribed' : 'minimum circumscribed'} ${D.type === 'Kreis' ? 'circle' : 'cylinder'}${dir && D.type !== 'Kreis' ? ', ∥ previous datum' : ''}${tagN}`, shift, tilt: Math.acos(Math.min(1, Math.abs(dot(c.dir, a)))) * 180 / Math.PI });
       dirs.push(c.dir); continue;
     }
     lsq(`${D.type}: no ISO 5459 simulation yet`);

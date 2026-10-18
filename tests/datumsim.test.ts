@@ -11,7 +11,7 @@ describe('ISO 5459 datum simulation', () => {
   it('primary plane: tangent (minimax) plane touches the high points from outside the material', () => {
     const P = grid((x, y) => 0.0005 * x + (x === 20 && y === 20 ? 0.001 : 0)); // start normal not tilted → minimax must tilt
     const A = F(1, 'Ebene', fit('Ebene', [20, 20, 0.0003], [0, 0, 1]), 'A');
-    const { feats, info } = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, 1] as Vec3) });
+    const { feats, info } = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, 1] as Vec3), datumFilter: false });
     const n = feats[0].measured!.normal, c = feats[0].measured!.center;
     for (const q of P) expect(dot(sub(q, c), n)).toBeLessThan(1e-9); // all points inside the material
     let mn = Infinity; for (const q of P) mn = Math.min(mn, dot(sub(q, c), n));
@@ -21,13 +21,13 @@ describe('ISO 5459 datum simulation', () => {
   it('central bump: plane lifts onto the bump (shift ≈ 0.02 vs. LSQ)', () => {
     const P = grid((x, y) => (Math.hypot(x - 20, y - 20) < 1 ? 0.02 : 0));
     const A = F(1, 'Ebene', fit('Ebene', [20, 20, 0], [0, 0, 1]), 'A');
-    const r = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, 1] as Vec3) });
+    const r = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, 1] as Vec3), datumFilter: false });
     expect(r.info[0].shift).toBeCloseTo(0.02, 4); expect(r.feats[0].measured!.center[2]).toBeCloseTo(0.02, 4);
   });
   it('outward side comes from vertex normals (normal pointing into the material is flipped for the contact)', () => {
     const P = grid((x, y) => (Math.hypot(x - 20, y - 20) < 1 ? -0.02 : 0)); // dent; material above (outward −z)
     const A = F(1, 'Ebene', fit('Ebene', [20, 20, 0], [0, 0, 1]), 'A');
-    const r = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, -1] as Vec3) });
+    const r = simulateDatums([A], { points: () => P, normals: () => P.map(() => [0, 0, -1] as Vec3), datumFilter: false });
     expect(r.feats[0].measured!.center[2]).toBeCloseTo(-0.02, 4); expect(r.feats[0].measured!.normal[2]).toBeGreaterThan(0.999); // reported normal keeps the fit's sign
   });
   it('secondary plane is constrained exactly ⟂ the primary, tertiary fixed ⟂ both', () => {
@@ -48,12 +48,18 @@ describe('ISO 5459 datum simulation', () => {
     const P: Vec3[] = [], N: Vec3[] = [];
     for (let k = 0; k < 20; k++) for (let i = 0; i < 90; i++) { const a = (i / 90) * 2 * Math.PI, r = i === 0 ? 5.98 : 6; P.push([r * Math.cos(a), r * Math.sin(a), k]); N.push([-Math.cos(a), -Math.sin(a), 0]); }
     const m = fit('Zylinder', [0, 0, 10], [0, 0, 1], { radius: 6, diameter: 12, length: 19 });
-    const hole = simulateDatums([F(1, 'Zylinder', m, 'A')], { points: () => P, normals: () => N });
+    const hole = simulateDatums([F(1, 'Zylinder', m, 'A')], { points: () => P, normals: () => N, datumFilter: false });
     const h = hole.feats[0].measured!; expect(hole.info[0].method).toContain('maximum inscribed');
     for (const q of P) expect(Math.hypot(q[0] - h.center[0], q[1] - h.center[1])).toBeGreaterThan(h.radius! - 1e-6);
     expect(h.radius!).toBeGreaterThan(5.985); expect(h.radius!).toBeLessThan(6); expect(h.center[0]).toBeLessThan(-0.002);
-    const shaft = simulateDatums([F(2, 'Zylinder', m, 'A')], { points: () => P, normals: () => N.map((n) => [-n[0], -n[1], 0] as Vec3) });
+    const shaft = simulateDatums([F(2, 'Zylinder', m, 'A')], { points: () => P, normals: () => N.map((n) => [-n[0], -n[1], 0] as Vec3), datumFilter: false });
     expect(shaft.info[0].method).toContain('minimum circumscribed'); expect(shaft.feats[0].measured!.radius!).toBeCloseTo(6, 3);
+  });
+  it('3σ spike filter (default) ignores a single spike, keeps the contact on noise', () => {
+    const P = grid((x, y) => 0.001 * Math.sin(x * 1.7 + y * 2.3) + (x === 20 && y === 20 ? 0.05 : 0));
+    const A = F(1, 'Ebene', fit('Ebene', [20, 20, 0], [0, 0, 1]), 'A'), N = () => P.map(() => [0, 0, 1] as Vec3);
+    const on = simulateDatums([A], { points: () => P, normals: N }), off = simulateDatums([A], { points: () => P, normals: N, datumFilter: false });
+    expect(on.info[0].method).toContain('1 spike'); expect(on.info[0].shift).toBeLessThan(0.0011); expect(off.info[0].shift).toBeGreaterThan(0.049);
   });
   it('maximum inscribed circle of a square is its incircle', () => {
     const Q: [number, number][] = []; for (let i = 0; i <= 100; i++) { const t = i / 100 * 2 - 1; Q.push([t, -1], [t, 1], [-1, t], [1, t]); }

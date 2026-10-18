@@ -86,7 +86,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc },
+  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -149,7 +149,7 @@ function featNormals(fid: number): Vec3[] | null {
   for (let i = 0; i < f.indices.length; i += step) { const v = f.indices[i]; out.push([na[3 * v], na[3 * v + 1], na[3 * v + 2]]); }
   nrmOf.set(P, out); return out;
 }
-const ctx = { points: featPoints, normals: featNormals, get datumAssoc() { return state.opts.datumAssoc; }, get frame() { return activeFrame(); } };
+const ctx = { points: featPoints, normals: featNormals, get datumAssoc() { return state.opts.datumAssoc; }, get datumFilter() { return state.opts.datumFilter !== false; }, get frame() { return activeFrame(); } };
 let showCurves = true;
 const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
 const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
@@ -1008,6 +1008,7 @@ function renderAnPicker() {
 const assocSel = $('#datum-assoc') as HTMLSelectElement;
 assocSel.onchange = () => { state.opts.datumAssoc = assocSel.value as DatumAssoc; toast(assocSel.value === 'iso' ? tt('Datums: ISO 5459 contact simulation') : tt('Datums: least-squares (Gauss) fits')); renderAll(); };
 $('#btn-datum-info').onclick = () => showDatumInfo();
+const filtCb = $('#datum-filter') as HTMLInputElement; filtCb.onchange = () => { state.opts.datumFilter = filtCb.checked; renderAll(); };
 /** Table: how each datum reference frame of the controls was simulated (method, shift/tilt vs. least squares). */
 function showDatumInfo() {
   const fm = featMap(), seqs = new Map<string, Feature[]>();
@@ -1638,7 +1639,7 @@ function renderTable() {
     tr.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT') return; state.sel = [...c.featureIds]; state.selControl = c.id; state.addFeat = c.featureIds[0]; renderTree(); renderDialog(); renderScene(); renderTable(); };
     tb.appendChild(tr);
   }
-  renderAnPicker(); const as0 = document.getElementById('datum-assoc') as HTMLSelectElement | null; if (as0) as0.value = state.opts.datumAssoc ?? 'iso';
+  renderAnPicker(); const as0 = document.getElementById('datum-assoc') as HTMLSelectElement | null; if (as0) as0.value = state.opts.datumAssoc ?? 'iso'; const fc0 = document.getElementById('datum-filter') as HTMLInputElement | null; if (fc0) { fc0.checked = state.opts.datumFilter !== false; fc0.disabled = state.opts.datumAssoc === 'lsq'; }
   $('#mb-sum').textContent = state.controls.length ? `${io}/${nio}` : '';
   $('#summary').innerHTML = state.controls.length ? `${state.controls.length} · <span style="color:var(--io)">${io} OK</span> · <span style="color:var(--nio)">${nio} NOK</span>` : '';
 }
