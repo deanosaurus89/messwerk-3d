@@ -6,6 +6,10 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.22', date: '2026-10-19', items: [
+    'Central overlay rule: temporary displays belong to the tool/dialog that made them and disappear when you leave it – creation preview, hover sets and pick circle (tool), extraction zone and re-extraction points (feature dialog), colour map/arrows/zones/derive preview (Analyze), DRF triad (selected control). Permanent display only via the View ribbon. Help › “What is shown when”.',
+    'Trim zone: in the feature dialog (Extraction) draw a lasso in the 3D view – “Remove inside” or “Keep inside”; trims are stored with the feature and apply on every re-extraction; ↶ undo, 🗑 clear.',
+  ] },
   { version: '2026.0.21', date: '2026-10-19', items: [
     'Transparent model now works everywhere (Analyze › Display › Transparent): scan and CAD faces become semi-transparent also without an active analysis; the setting is remembered; clearer tooltips.',
     'Derived features (from Analyze) no longer show empty re-extraction/fit parameter sections; a note explains that they follow their parent automatically.',

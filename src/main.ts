@@ -10,7 +10,8 @@ import { sideView } from './ui/axisview';
 import { TRIM_TYPES, trimmedSurface, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
 import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
-import { REEX_TYPES, bindReex, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
+import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
+import { OverlayManager } from './ui/overlays';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
 const curveCache = new Map<number, { key: string; seg: Float32Array | null }>();
@@ -120,7 +121,7 @@ const state = {
   curves: [] as CurveView[], nextCurve: 1, curveSel: null as number | null, showLayout: false,
   layout: null as null | { nodes: { p: number[]; degree: number; v: number }[]; corners: { v: number; kind: string; p: number[] }[]; suggestions: (CurveView & { reason: string; region: number })[]; regions: { faces: number; sides: number; loops: number; area: number; center: number[] }[]; regionOf: Int32Array; tJunctions: number; foursided: number },
 };
-initReexUI({ call: (req) => busy(engine.call<any>(req as any)), renderAll: () => renderAll(), renderScene: () => renderScene(), showZone: () => showZone, setShowZone: (on) => setShowZone(on), toast: (t) => toast(t), invalidate: (id) => { ptsCache.delete(id); trimCache.delete(id); curveCache.delete(id); },
+initReexUI({ lasso: () => lassoPick(), call: (req) => busy(engine.call<any>(req as any)), renderAll: () => renderAll(), renderScene: () => renderScene(), showZone: () => showZone, setShowZone: (on) => setShowZone(on), toast: (t) => toast(t), invalidate: (id) => { ptsCache.delete(id); trimCache.delete(id); curveCache.delete(id); },
   recompute: () => recomputeDistances(), autosave: () => scheduleAutosave(), flash: (sel, pending) => flashUpdated(sel, pending), fmt: (v, d) => fmt(v, d) });
 // '?' help buttons with a docs section (e.g. Exclude raised) – delegated, works for every panel
 document.addEventListener('click', (e) => { const b = (e.target as HTMLElement)?.closest?.('[data-doc-sec]') as HTMLElement | null; if (!b) return; e.preventDefault(); e.stopPropagation(); showDocs(b.dataset.docSec); }, true);
@@ -2088,8 +2089,48 @@ function renderDevLegend(dev: Float32Array | null) {
   const r = devRange(dev);
   el.innerHTML = `<b>${tt('Deviation [mm]')}</b><div class="bar"></div><div class="ticks"><span>${sgn(-r, 3)}</span><span>0</span><span>${sgn(r, 3)}</span></div>`;
 }
+/** Lasso in the 3D view (zone trim): click corners, double-click/Enter = finish, Esc = cancel. Returns NDC polygon + view matrix. */
+function lassoPick(): Promise<{ m: number[]; poly: [number, number][] } | null> {
+  return new Promise((res) => {
+    const host = viewer.el, R = host.getBoundingClientRect(), NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg'); svg.id = 'lasso'; svg.setAttribute('width', String(R.width)); svg.setAttribute('height', String(R.height));
+    svg.style.cssText = 'position:absolute;left:0;top:0;z-index:30;cursor:crosshair;touch-action:none';
+    const pl = document.createElementNS(NS, 'polygon'); pl.setAttribute('style', 'fill:rgba(216,27,96,.12);stroke:#d81b60;stroke-width:2;stroke-dasharray:6 4'); svg.appendChild(pl);
+    const tip = document.createElement('div'); tip.id = 'lasso-tip'; tip.innerHTML = `${tt('Lasso: click the corners · double-click or Enter = finish · Esc = cancel')} <button type="button" data-l="ok">✓</button> <button type="button" data-l="x">✕</button>`; host.append(svg, tip);
+    tip.querySelector<HTMLButtonElement>('[data-l="ok"]')!.onclick = () => end(true); tip.querySelector<HTMLButtonElement>('[data-l="x"]')!.onclick = () => end(false);
+    const pts: [number, number][] = []; viewer.controls.enabled = false;
+    const draw = () => pl.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
+    const end = (ok: boolean) => { svg.remove(); tip.remove(); document.removeEventListener('keydown', key, true); viewer.controls.enabled = true;
+      if (!ok || pts.length < 3) { res(null); return; }
+      const cam = viewer.camera; cam.updateMatrixWorld(); const M = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
+      res({ m: Array.from(M.elements), poly: pts.map(([x, y]) => [(x / R.width) * 2 - 1, 1 - (y / R.height) * 2] as [number, number]) }); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); end(false); } else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); end(true); } };
+    svg.addEventListener('pointerdown', (e) => { e.stopPropagation(); const r = svg.getBoundingClientRect(); pts.push([e.clientX - r.left, e.clientY - r.top]); draw(); });
+    svg.addEventListener('dblclick', (e) => { e.stopPropagation(); pts.pop(); end(true); });
+    document.addEventListener('keydown', key, true);
+  });
+}
+/** Central overlay manager: contextual overlays are drawn only while their context lives and are cleared when it ends. */
+const featureDialogOpen = () => dialogVisible() && state.sel.length === 1 && state.features.some((f) => f.id === state.sel[0]);
+let _ov: OverlayManager | null = null;
+const ovm = () => (_ov ??= new OverlayManager({
+  mode: () => !!state.mode || !!pe.tool || !!state.csEdit,
+  dialog: () => featureDialogOpen(),
+  analyze: () => state.an.on,
+  control: () => !!drfControl(),
+}).register(
+  { id: 'preview', ctx: 'mode', label: 'Creation preview (points, geometry, contour, creation zone)', clear: () => { if (!state.mode) state.preview = null; } },
+  { id: 'hover', ctx: 'mode', label: 'Hover detection (orange/blue point sets)', clear: () => clearAuxHover() },
+  { id: 'cursor', ctx: 'mode', label: 'Pick / brush circle', clear: () => viewer.showCursor(null, 1) },
+  { id: 'brush', ctx: 'mode', label: 'Brush selection', clear: () => { if (!state.mode) clearBrush(); } },
+  { id: 'anchor', ctx: 'mode', label: 'Anchor points' },
+  { id: 'zone', ctx: 'dialog', label: 'Extraction zone + re-extraction preview points', clear: () => clearReexPreview() },
+  { id: 'analysis', ctx: 'analyze', label: 'Analyze colour map, arrows, zones, axis view, derive preview', clear: () => { state.an.derivePrev = null; state.an.otherLabels = false; document.getElementById('dev-legend')?.remove(); } },
+  { id: 'drf', ctx: 'control', label: 'DRF triad of the selected control' },
+));
 function renderScene() {
   if (!state.data) return;
+  ovm().sync();
   if (viewer.model) viewer.model.visible = state.modelVisible;
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
@@ -2102,15 +2143,15 @@ function renderScene() {
     if (s && f.dev && state.devMap && f.dev.length === f.indices.length) viewer.paintScalar(f.indices, f.dev, devRange(f.dev));
     else viewer.paint(f.indices, s ? c : c.map((v) => 0.55 * v + 0.45 * 0.68));
   }
-  if (state.brushMask && state.brushCount) {
+  if (ovm().on('brush') && state.brushMask && state.brushCount) {
     const idx: number[] = []; state.brushMask.forEach((v, i) => v && idx.push(i));
     viewer.paint(Uint32Array.from(idx), [1, 0.85, 0]);
   }
-  const p = state.preview;
+  const p = ovm().on('preview') ? state.preview : null;
   if (p?.aux?.indices.length) viewer.paint(p.aux.indices, rgb(AUX_COLOR));
   if (p && p.indices.length) { if (p.dev && state.devMap) viewer.paintScalar(p.indices, p.dev, devRange(p.dev)); else viewer.paint(p.indices, rgb(PREVIEW_COLOR)); }
   if (p?.raised?.length) viewer.paint(p.raised, [0.85, 0.1, 0.55]);
-  { const rx = reexPreviewPts(zoneAlive); if (rx) viewer.paint(rx, rgb(PREVIEW_COLOR)); }
+  { const rx = ovm().on('zone') ? reexPreviewPts(zoneAlive) : null; if (rx) viewer.paint(rx, rgb(PREVIEW_COLOR)); }
   const lg = [p?.dev && state.devMap ? p.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
   if (!peOn) renderDevLegend(lg ?? null);
   if (state.an.on && state.an.otherLabels) for (const i of anControl()?.datumIds ?? []) { const d = state.features.find((x) => x.id === i); if (d?.indices.length && vis(d)) viewer.paint(d.indices, [0.12, 0.53, 0.9]); }
@@ -2118,13 +2159,13 @@ function renderScene() {
   viewer.clearPrims();
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
-  { const R = showZone ? reexPreview(zoneAlive) : null; if (R) viewer.addRegion(R); }
-  if (showZone && state.preview?.zone) viewer.addRegion(state.preview.zone);
+  { const R = showZone && ovm().on('zone') ? reexPreview(zoneAlive) : null; if (R) viewer.addRegion(R); }
+  if (showZone && p?.zone) viewer.addRegion(p.zone);
   if (state.an.on && state.an.res?.cpos) { const v = state.an.res.cpos; viewer.addCirclePos(v, Math.max(1, state.an.axLoc), state.an.axLab.dev ? `${tt('deviation')} Ø ${fmt(v.val, 4)}${v.status === 'IO' ? ' ✔' : v.status === 'NIO' ? ' ✘' : ''}` : '', true, { zone: state.an.axLab.zone ? `${tt('zone')} Ø ${fmt(v.tol, 4)}` : '', nom: state.an.axLab.nom ? tt('nominal (TED)') : '' }); }
   if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), state.an.axLab.dev ? offsetLabel(x) : '', { zones: true, env: state.an.axEnv, labels: axisLabels(x) });
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.an.on && state.an.derivePrev) viewer.addPrimitive(state.an.derivePrev.fit, 0xd81b60, true);
-  if (state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
+  if (ovm().on('anchor') && state.mode?.kind === 'anchor') for (const [i, q] of state.mode.pts.entries()) viewer.addPrimitive({ type: 'Punkt', center: q, normal: state.mode.nrm[i] } as FitResult, 0xff8c1a, true);
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
@@ -2148,7 +2189,7 @@ function renderScene() {
     for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
   }
   renderCsTriads();
-  renderDrfTriad();
+  if (ovm().on('drf')) renderDrfTriad();
   // Labels
   const fm = featMap();
   const focus = anFocusIds();
@@ -2649,7 +2690,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 

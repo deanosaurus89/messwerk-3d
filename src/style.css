@@ -437,3 +437,5 @@ body.nav-pause #scene canvas { cursor:grab; }
 .an-btm button { flex:1 1 0; white-space:nowrap; }
 .cp-pick { display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
 .cp-pick input { width:64px; } .cp-pick button { min-width:26px; padding:2px 4px; }
+#lasso-tip { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:31; background:#d81b60; color:#fff; padding:3px 10px; border-radius:12px; font-size:12px; } #lasso-tip button { padding:0 6px; }
+.rx-trim { flex-wrap:wrap; gap:4px; }

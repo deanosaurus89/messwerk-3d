@@ -32,6 +32,8 @@ export interface ReexParams {
   angleOn?: boolean;
   /** outlier removal on/off (default on); off = nothing removed regardless of sigma */
   sigmaOn?: boolean;
+  /** user trims of the zone: lasso polygons in a stored view (keep inside / remove inside) */
+  trims?: ZoneTrim[];
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
@@ -45,6 +47,18 @@ export function normReex<T extends Partial<ReexParams>>(p: T): T & ReexParams {
   if (p.fillBand != null) { if (p.fillBand > 0) { q.fill = true; q.maxDist = Math.max(q.maxDist, p.fillBand); } delete q.fillBand; }
   if (q.margin === undefined || q.margin === null) q.margin = 0;
   return q;
+}
+/** Lasso trim of the extraction zone: polygon in normalized device coordinates of a stored view matrix
+ *  (projection × view, column-major). keep = only points inside survive; otherwise points inside are removed. */
+export interface ZoneTrim { m: number[]; poly: [number, number][]; keep: boolean }
+function inPoly(x: number, y: number, P: [number, number][]) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; }
+/** Does point q pass all trims? */
+export function trimPass(trims: ZoneTrim[] | undefined, q: Vec3): boolean {
+  if (!trims?.length) return true;
+  for (const t of trims) { const m = t.m, w = m[3] * q[0] + m[7] * q[1] + m[11] * q[2] + m[15];
+    const ins = w > 0 && inPoly((m[0] * q[0] + m[4] * q[1] + m[8] * q[2] + m[12]) / w, (m[1] * q[0] + m[5] * q[1] + m[9] * q[2] + m[13]) / w, t.poly);
+    if (t.keep ? !ins : ins) return false; }
+  return true;
 }
 export interface ReexResult { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
 
@@ -138,7 +152,7 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   let dispR: SearchRegion = R0; // shown zone (with fill + inset: the zone of the final points)
   const cosA = p.angleOn === false ? -2 : Math.cos((p.maxAngleDeg * Math.PI) / 180), N = pos.length / 3, outl = p.sigmaOn !== false && p.sigma > 0;
   // candidates of the region (region fixed from the start geometry; the distance test is part of the region)
-  const cands: number[] = []; for (let v = 0; v < N; v++) if (inRegion(Rc, P3(pos, v))) cands.push(v);
+  const cands: number[] = []; for (let v = 0; v < N; v++) { const q = P3(pos, v); if (inRegion(Rc, q) && trimPass(p.trims, q)) cands.push(v); }
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];
@@ -156,6 +170,7 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   if (p.fill && type === 'Ebene') {
     // region from the re-extraction gives the outer contour; then all points inside it within the band (no σ/angle filter)
     const fr = fillOuterBoundary(pos, nrm, idx, fit, { band: p.maxDist, excludeRaised: !!p.excludeRaised, islands: p.islands !== false, inset: fillInset || !zoneInset ? Math.max(0, p.inset ?? 0) : 0 }, tris);
+    if (p.trims?.length) fr.indices = Uint32Array.from(Array.from(fr.indices).filter((v) => trimPass(p.trims, P3(pos, v))));
     if (fillInset) { if (fr.indices.length < 5) throw new Error('Boundary exclusion distance removes all points'); dispR = buildRegion(fit, pos, fr.indices, { ...p, inset: 0, margin: 0 }, seedPts, tris); }
     const Pp: Vec3[] = Array.from(fr.indices, (v) => P3(pos, v)), Nn: Vec3[] = nrm ? Array.from(fr.indices, (v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]] as Vec3) : Pp.map(() => fit.normal);
     fit = { ...fitType(type, Pp, Nn, false), type }; idx = fr.indices; removed = 0;
