@@ -303,6 +303,7 @@ $('#btn-report2').onclick = () => makeReport();
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
 $('#btn-delete-feat').onclick = () => deleteSelected();
+$('#btn-props').onclick = () => { const f = state.features.find((x) => x.id === state.sel[0]); if (f && state.sel.length === 1) openFeatureProps(f); else toast(tt('Select one feature first (tree or 3D view).')); };
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-toggle-wire').onclick = () => toggleWire();
 $('#btn-toggle-curves').onclick = () => toggleCurves();
@@ -1614,7 +1615,9 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 }
 
 // ------------------------------------------------------------------ Darstellung
-function renderAll() { if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
+function refreshProps() { const el = document.getElementById('props-dlg'), b = el?.querySelector('#props-body'); if (!el || !b) return;
+  const f = state.features.find((x) => x.id === +el.dataset.fid!); if (!f?.measured) { el.remove(); return; } const h = propertiesHTML(f); if (b.innerHTML !== h) b.innerHTML = h; }
+function renderAll() { refreshProps(); (document.getElementById('btn-props') as HTMLButtonElement | null)?.toggleAttribute('disabled', state.sel.length !== 1 || !state.features.some((x) => x.id === state.sel[0])); if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
@@ -1700,9 +1703,13 @@ function renderTree() {
       'indent2' + (vis ? '' : ' hidden-feat'), (e) => selectFeature(f.id, e.ctrlKey || e.metaKey || e.shiftKey), sel, f.id,
       eyeBtn(vis, () => { vis ? state.hidden.add(f.id) : state.hidden.delete(f.id); renderTree(); renderScene(); }));
     fnode.appendChild(eyeBtn(lab, () => { lab ? state.hiddenLabels.add(f.id) : state.hiddenLabels.delete(f.id); renderTree(); renderScene(); }, true));
-    fnode.ondblclick = () => centerOn(f.id);
+    fnode.ondblclick = (e) => { e.preventDefault(); openFeatureProps(f); };
+    fnode.title = tt('Double-click: Properties (editable) · right-click: menu');
     attachContext(fnode, f.id);
-    if (f.measured) node(`<span class="tw"></span>${ICON.ist}${tt('Actual')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('Actual')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+      an.title = tt('Actual geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
+      an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu(e.clientX, e.clientY, [[`ⓘ ${tt('Properties…')}`, () => showProperties(f)], [`⌖ ${tt('Center')}`, () => centerOn(f.id)]]); };
+      an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
     if (f.nominal) node(`<span class="tw"></span>${ICON.soll}${tt('Nominal')}`, 'indent3', () => selectFeature(f.id));
   }
@@ -1859,7 +1866,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label></div>
     ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${reexHTML(f)}
-    <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Properties…')}</button></p>
+    <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Actual – read-only info…')}</button></p>
     ${f.type !== 'Abstand' && !f.cons ? fitParamsHTML(f) : ''}
     ${dk ? `<h4><span class="dflag sm">${f.datum ?? '?'}</span> ${tt('Datum (ISO 5459)')}</h4>
       <div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
@@ -2299,14 +2306,20 @@ function propertiesHTML(f: FeatureView): string {
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}`;
 }
+/** Editable feature properties = the Dialog (datum, extraction, filters, fit, aux plane / construction inputs). */
+function openFeatureProps(f: FeatureView) {
+  document.getElementById('props-dlg')?.remove();
+  state.sel = [f.id]; state.selModel = false; setPaneOpen('dialog', true); togglePanel('dialog', true); renderAll();
+}
+/** Read-only properties of the ACTUAL geometry (tree: Actual › right-click › Properties…); refreshed after every recompute. */
 function showProperties(f: FeatureView) {
   document.getElementById('props-dlg')?.remove();
   const el = document.createElement('div'); el.id = 'props-dlg'; el.className = 'modal-ov';
   el.innerHTML = `<div class="wn-box" role="dialog"><button class="ov-x" data-x title="${tt('Close')}">✕</button><h3><span style="color:${hex(f.color)}">${f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type] ?? ''}</span> ${tt('Properties')}: ${f.name}</h3>
-    ${propertiesHTML(f)}<div class="row"><button class="btn" data-dlg>🛠 ${tt('Dialog (extraction / fit parameters) …')}</button><button class="btn primary" data-x>${tt('Close')}</button></div></div>`;
+    <p class="note">${tt('Read-only: result of the last extraction/fit. It updates automatically after every recompute. To change parameters open the feature’s Properties (double-click the feature).')}</p><div id="props-body">${propertiesHTML(f)}</div><div class="row"><button class="btn primary" data-x>${tt('Close')}</button></div></div>`;
+  el.dataset.fid = String(f.id);
   const close = () => { el.remove(); document.removeEventListener('keydown', esc); }, esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
   el.querySelectorAll<HTMLElement>('[data-x]').forEach((b) => (b.onclick = close));
-  el.querySelector<HTMLElement>('[data-dlg]')!.onclick = () => { close(); state.sel = [f.id]; setPaneOpen('dialog', true); togglePanel('dialog', true); renderAll(); };
   el.addEventListener('pointerdown', (e) => { if (e.target === el) close(); }); document.addEventListener('keydown', esc);
   document.body.appendChild(el);
 }
@@ -2315,8 +2328,8 @@ function openContext(x: number, y: number, fid: number | null) {
   const items: ([string, () => void] | null)[] = [];
   if (f) {
     state.sel = [f.id]; state.selModel = false; state.addFeat = f.id; renderAll();
-    items.push([`ⓘ ${tt('Properties…')}`, () => showProperties(f)]);
-    items.push([`🛠 ${tt('Dialog …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-name')?.focus(), 30); }]);
+    items.push([`🛠 ${tt('Properties…')}`, () => openFeatureProps(f)]);
+    if (f.measured) items.push([`ⓘ ${tt('Actual – read-only info …')}`, () => showProperties(f)]);
     items.push([`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
     items.push([`⌖ ${tt('Center')}`, () => centerOn(fid)]);
     for (const it of analyzeItems(f)) items.push(it as [string, () => void]);
@@ -3528,11 +3541,29 @@ function provenanceHTML(f: FeatureView): string {
 function conDefinitionHTML(f: FeatureView): string {
   if (!f.cons) return '';
   const c = conByKey(f.cons.key);
-  return `<h4>🔗 ${tt('Construction')}</h4>${kv([[tt('Method'), c ? tt(c.label) : f.cons.key], [tt('Parents'), f.cons.refs.map(nameOf).join(', ')]])}
+  const refs = f.cons.refs, n = refs.length, min = c ? (c.multi ? c.slots.length + c.multi.min : c.slots.length) : n;
+  const blocked = c ? dependentsOf(state.features, [f.id]) : new Set<number>();
+  const optsFor = (i: number) => { const s = c ? slotFor(c, i) : null; return state.features.filter((g) => g.id !== f.id && !blocked.has(g.id) && g.measured && (!s || accepts(s, g.type))); };
+  const rows = refs.map((r, i) => { const s = c ? slotFor(c, i) : null;
+    return `<div class="row con-in"><label>${s ? tt(s.label) : '#' + (i + 1)}</label><select data-cin="${i}">${optsFor(i).map((g) => `<option value="${g.id}" ${g.id === r ? 'selected' : ''}>${g.name}</option>`).join('')}</select>
+      <button type="button" class="btn" data-cmv="${i}" ${i ? '' : 'disabled'} title="${tt('Swap with the input above')}">↑</button>${c?.multi && n > min ? `<button type="button" class="btn" data-crm="${i}" title="${tt('Remove this input')}">✕</button>` : ''}</div>`; }).join('');
+  const addable = c?.multi ? optsFor(n).filter((g) => !refs.includes(g.id)) : [];
+  const add = addable.length ? `<div class="row con-in"><label>${tt('Add input')}</label><select data-cadd><option value="">＋ …</option>${addable.map((g) => `<option value="${g.id}">${g.name}</option>`).join('')}</select></div>` : '';
+  return `<h4>🔗 ${tt('Construction')}</h4>${kv([[tt('Method'), c ? tt(c.label) : f.cons.key], [tt('Inputs'), `${n}${c?.multi ? ` (${tt('min. {0}', min)})` : ''}`]])}
+    <div class="note">${tt('Source features – change, swap, add or remove; the feature and everything built on it (coordinate systems, controls, report) recompute at once.')}</div>${rows}${add}
     ${(c?.params ?? []).map((q) => `<div class="row"><label>${tt(q.label)}${q.unit ? ` [${q.unit}]` : ''}</label><input data-fpar="${q.key}" value="${f.cons!.params?.[q.key] ?? q.def}" inputmode="decimal" data-num="signed"></div>`).join('')}
     ${f.cons.error ? `<div class="cs-dof err">⚠ ${f.cons.error}</div>` : ''}`;
 }
+function setConRefs(f: FeatureView, refs: number[]) {
+  f.cons!.refs = refs; f.refs = [...refs]; f.cons!.error = undefined as any;
+  try { recomputeDistances(); } catch (e: any) { f.cons!.error = e.message; }
+  renderAll(); scheduleAutosave();
+}
 function bindConDefinition(d: HTMLElement, f: FeatureView) {
+  d.querySelectorAll<HTMLSelectElement>('[data-cin]').forEach((s) => (s.onchange = () => { const r = [...f.cons!.refs]; r[+s.dataset.cin!] = +s.value; setConRefs(f, r); }));
+  d.querySelectorAll<HTMLButtonElement>('[data-cmv]').forEach((b) => (b.onclick = () => { const i = +b.dataset.cmv!, r = [...f.cons!.refs]; [r[i - 1], r[i]] = [r[i], r[i - 1]]; setConRefs(f, r); }));
+  d.querySelectorAll<HTMLButtonElement>('[data-crm]').forEach((b) => (b.onclick = () => { const r = f.cons!.refs.filter((_, i) => i !== +b.dataset.crm!); setConRefs(f, r); }));
+  const ad = d.querySelector<HTMLSelectElement>('[data-cadd]'); if (ad) ad.onchange = () => { if (ad.value) setConRefs(f, [...f.cons!.refs, +ad.value]); };
   d.querySelectorAll<HTMLInputElement>('[data-fpar]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (!isFinite(v)) return; (f.cons!.params ??= {})[i.dataset.fpar!] = v; recomputeDistances(); renderAll(); }));
 }
 {
