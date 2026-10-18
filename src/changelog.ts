@@ -7,11 +7,15 @@ export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.da
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
   { version: '2026.0.16', date: '2026-10-18', items: [
-    'Hole patterns: Position of a bolt-circle pattern with TEDs for centre, pitch circle Ø and start angle; common zone (CZ) or separate zones; a pattern can be a datum (fixes origin and rotation).',
-    'Position respects the degrees of freedom the datums leave free (e.g. A only → location floats, A|hole → rotation free).',
-    'Ⓜ/Ⓛ: bonus tolerance from the mating/minimum-material size (needs a Diameter control with limits); datum shift with A|B(M).',
-    'New feature type Polyline (derived from Analyze; from CAD reference coming later). Derive feature from Analyze: zone planes of a flatness, median line as Polyline, minimum-zone axis – preview, Add to tree, chain icon, auto recompute.',
-    'Axis view: thicker coloured median line, Hide mesh toggle.',
+    'TEDs: the actual value is pre-filled as a suggestion (grey, italic) – computed but flagged “Nominal unconfirmed” until you tick ✓ (or ✓ all) or type the drawing value. Also for θ/φ and the angularity angle.',
+    'TED fields follow the situation: only coordinates ⟂ to the axis that the datums lock are required; along the axis not shown; free directions greyed as not applicable – each with a tooltip why.',
+    'Datum reference frame as slots: primary → secondary → tertiary dropdowns of the defined datums (no more typing A|B|C).',
+    'Creation Panel (Action Bar while creating a feature): assign a datum label directly.',
+    'Planes: “All inside boundary” – region growing gives the outer contour, then all points inside it within a band are used (bumps, spatter, burrs, craters for flatness); openings and walls stay out. Also in the Feature dialog and Re-extraction.',
+    'Axis view: ▭ Zones and ◎ Envelope toggles; the envelope (minimum-zone cylinder around the median line) is drawn in purple.',
+    'Analyze hides annotations of unrelated features (🏷 Show other annotations); restored on exit.',
+    'Help/docs overlay: big ✕, tap outside or Esc closes it (iPhone).',
+    'Also included (preview of the next release, still being polished): bolt-circle pattern position (CZ/SZ), pattern as datum, free datum DOF, Ⓜ/Ⓛ bonus and datum shift, Polyline feature and Derive feature from Analyze, Hide mesh in the axis view.',
   ] },
   { version: '2026.0.15', date: '2026-10-18', items: [
     'Datums per ISO 5459: tangent plane (minimax, outside the material), maximum inscribed cylinder for holes, minimum circumscribed for shafts; secondary/tertiary constrained to the previous datums; 3σ spike filter for scan data. Controls › Datum simulation (ISO 5459 / least squares) and Datum info. Note: values of existing projects can change.',
