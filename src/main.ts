@@ -1924,6 +1924,16 @@ function renderScene() {
 viewer.labels.onMoved = (id, off) => { state.labelOffsets.set(id, off); const f = id < 0 ? null : state.features.find((x) => x.id === id);
   if (id < 0 || f?.dim) renderScene(); else scheduleAutosave(); };
 viewer.labels.onSelect = (id) => { if (id >= 0) selectFeature(id); };
+viewer.labels.pinTitle = tt('Pinned (dragged) – click to unpin: automatic placement again');
+viewer.labels.onUnpin = (id) => { state.labelOffsets.delete(id); status(tt('Annotation unpinned – automatic placement.')); renderScene(); scheduleAutosave(); };
+/** Reset annotation positions: the selected features, or all when nothing is selected. */
+function resetLabelPositions() {
+  const ids = state.sel.filter((i) => state.labelOffsets.has(i));
+  if (ids.length) { for (const i of ids) state.labelOffsets.delete(i); status(tt('Annotation positions reset for {0} selected feature(s).', ids.length)); }
+  else { const n = [...state.labelOffsets.keys()].filter((k) => k >= 0).length; for (const k of [...state.labelOffsets.keys()]) if (k >= 0) state.labelOffsets.delete(k); status(tt('All annotation positions reset ({0}).', n)); }
+  renderScene(); scheduleAutosave();
+}
+$('#btn-reset-labels').onclick = () => resetLabelPositions();
 
 renderAll();
 
@@ -1978,14 +1988,14 @@ function syncViewToggles() {
   const g = document.createElement('div'); g.id = 'view-gear';
   g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
     <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ ${tt('Fit all')}</button>
-    <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button>
+    <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button><button data-vg="relabel" title="${tt('Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected')}">↺ ${tt('Reset positions')}</button>
     <button data-vg="wire" data-vt="wire">▦ ${tt('Mesh edges')}</button><button data-vg="curves" data-vt="curves" class="on">〰 ${tt('Curves/CAD edges')}</button>
     <button data-vg="opts">⚙ ${tt('Options …')}</button></div>`;
   g.addEventListener('pointerdown', (e) => e.stopPropagation());
   g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => g.classList.toggle('open');
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
     if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status(tt('Fitted to view.')); }
-    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'opts') openOptions(); else toggleCurves();
+    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'opts') openOptions(); else toggleCurves();
     g.classList.remove('open'); }));
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   viewer.el.appendChild(g);

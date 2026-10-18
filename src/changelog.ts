@@ -7,7 +7,13 @@ export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.da
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
   { version: '2026.0.17', date: '2026-10-18', items: [
-    'Polish release (no new features): the preview features of 0.16 are now finished and verified on desktop and iPhone.',
+    'Fix: TED suggestions are computed in the same datum frame as the evaluation (contact datums). Before, they came from the least-squares datums, so an accepted suggestion could show a position error (e.g. 1.966 NOK) instead of ~0. If you confirmed (✓) suggestions in 0.16, clear those fields once to get the corrected suggestion.',
+    'TED fields are labelled by drawing meaning (“from B”, “from C”); the tooltip shows the DRF axis and its direction in the display CS, and a DRF triad is drawn while the control is selected.',
+    'Fix: “All inside boundary” keeps interior islands (spatter rings around holes, bump patches, strips next to slots). Band 2 mm plus the tips of taller bumps; the outer contour is drawn as a bold blue line; raised features (boss, sphere, pad) show in magenta and stay in unless you choose ⛰ Exclude raised.',
+    'Circle / slot / line: Creation Panel now has ▱ Full plane | ◎ Local ring (with gap/width) for the aux plane, plus ⬚ All inside boundary for the full aux plane – live preview.',
+    'Annotations: a dragged annotation stays pinned (🔒); tap the 🔒 to unpin. View › ↺ Reset positions (also in the ⚙ menu): selected or all.',
+    'Phones: nav cube, ⚙ menu and CS indicator stay visible above an open Control Properties panel.',
+    'The 0.16 preview features are finished and verified on desktop and iPhone:',
     'Ⓜ/Ⓛ and patterns: per-hole table (Ø, t + bonus, permitted, margin) in Control Properties and the analysis panel; ▶ marks the hole with the smallest margin, which decides OK/NOK.',
     'Pattern position in the axis view: each hole is shown against its own nominal axis (after the best fit of the pattern) with its permitted zone; the label names the hole (k of n), bonus and margin.',
     'Datum slots (primary → secondary → tertiary, with Ⓜ/Ⓛ) also in the analysis panel – changes recompute immediately.',

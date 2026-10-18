@@ -132,6 +132,10 @@ export class Labels {
   items = new Map<number, LabelEl>();
   onMoved: (id: number, offset: V3) => void = () => {};
   onSelect: (id: number) => void = () => {};
+  /** lock icon clicked: back to automatic placement */
+  onUnpin: (id: number) => void = () => {};
+  /** tooltip of the lock icon (i18n from the app) */
+  pinTitle = 'Pinned (dragged) – click to unpin: automatic placement again';
   private lastKey = '';
   private dragging: { id: number; dx: number; dy: number; moved: boolean; x0: number; y0: number } | null = null;
   constructor(private v: Viewer) {
@@ -153,6 +157,7 @@ export class Labels {
         const el = document.createElement('div'); el.className = 'lbl'; el.dataset.fid = String(s.id);
         el.addEventListener('pointerdown', (e) => {
           e.stopPropagation(); e.preventDefault();
+          if ((e.target as HTMLElement).closest('.lbl-pin')) { this.onUnpin(s.id); return; }
           const r = el.getBoundingClientRect();
           this.dragging = { id: s.id, dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - (r.top + r.height / 2), moved: false, x0: e.clientX, y0: e.clientY };
         });
@@ -160,7 +165,9 @@ export class Labels {
         it = { spec: s, el, w: 0, h: 0, choice: -1, cx: 0, cy: 0 }; this.items.set(s.id, it);
       }
       it.spec = s;
-      if (it.el.innerHTML !== s.html) it.el.innerHTML = s.html;
+      const html = s.html + (s.offset && s.id >= 0 ? `<button class="lbl-pin" title="${this.pinTitle.replace(/"/g, '&quot;')}">🔒</button>` : '');
+      if (it.el.innerHTML !== html) it.el.innerHTML = html;
+      it.el.classList.toggle('pinned', !!s.offset);
       it.el.style.setProperty('--c', s.color);
       it.el.classList.toggle('sel', s.selected);
       it.w = it.el.offsetWidth; it.h = it.el.offsetHeight;
