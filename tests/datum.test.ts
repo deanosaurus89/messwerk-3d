@@ -204,3 +204,23 @@ describe('TED suggestions in the evaluation frame (rotated part, contact datums)
     expect(evaluate(c, m2, cx).measured!).toBeLessThan(0.002);
   });
 });
+
+describe('Position of a circle: centre only, zone axis ⟂ aux plane', () => {
+  // rotated part: A normal = world +Y; circle in a slightly tilted aux plane (0.17°), centre off by (0.03, 0.04) in the plane
+  const A3 = F(21, 'Plane 1', 'Ebene', fit('Ebene', [40, 10, 40], [0, 1, 0]), 'A');
+  const B3 = F(22, 'Plane 4', 'Ebene', fit('Ebene', [40, 5, 0], [0, 0, -1]), 'B');
+  const C3 = F(23, 'Plane 5', 'Ebene', fit('Ebene', [0, 5, 40], [-1, 0, 0]), 'C');
+  const t = (0.17 * Math.PI) / 180;
+  const K = F(24, 'Circle 2', 'Kreis', fit('Kreis', [46.83, 10, 63.14], [Math.sin(t), Math.cos(t), 0], { radius: 3, diameter: 6 }));
+  const m3 = new Map([A3, B3, C3, K].map((f) => [f.id, f]));
+  it('value = 2 × centre distance from the TED axis; suggestion → 0; fields from B and C', () => {
+    const c: Control = { id: 9, kind: 'Position', featureIds: [24], nominal: 0, tolUp: 0.1, tolLo: 0, datumIds: [21, 22, 23] };
+    const spec = tedSpec(c, K, [A3, B3, C3]).filter((s) => s.state === 'req' && s.k <= 2);
+    expect(spec.map((s) => s.from).sort()).toEqual(['B', 'C']);
+    expect(evaluate(c, m3).measured!).toBeLessThan(1e-6);
+    // drawing: 46.8 from C, 63.1 from B → centre off by 0.03 (X) and 0.04 (Z) → Ø 0.1
+    const vx = spec.find((s) => s.from === 'C')!, vz = spec.find((s) => s.from === 'B')!;
+    c.basic = [null, null, null]; c.basic[vx.k] = Math.sign(vx.sug!) * 46.8; c.basic[vz.k] = Math.sign(vz.sug!) * 63.1;
+    const r = evaluate(c, m3); expect(r.measured!).toBeCloseTo(2 * Math.hypot(0.03, 0.04), 4); expect(r.detail).toMatch(/circle centre/);
+  });
+});

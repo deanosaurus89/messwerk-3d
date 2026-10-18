@@ -853,13 +853,14 @@ function distSpec(m: DistMode): CtxSpec {
 // Architektur: eine Abweichungsquelle liefert Knotenindizes + vorzeichenbehaftete Abweichungen (+ optional Lage/Richtung
 // für Whisker). Quellen heute: Formabweichung je Merkmal (Punkte ↔ Ausgleichselement) und Polygon ↔ Original;
 // eine CAD-Quelle (Netz ↔ Sollgeometrie) lässt sich als weiterer Eintrag in AN_SOURCES ergänzen.
-type AnKind = 'form' | 'mesh' | 'axis';
+type AnKind = 'form' | 'mesh' | 'axis' | 'cpos';
 /** Controls shown in the axis view (cylinder/cone): orientation/location of the axis and straightness of the axis. */
 const AXIS_CTRL = ['Position', 'Rechtwinkligkeit', 'Parallelität', 'Neigung', 'Koaxialität', 'Geradheit Achse'];
 /** Which analysis view a control gets: axis view, surface colour map, or none (dimensions). */
-function ctrlAnalysisKind(c: Control): 'axis' | 'form' | null {
+function ctrlAnalysisKind(c: Control): 'axis' | 'form' | 'cpos' | null {
   const f = state.features.find((x) => x.id === c.featureIds[0]); if (!f || !f.measured) return null;
   if (c.kind === 'Position' && isPattern(f)) return 'axis'; // bolt-circle pattern: axis view of every hole
+  if (c.kind === 'Position' && (f.type === 'Kreis' || f.type === 'Langloch') && c.datumIds?.length) return 'cpos'; // centre point in a Ø zone ⟂ aux plane
   if (!f.indices.length) return null;
   if ((f.type === 'Zylinder' || f.type === 'Kegel') && AXIS_CTRL.includes(c.kind)) return 'axis';
   if ((isZoneControl(c.kind) || isDatumControl(c.kind)) && f.type !== 'Abstand' && f.type !== 'Winkel') return 'form';
@@ -910,7 +911,9 @@ function analyzeItems(f: FeatureView): [string, (() => void) | null][] {
   if (!cs.length) return f.type === 'Abstand' ? [] : [[`◐ ${tt('Analyze form deviation')}`, () => { state.an.ctrl = null; state.sel = [f.id]; analyze('form'); }]];
   return cs.map((c) => [`◐ ${tt('Analyze: {0}', controlLabel(c, f) + (c.datumIds?.length ? ` |${datumText(c, featMap())}|` : ''))}`, () => analyzeControl(c.id)] as [string, () => void]);
 }
-interface AnResult { idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[]; axes?: AxisAnalysis[] }
+/** Position of a circle/slot centre: nominal point (foot on the zone axis), actual centre, zone axis ⟂ aux plane. */
+interface CposView { fid: number; nom: Vec3; act: Vec3; dir: Vec3; tol: number; val: number; bonus: number; radius: number; status: string; flag?: string }
+interface AnResult { cpos?: CposView; idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[]; axes?: AxisAnalysis[] }
 const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   form: async () => {
     const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
@@ -923,6 +926,17 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     state.an.ids = fs.map((f) => f.id);
     let off = 0; const feats = fs.map((f) => { let lo = Infinity, hi = -Infinity; for (let i = off; i < off + f.indices.length; i++) { lo = Math.min(lo, dev[i]); hi = Math.max(hi, dev[i]); } off += f.indices.length; return { id: f.id, lo, hi }; });
     return { feats, idx, dev, pos, dir, label: C ? `◐ ${ctrlTitle(C)}` : fs.length === 1 ? tt('Form deviation – {0}', fs[0].name) : tt('Form deviation – {0} features', fs.length) };
+  },
+  cpos: async () => {
+    const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined; if (!C) return null;
+    const f = state.features.find((x) => x.id === C.featureIds[0]); if (!f?.measured) return null;
+    const r = evaluate(C, featMap(), ctx), m = r.members?.[0];
+    if (!m) { toast(r.flag ? tt(r.flag) : tt('Enter the TED in the control first.')); return null; }
+    const act = f.measured.center as Vec3, d = m.dirW, t = (act[0] - m.nomW[0]) * d[0] + (act[1] - m.nomW[1]) * d[1] + (act[2] - m.nomW[2]) * d[2];
+    const nom: Vec3 = [m.nomW[0] + t * d[0], m.nomW[1] + t * d[1], m.nomW[2] + t * d[2]];
+    state.an.ids = [f.id, ...(C.datumIds ?? [])];
+    return { idx: new Uint32Array(0), dev: new Float32Array(0), label: `◐ ${ctrlTitle(C)}`,
+      cpos: { fid: f.id, nom, act, dir: d, tol: m.tol, val: m.dia, bonus: m.bonus, radius: f.measured.radius ?? (f.measured.diameter ?? 2) / 2, status: r.status, flag: r.flag } };
   },
   axis: async () => {
     const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
@@ -954,6 +968,12 @@ async function analyze(kind: AnKind, keepView = false, fromControl = false) {
   if (!keepView) state.an.otherLabels = false; // entering Analyze: annotations of unrelated features hidden (restored on exit)
   state.an.kind = kind; state.an.res = r; state.an.on = true; pe.cmp = false;
   if (kind === 'axis' && r.axes?.length && !keepView) sideView(viewer, r.axes);
+  if (kind === 'cpos' && r.cpos && !keepView) { const d = r.cpos.dir, q = Math.abs(d[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], k = q[0] * d[0] + q[1] * d[1] + q[2] * d[2], pp = [q[0] - k * d[0], q[1] - k * d[1], q[2] - k * d[2]];
+    viewer.focus(r.cpos.act as [number, number, number], Math.min(r.cpos.radius * 5, Math.max(r.cpos.tol, r.cpos.val, 1e-3) * Math.max(1, state.an.axLoc) * 3), [d[0] + 0.45 * pp[0], d[1] + 0.45 * pp[1], d[2] + 0.45 * pp[2]]);
+    // the Action Bar covers the lower middle: move the centre into the upper part of the view
+    const cam = viewer.camera as any; cam.updateMatrixWorld(); const e = cam.matrixWorld.elements, up = [e[4], e[5], e[6]], tg = viewer.controls.target;
+    const dist = cam.position.distanceTo(tg), sh = 0.25 * 2 * dist * Math.tan(((cam.fov ?? 45) * Math.PI) / 360);
+    for (const o of [tg, cam.position]) { o.x -= up[0] * sh; o.y -= up[1] * sh; o.z -= up[2] * sh; } viewer.controls.update(); }
   renderAll();
 }
 function analyzeOff() { state.an.on = false; state.an.res = null; state.an.ctrl = null; state.an.derivePrev = null; viewer.setModelOpacity(1); renderAll(); }
@@ -995,6 +1015,15 @@ function paintAnalysis(): boolean {
       + r.axes.slice(0, 1).map((x) => { const cs = axisColorScale(x), REF = { nominal: tt('distance from the nominal axis'), zone: tt('distance from the zone axis'), planes: tt('distance from the zone mid-plane'), form: tt('distance from the minimum-zone axis') };
         return `<small title="${tt('Median-line points and segments are coloured by their deviation: green = on the reference, red = at the zone boundary (t/2) or beyond')}">${tt('Colour')}: ${REF[cs.ref]}<div class="bar half"></div><div class="ticks"><span>0</span><span>${fmt(cs.h / 2, 4)}</span><span>≥ ${fmt(cs.h, 4)}${x.tol != null ? ' (t/2)' : ''}</span></div></small>`; }).join('')
       + `<small><span style="color:#555">━</span> ${tt('nominal axis')} · <span style="color:#2e9e3e">━</span><span style="color:#c62828">●</span> ${tt('median line (coloured)')} · <span style="color:#e57373">┅</span> ${tt('its axis')} · <span style="color:#1565c0">➝</span> ${tt('offset')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('required zone')} · <span style="color:#8e44ad">◎</span> ${tt('envelope (min. zone)')}</small>`;
+    return true;
+  }
+  if (r.cpos) {
+    viewer.setModelOpacity(a.axHide ? 0 : a.trans ? 0.35 : 1);
+    let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
+    const v = r.cpos, lx = Math.max(1, a.axLoc);
+    el.innerHTML = `<b>${r.label}</b><small>${tt('Position Ø')} <b>${fmt(v.val, 4)}</b> · ${tt('permitted')} ${fmt(v.tol, 4)}${v.bonus > 1e-12 ? ` (${tt('incl. bonus')} ${fmt(v.bonus, 4)})` : ''} · ${tt('offset')} ${fmt(v.val / 2, 4)} ${v.flag ? `<span class="st missing">⚠ ${tt(v.flag)}</span>` : ''}</small>`
+      + `<small>${tt('Only the fitted centre counts; zone = cylinder Øt ⟂ the auxiliary plane through the TED point.')} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('True scale.')}</small>`
+      + `<small><span style="color:#555">━</span> ${tt('zone axis')} · <span style="color:#555">●</span> ${tt('nominal point')} · <span style="color:#c62828">●</span>/<span style="color:#2e9e3e">●</span> ${tt('actual centre')} · <span style="color:#2e9e3e">▮</span> ${tt('tolerance zone')} · <span style="color:#1565c0">➜</span> ${tt('offset')}</small>`;
     return true;
   }
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }
@@ -1071,6 +1100,13 @@ function addDerived(key: string, p: FeatureView) {
 function analysisSpec(): CtxSpec | null {
   const a = state.an; if (!a.on || !a.res) return null;
   const cp = ctrlPanel();
+  if (a.res.cpos) return { title: `◐ ${tt('Circle position')}`, cls: 'an',
+    controls: `${cp.html}<label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show/hide the tolerance zone cylinder')}">▭ ${tt('Zones')}</button>${otherLabelsHtml()}`,
+    bind: (el) => { cp.bind(el); const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
+      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'hide') a.axHide = !a.axHide; else if (b.dataset.a === 'zones') a.axZones = !a.axZones; else a.trans = !a.trans; renderAll(); }));
+      el.querySelectorAll<HTMLButtonElement>('[data-ol]').forEach((b) => (b.onclick = () => { state.an.otherLabels = !state.an.otherLabels; renderAll(); })); },
+    cancel: { run: analyzeOff, title: tt('Close analysis') } };
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
     controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
       <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
@@ -1878,6 +1914,7 @@ function renderScene() {
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
   { const R = reexPreview((id) => state.features.some((x) => x.id === id)); if (R) viewer.addRegion(R); }
+  if (state.an.on && state.an.res?.cpos) { const v = state.an.res.cpos; viewer.addCirclePos(v, Math.max(1, state.an.axLoc), `Ø ${fmt(v.val, 4)}${v.status === 'IO' ? ' ✔' : v.status === 'NIO' ? ' ✘' : ''}`, state.an.axZones); }
   if (state.an.on && state.an.res?.axes) for (const x of state.an.res.axes) viewer.addAxisAnalysis(x, axisExag(state.an.res), Math.max(1, state.an.axLoc), offsetLabel(x), { zones: state.an.axZones, env: state.an.axEnv });
   if (state.an.on && state.an.zones && state.an.res?.feats) for (const z of state.an.res.feats) { const f = state.features.find((x) => x.id === z.id); if (f?.measured) viewer.addZone(f.measured, z.lo, z.hi); }
   if (state.an.on && state.an.derivePrev) viewer.addPrimitive(state.an.derivePrev.fit, 0xd81b60, true);

@@ -302,6 +302,11 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
             const nomP = add(b, add(scale(E3(i1), R * Math.cos(al + k * pitch)), scale(E3(i2), R * Math.sin(al + k * pitch))));
             return { ML: mlOf(h), nomP, g, t: tFor(h) }; });
           if (used.size !== n) return { value: null, flag: 'pattern members do not match the equal division – check Ø and start angle' };
+        } else if (f.type === 'Kreis' || f.type === 'Langloch') {
+          // circle/slot: only the fitted CENTRE counts; cylindrical zone Øt whose axis is ⟂ to the circle's auxiliary
+          // plane (its normal), through the TED point – value = 2 × distance of the centre from that axis (in the aux plane)
+          const gl = unit(dirLocal(F, unit(m.normal))), gC = dot(gl, g) < 0 ? scale(gl, -1) : gl, cl = toLocal(F, m.center);
+          members = [{ ML: [cl, cl], nomP: b, g: gC, t: tFor(f) }];
         } else members = [{ ML: mlOf(f), nomP: b, g, t: tFor(f) }];
         if (flag) return { value: null, flag };
         // datum shift: datum features of size referenced at Ⓜ/Ⓛ may shift the DRF by half their departure from MMC/LMC
@@ -314,7 +319,8 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
         const fr = { freeT: F.freeT.filter((i) => i !== N.ax).map(E3), freeR: F.freeR && (members.length > 1 || norm([b[0], b[1], 0]) > 1e-9), shiftR };
         const cz = c.cz !== false, res = evalPositionGroup(members, fr, cz), wi = res.worst;
         const dof = [...fr.freeT.map((e) => 'XYZ'[e.indexOf(1)]), ...(fr.freeR ? ['rot Z'] : []), ...(shiftR > 0 ? [`datum shift ≤ ${(2 * shiftR).toFixed(4)}`] : [])];
-        const head = members.length > 1 ? `pattern of ${members.length} (${cz ? 'common zone CZ' : 'separate zones'}): Ø ${res.dia.map((d) => d.toFixed(4)).join(' / ')}, worst member ${wi + 1}` : `${members[0].ML.length > 2 ? `derived median line (${members[0].ML.length} sections)` : 'axis end points – no points'} in Ø zone around the ${tag}`;
+        const isC = f.type === 'Kreis' || f.type === 'Langloch';
+        const head = isC ? `${f.type === 'Kreis' ? 'circle' : 'slot'} centre in Ø zone ⟂ aux plane, ${tag}` : members.length > 1 ? `pattern of ${members.length} (${cz ? 'common zone CZ' : 'separate zones'}): Ø ${res.dia.map((d) => d.toFixed(4)).join(' / ')}, worst member ${wi + 1}` : `${members[0].ML.length > 2 ? `derived median line (${members[0].ML.length} sections)` : 'axis end points – no points'} in Ø zone around the ${tag}`;
         const Wd = (v: Vec3): Vec3 => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
         const info: PosMemberInfo[] = members.map((mm, i) => ({ fid: mfs[i].id, name: mfs[i].name, dia: res.dia[i], tol: mm.t, bonus: mm.t - c.tolUp, margin: mm.t - res.dia[i], nomW: add(F.o, Wd(res.nom[i].p)), dirW: Wd(res.nom[i].g) }));
         return { members: info, worst: wi, value: res.dia[wi], bonus: members[wi].t - c.tolUp || undefined, detail: `${head} (DRF ${F.text}${dof.length ? `, free: ${dof.join(', ')}` : ''})${notes.length ? ' · ' + notes.join(' · ') : ''}` };

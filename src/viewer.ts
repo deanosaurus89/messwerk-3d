@@ -530,6 +530,24 @@ export class Viewer {
       new THREE.MeshBasicMaterial({ color: selected ? 0xffd400 : hover ? 0xffffff : color, transparent: thin, opacity: thin ? 0.8 : 1 }));
     tube.renderOrder = 5; if (id != null) tube.userData.curveId = id; this.prims.add(tube);
   }
+  /** Position of a circle/slot centre: zone axis (⟂ aux plane) through the nominal point, tolerance cylinder Øt,
+   *  nominal point, actual centre (green inside / red outside) and the offset arrow with its value; offset and zone ×locEx. */
+  addCirclePos(v: { nom: number[]; act: number[]; dir: number[]; tol: number; val: number; radius: number }, locEx = 1, label = '', zones = true) {
+    const V = (p: number[]) => new THREE.Vector3(p[0], p[1], p[2]), N = V(v.nom), d = V(v.dir).normalize(), S = Math.max(v.tol, v.val, 1e-3) * locEx, H = Math.min(v.radius * 1.6, S * 4);
+    const off = V(v.act).sub(N), A = N.clone().addScaledVector(off, locEx), ok = v.val <= v.tol + 1e-12;
+    const add = (o: THREE.Object3D, order = 7) => { o.traverse((c: any) => { if (c.material) { c.material.depthTest = false; c.material.transparent = true; } c.renderOrder = order; c.raycast = () => {}; }); this.prims.add(o); };
+    const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([N.clone().addScaledVector(d, -H / 2), N.clone().addScaledVector(d, H / 2)]), new THREE.LineBasicMaterial({ color: 0x555555 })); add(ln);
+    if (zones && v.tol > 0) { const R = (v.tol / 2) * locEx, g = new THREE.CylinderGeometry(R, R, H, 48, 1, true);
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x22aa44, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
+      const w = new THREE.LineSegments(new THREE.EdgesGeometry(g, 1), new THREE.LineBasicMaterial({ color: 0x22aa44, opacity: 0.8 }));
+      for (const o of [m, w]) { o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d); o.position.copy(N); add(o, 5); } }
+    const r = S / 25;
+    const dot = (p: THREE.Vector3, color: number) => { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), new THREE.MeshBasicMaterial({ color })); s.position.copy(p); add(s, 8); };
+    dot(N, 0x555555); dot(A, ok ? 0x2e9e3e : 0xc62828);
+    const len = A.distanceTo(N);
+    if (len > 1e-9) { const ah = new THREE.ArrowHelper(A.clone().sub(N).normalize(), N, len, 0x1565c0, Math.min(len * 0.35, S / 4), Math.min(len * 0.2, S / 8)); add(ah, 9); }
+    if (label) this.addText(N.clone().lerp(A, 0.5).addScaledVector(d, H * 0.35).toArray(), label, '#1565c0');
+  }
   /** Closed contour loop (e.g. the outer boundary of 'All inside boundary'): bold tube, always visible. */
   addContour(pts: number[][], color: number) {
     if (pts.length < 3) return;
