@@ -1255,7 +1255,7 @@ function membersHtml(c: Control, r: ControlResult, open = false): string {
   const M = r.members; if (!M || (M.length < 2 && !c.mod)) return '';
   const rows = M.map((m, i) => `<tr class="${i === r.worst ? 'worst' : ''}${m.margin < 0 ? ' nio' : ''}"><td>${i === r.worst ? '▶ ' : ''}${m.name}</td><td>${fmt(m.dia, 4)}</td><td>${fmt(c.tolUp, 4)}${c.mod ? ` + ${fmt(m.bonus, 4)}` : ''}</td><td>${fmt(m.tol, 4)}</td><td>${sgn(m.margin, 4)}</td></tr>`).join('');
   const w = M[r.worst ?? 0];
-  return `<details class="pm" ${open ? 'open' : ''}><summary title="${tt('Per hole: measured position Ø, permitted tolerance (t + bonus from Ⓜ/Ⓛ) and margin = permitted − measured. ▶ = hole with the smallest margin (decides OK/NOK)')}">${M.length > 1 ? tt('{0} holes', M.length) + ' · ' : ''}${tt('worst margin')} ${sgn(w.margin, 4)}${M.length > 1 ? ` (${w.name})` : ''}</summary>
+  return `<details class="pm" ${open ? 'open' : ''}><summary title="${tt('Per hole: measured position Ø, permitted tolerance (t + bonus from Ⓜ/Ⓛ) and margin = permitted − measured. ▶ = hole with the smallest margin (decides OK/NOK)')}">${M.length > 1 ? tt('{0} holes', M.length) + ' · ' : ''}${M.length > 1 ? tt('worst margin') : tt('margin')} ${sgn(w.margin, 4)}${M.length > 1 ? ` (${w.name})` : ''}</summary>
     <table><thead><tr><th>${tt('Hole')}</th><th>Ø</th><th>t${c.mod ? ' + ' + tt('bonus') : ''}</th><th>${tt('permitted')}</th><th>${tt('margin')}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 /** Text after the value in the frame: Ⓜ/Ⓛ and CZ. */
