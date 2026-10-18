@@ -6,6 +6,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.16', date: '2026-10-18', items: [
+    'Hole patterns: Position of a bolt-circle pattern with TEDs for centre, pitch circle Ø and start angle; common zone (CZ) or separate zones; a pattern can be a datum (fixes origin and rotation).',
+    'Position respects the degrees of freedom the datums leave free (e.g. A only → location floats, A|hole → rotation free).',
+    'Ⓜ/Ⓛ: bonus tolerance from the mating/minimum-material size (needs a Diameter control with limits); datum shift with A|B(M).',
+    'New feature type Polyline (derived from Analyze; from CAD reference coming later). Derive feature from Analyze: zone planes of a flatness, median line as Polyline, minimum-zone axis – preview, Add to tree, chain icon, auto recompute.',
+    'Axis view: thicker coloured median line, Hide mesh toggle.',
+  ] },
   { version: '2026.0.15', date: '2026-10-18', items: [
     'Datums per ISO 5459: tangent plane (minimax, outside the material), maximum inscribed cylinder for holes, minimum circumscribed for shafts; secondary/tertiary constrained to the previous datums; 3σ spike filter for scan data. Controls › Datum simulation (ISO 5459 / least squares) and Datum info. Note: values of existing projects can change.',
     'Oblique nominal directions: Position accepts TED angles θ (from Z) and φ (about Z) in the datum system – no snapping to the nearest axis.',
