@@ -78,18 +78,25 @@ export type Req =
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
-  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number } }
+  | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
-  | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number } };
+  | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null };
 
+/** Aux plane 'full adjacent face' + All inside boundary: fill the aux plane points inside its outer contour, refit it. */
+function auxFill(r: { plane: FitResult; planeIdx: Uint32Array }, req: { plane?: FitResult; ring?: unknown; fill?: FillParams | null }) {
+  if (!req.fill || req.plane || req.ring || !r.planeIdx || r.planeIdx.length < 3) return null;
+  const f = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, r.planeIdx, r.plane, req.fill);
+  const { p, n } = gather(mesh!, f.indices); const plane = fitType('Ebene', p, n, 0); delete plane.residuals; plane.n = f.indices.length;
+  return { plane, indices: f.indices, raised: f.raised, contour: f.contour, added: f.added };
+}
 export interface FitParams { k: number; nf?: NormalFilter | null; /** planes: capture all points inside the outer boundary of the region (band ± mm) */ fill?: FillParams | null; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   let { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Too few points selected');
-  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0;
+  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0, raised: Uint32Array | undefined, contour: number[][][] | undefined;
   if (prm.fill && type === 'Ebene') {
     const r = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, idx, fit, prm.fill);
-    use = idx = r.indices; filled = r.added; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
+    use = idx = r.indices; filled = r.added; raised = r.raised; contour = r.contour; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
   }
   if (prm.nf && n.length === p.length) {
     const keep = normalFilter(fit, p, n, prm.nf);
@@ -100,7 +107,7 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
     } else removed = 0;
   }
   delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
-  return { indices: use, fit, candidates: [], filled };
+  return { indices: use, fit, candidates: [], filled, raised, contour };
 }
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
@@ -181,8 +188,10 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       }
     } else if (req.op === 'aux') {
       if (!topo) throw new Error('The auxiliary plane needs a polygon model (triangles).');
-      const r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane, Infinity, req.ring);
-      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx } };
+      let r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, req.plane, Infinity, req.ring);
+      const af = auxFill(r, req);
+      if (af) r = { ...extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, af.plane, Infinity), plane: af.plane, planeIdx: af.indices };
+      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx, raised: af?.raised, contour: af?.contour, filled: af?.added } };
     } else if (req.op === 'dev') {
       // Abweichungen der Merkmalspunkte zum Ausgleichselement (Farbkarte/Whisker der Analyse)
       const idx = req.indices, P = mesh!.positions, n = idx.length, dev = new Float32Array(n), dir = new Float32Array(3 * n), pos = new Float32Array(3 * n);
@@ -192,8 +201,10 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { dev, dir, pos }; transfer.push(dev.buffer, dir.buffer, pos.buffer);
     } else if (req.op === 'auxLine') {
       if (!topo) throw new Error('Line with auxiliary plane needs a polygon model (triangles).');
-      const r = extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, req.plane, req.ring);
-      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx }, faces: r.faces };
+      let r = extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, req.plane, req.ring);
+      const af = auxFill(r, req);
+      if (af) r = { ...extractLine(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.side, af.plane), plane: af.plane, planeIdx: af.indices };
+      result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx, raised: af?.raised, contour: af?.contour, filled: af?.added }, faces: r.faces };
     } else if (req.op === 'brush') {
       result = { indices: brushSelect(mesh!, req.center, req.radius, req.facing) };
     } else if (req.op === 'nurbs') {

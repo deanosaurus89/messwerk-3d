@@ -373,3 +373,5 @@ input.ted:disabled { background:#f1f3f5; }
 .pm table { border-collapse:collapse; margin-top:2px; } .pm td, .pm th { padding:1px 6px; text-align:right; border-bottom:1px solid #e3e8ee; } .pm td:first-child, .pm th:first-child { text-align:left; }
 .pm tr.worst td { font-weight:700; background:#fff7e0; } .pm tr.nio td:last-child { color:#c62828; }
 .an-ctrl .pm { display:block; }
+#ctx-panel .cp-aux button { padding: 2px 6px; }
+#ctx-panel #cp-rg, #ctx-panel #cp-rw { width: 3.6em; }

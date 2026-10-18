@@ -530,6 +530,13 @@ export class Viewer {
       new THREE.MeshBasicMaterial({ color: selected ? 0xffd400 : hover ? 0xffffff : color, transparent: thin, opacity: thin ? 0.8 : 1 }));
     tube.renderOrder = 5; if (id != null) tube.userData.curveId = id; this.prims.add(tube);
   }
+  /** Closed contour loop (e.g. the outer boundary of 'All inside boundary'): bold tube, always visible. */
+  addContour(pts: number[][], color: number) {
+    if (pts.length < 3) return;
+    const path = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), true, 'centripetal');
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(1200, pts.length * 3), this.radius / 170, 6), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+    tube.renderOrder = 8; this.prims.add(tube);
+  }
   /** Kontrollpunkt (anfassbar), immer sichtbar. */
   addCtrl(p: number[], i: number, active = false) {
     const d = new THREE.Mesh(new THREE.SphereGeometry(this.radius / (active ? 110 : 140), 12, 10), new THREE.MeshBasicMaterial({ color: active ? 0xff3d00 : 0xffffff, depthTest: false }));
