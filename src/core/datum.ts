@@ -182,11 +182,16 @@ const E3 = (i: number): Vec3 => { const e: Vec3 = [0, 0, 0]; e[i] = 1; return e;
 /** Size limits of a feature from its Diameter control (nominal + tolerances), for Ⓜ/Ⓛ. */
 function sizeSpec(fid: number, ctx: EvalCtx) { return ctx.controls?.find((k) => k.kind === 'Durchmesser' && k.featureIds[0] === fid && k.nominal != null) ?? null; }
 /** Bonus of one feature of size for the control's modifier; flag if the size spec or points are missing. */
-function featBonus(mod: 'M' | 'L', f: Feature, ctx: EvalCtx): { b: number; txt: string } | { flag: string } {
+/** Ⓜ/Ⓛ bonus details of one feature of size (for the panels): mating size, limits, bonus. */
+export interface BonusInfo { hole: boolean; mod: 'M' | 'L'; ms: number; gauss: number | null; limit: number; nominal: number; tolUp: number; tolLo: number; bonus: number; beyond: boolean; capped: boolean }
+function featBonus(mod: 'M' | 'L', f: Feature, ctx: EvalCtx): { b: number; txt: string; info: BonusInfo } | { flag: string } {
   const sp = sizeSpec(f.id, ctx); if (!sp) return { flag: `size nominal missing for ${mod === 'M' ? 'Ⓜ' : 'Ⓛ'} – add a Diameter control with nominal and tolerances to ${f.name}` };
   const ms = matingSize(f, ctx, mod); if (!ms) return { flag: `${f.name}: no points/normals for the ${mod === 'M' ? 'mating' : 'minimum-material'} size` };
-  const r = mmBonus(mod, ms.hole, ms.d, sp.nominal!, sp.tolUp, sp.tolLo);
-  return { b: r.bonus, txt: `${f.name}: ${mod === 'M' ? 'mating' : 'min.-material'} size Ø ${ms.d.toFixed(4)}, ${mod === 'M' ? 'MMC' : 'LMC'} ${r.limit.toFixed(4)} → bonus ${r.bonus.toFixed(4)}${r.beyond ? ' (size beyond the limit – no bonus)' : ''}` };
+  const r = mmBonus(mod, ms.hole, ms.d, sp.nominal!, sp.tolUp, sp.tolLo), M = mod === 'M';
+  const info: BonusInfo = { hole: ms.hole, mod, ms: ms.d, gauss: f.measured?.diameter ?? null, limit: r.limit, nominal: sp.nominal!, tolUp: sp.tolUp, tolLo: sp.tolLo, bonus: r.bonus, beyond: r.beyond, capped: r.capped };
+  const kind = ms.hole ? 'hole' : 'shaft', sizeName = M ? (ms.hole ? 'mating size (max. inscribed)' : 'mating size (min. circumscribed)') : (ms.hole ? 'min.-material size (min. circumscribed)' : 'min.-material size (max. inscribed)');
+  return { b: r.bonus, info, txt: `${f.name} (${kind}): ${sizeName} Ø ${ms.d.toFixed(4)}${info.gauss != null ? ` (Gauss Ø ${info.gauss.toFixed(4)})` : ''}, ${M ? 'MMC' : 'LMC'} ${r.limit.toFixed(4)} → bonus ${r.bonus.toFixed(4)}`
+    + (r.beyond ? ` (${sizeName} beyond the ${M ? 'MMC' : 'LMC'} – no bonus)` : r.capped ? ' (capped at the size tolerance range – size beyond the other limit)' : '') };
 }
 export const NOMINAL_MISSING = 'Nominal missing';
 const DEG = Math.PI / 180;
@@ -213,7 +218,7 @@ export function positionNominal(F: DRF, f: Feature, basic?: (number | null)[]): 
 export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): boolean {
   return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
 }
-export interface PosMemberInfo { fid: number; name: string; dia: number; tol: number; bonus: number; margin: number; nomW: Vec3; dirW: Vec3 }
+export interface PosMemberInfo { fid: number; name: string; dia: number; tol: number; bonus: number; margin: number; nomW: Vec3; dirW: Vec3; /** Ⓜ/Ⓛ size details */ bx?: BonusInfo }
 export interface DatumEval { value: number | null; flag?: string; detail?: string; /** bonus tolerance from Ⓜ/Ⓛ (added to t) */ bonus?: number;
   /** Position of axes: per member (pattern hole or the feature itself) Ø, permitted t (+bonus), margin and the nominal axis used */
   members?: PosMemberInfo[]; worst?: number; }
@@ -289,7 +294,8 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
           const L = h.type === 'Zylinder' || h.type === 'Kegel' ? hm.length || 0 : 0, a = unit(hm.normal);
           return [-0.5, 0.5].map((t) => toLocal(F, add(hm.center, scale(a, t * L)))); };
         const notes: string[] = []; let flag: string | undefined;
-        const tFor = (h: Feature) => { if (!c.mod) return c.tolUp; const r = featBonus(c.mod, h, ctx); if ('flag' in r) { flag = r.flag; return c.tolUp; } notes.push(r.txt); return c.tolUp + r.b; };
+        const bInfo = new Map<number, BonusInfo>();
+        const tFor = (h: Feature) => { if (!c.mod) return c.tolUp; const r = featBonus(c.mod, h, ctx); if ('flag' in r) { flag = r.flag; return c.tolUp; } notes.push(r.txt); bInfo.set(h.id, r.info); return c.tolUp + r.b; };
         let members: PosMember[], mfs: Feature[] = [f];
         if (isPattern(f)) {
           const hs = f.cons!.refs.map((id) => feats.get(id)).filter((h): h is Feature => !!h?.measured);
@@ -319,10 +325,10 @@ function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx
         const fr = { freeT: F.freeT.filter((i) => i !== N.ax).map(E3), freeR: F.freeR && (members.length > 1 || norm([b[0], b[1], 0]) > 1e-9), shiftR };
         const cz = c.cz !== false, res = evalPositionGroup(members, fr, cz), wi = res.worst;
         const dof = [...fr.freeT.map((e) => 'XYZ'[e.indexOf(1)]), ...(fr.freeR ? ['rot Z'] : []), ...(shiftR > 0 ? [`datum shift ≤ ${(2 * shiftR).toFixed(4)}`] : [])];
-        const isC = f.type === 'Kreis' || f.type === 'Langloch';
+        const isC = (f.type === 'Kreis' || f.type === 'Langloch') && !isPattern(f);
         const head = isC ? `${f.type === 'Kreis' ? 'circle' : 'slot'} centre in Ø zone ⟂ aux plane, ${tag}` : members.length > 1 ? `pattern of ${members.length} (${cz ? 'common zone CZ' : 'separate zones'}): Ø ${res.dia.map((d) => d.toFixed(4)).join(' / ')}, worst member ${wi + 1}` : `${members[0].ML.length > 2 ? `derived median line (${members[0].ML.length} sections)` : 'axis end points – no points'} in Ø zone around the ${tag}`;
         const Wd = (v: Vec3): Vec3 => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
-        const info: PosMemberInfo[] = members.map((mm, i) => ({ fid: mfs[i].id, name: mfs[i].name, dia: res.dia[i], tol: mm.t, bonus: mm.t - c.tolUp, margin: mm.t - res.dia[i], nomW: add(F.o, Wd(res.nom[i].p)), dirW: Wd(res.nom[i].g) }));
+        const info: PosMemberInfo[] = members.map((mm, i) => ({ fid: mfs[i].id, name: mfs[i].name, dia: res.dia[i], tol: mm.t, bonus: mm.t - c.tolUp, margin: mm.t - res.dia[i], nomW: add(F.o, Wd(res.nom[i].p)), dirW: Wd(res.nom[i].g), bx: bInfo.get(mfs[i].id) }));
         return { members: info, worst: wi, value: res.dia[wi], bonus: members[wi].t - c.tolUp || undefined, detail: `${head} (DRF ${F.text}${dof.length ? `, free: ${dof.join(', ')}` : ''})${notes.length ? ' · ' + notes.join(' · ') : ''}` };
       }
       return { value: 2 * norm(sub(loc, b)), detail: `spherical zone SØ (DRF ${F.text})` };

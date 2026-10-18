@@ -57,8 +57,10 @@ export function evalPositionGroup(members: PosMember[], fr: PosFreedom, cz = tru
   return { dia, excess: Math.max(...rs.map((r) => r.excess)), worst, w: rs[worst].w, tr: rs[worst].tr, nom: rs.map((r) => r.nom[0]) };
 }
 /** Bonus tolerance from the material modifier (ISO 2692). `d` = actual mating size (Ⓜ) or minimum-material size (Ⓛ). */
-export function bonus(mod: 'M' | 'L', hole: boolean, d: number, nominal: number, tolUp: number, tolLo: number): { bonus: number; limit: number; beyond: boolean } {
+export function bonus(mod: 'M' | 'L', hole: boolean, d: number, nominal: number, tolUp: number, tolLo: number): { bonus: number; limit: number; beyond: boolean; capped: boolean; mmc: number; lmc: number } {
+  // ISO 2692: hole MMC = lower limit, LMC = upper limit; shaft MMC = upper limit, LMC = lower limit (tolLo is signed, e.g. -0.1)
   const mmc = hole ? nominal + tolLo : nominal + tolUp, lmc = hole ? nominal + tolUp : nominal + tolLo;
-  const raw = mod === 'M' ? (hole ? d - mmc : mmc - d) : (hole ? lmc - d : d - lmc);
-  return { bonus: Math.max(0, raw), limit: mod === 'M' ? mmc : lmc, beyond: raw < 0 };
+  const raw = mod === 'M' ? (hole ? d - mmc : mmc - d) : (hole ? lmc - d : d - lmc), range = Math.abs(tolUp - tolLo);
+  // no bonus when the size is beyond the MMC (Ⓜ) / LMC (Ⓛ); at most the size tolerance range (size beyond the other limit = size NOK)
+  return { bonus: Math.min(range, Math.max(0, raw)), limit: mod === 'M' ? mmc : lmc, beyond: raw < -1e-12, capped: raw > range + 1e-12, mmc, lmc };
 }

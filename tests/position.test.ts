@@ -35,6 +35,23 @@ describe('position group solver', () => {
     const one = [mem([10.05, 0, 0], [10, 0, 0])];
     expect(evalPositionGroup(one, { freeT: [], freeR: false, shiftR: 0.03 }).dia[0]).toBeCloseTo(0.04, 3);
   });
+  it('bonus: hole/shaft × Ⓜ/Ⓛ, larger hole within tolerance, no bonus beyond MMC, capped at the size range', () => {
+    // hole Ø10 +0.1/-0.05 → MMC 9.95, LMC 10.10
+    const h = (d: number, m: 'M' | 'L' = 'M') => bonus(m, true, d, 10, 0.1, -0.05);
+    expect(h(10.03).bonus).toBeCloseTo(0.08, 9); expect(h(10.03).limit).toBeCloseTo(9.95, 9);   // larger than nominal, within tol → bonus
+    expect(h(9.97).bonus).toBeCloseTo(0.02, 9);                                                  // smaller than nominal, still above MMC
+    expect(h(9.94).bonus).toBe(0); expect(h(9.94).beyond).toBe(true);                          // below MMC → no bonus
+    expect(h(10.2).bonus).toBeCloseTo(0.15, 9); expect(h(10.2).capped).toBe(true);             // beyond LMC → capped at 0.15
+    expect(h(10.03, 'L').bonus).toBeCloseTo(0.07, 9); expect(h(10.03, 'L').limit).toBeCloseTo(10.1, 9);
+    expect(h(10.12, 'L').bonus).toBe(0); expect(h(10.12, 'L').beyond).toBe(true);
+    // shaft Ø10 +0.05/-0.1 → MMC 10.05, LMC 9.90
+    const s = (d: number, m: 'M' | 'L' = 'M') => bonus(m, false, d, 10, 0.05, -0.1);
+    expect(s(9.98).bonus).toBeCloseTo(0.07, 9); expect(s(9.98).limit).toBeCloseTo(10.05, 9);
+    expect(s(10.06).bonus).toBe(0); expect(s(10.06).beyond).toBe(true);
+    expect(s(9.8).bonus).toBeCloseTo(0.15, 9); expect(s(9.8).capped).toBe(true);
+    expect(s(9.98, 'L').bonus).toBeCloseTo(0.08, 9); expect(s(9.98, 'L').limit).toBeCloseTo(9.9, 9);
+    expect(s(9.88, 'L').bonus).toBe(0);
+  });
   it('bonus rules (ISO 2692)', () => {
     expect(bonus('M', true, 12.05, 12, 0.1, 0).bonus).toBeCloseTo(0.05, 9);   // hole MMC 12.00
     expect(bonus('M', false, 11.97, 12, 0, -0.1).bonus).toBeCloseTo(0.03, 9); // shaft MMC 12.00
@@ -101,6 +118,20 @@ describe('maximum material requirement', () => {
     expect(evaluate(pos(), map, ctx).status).toBe('NIO');
     const r = evaluate(pos({ mod: 'M' }), map, ctx);
     expect(r.measured!).toBeCloseTo(0.08, 3); expect(r.bonus!).toBeCloseTo(0.06, 3); expect(r.status).toBe('IO');
+  });
+  it('hole larger than nominal but within tolerance gets the bonus (mating size, tol + bonus = permitted)', () => {
+    const ctx2 = { ...ctx, controls: [{ ...size, nominal: 10.02, tolUp: 0.1, tolLo: -0.05 }] };  // MMC 9.97, actual Ø10.06 > nominal
+    const r = evaluate(pos({ mod: 'M' }), map, ctx2), m = r.members![0];
+    expect(m.bx!.hole).toBe(true); expect(m.bx!.ms).toBeCloseTo(10.06, 3); expect(m.bx!.limit).toBeCloseTo(9.97, 9);
+    expect(r.bonus!).toBeCloseTo(0.09, 3); expect(m.tol).toBeCloseTo(0.14, 3); expect(r.status).toBe('IO');
+    expect(r.detail).toContain('MMC 9.9700'); expect(r.detail).toContain('(hole)');
+  });
+  it('shaft Ⓜ: bonus = MMC − mating size (min. circumscribed)', () => {
+    const Ns = N.map((n) => [-n[0], -n[1], 0] as Vec3);   // outward normals → shaft
+    const ctx3 = { points: ctx.points, normals: (id: number) => (id === 30 ? Ns : null), controls: [{ ...size, nominal: 10.1, tolUp: 0.05, tolLo: -0.1 }] };
+    const r = evaluate(pos({ mod: 'M' }), map, ctx3), m = r.members![0];
+    expect(m.bx!.hole).toBe(false); expect(m.bx!.limit).toBeCloseTo(10.15, 9); expect(r.bonus!).toBeCloseTo(0.09, 3);
+    const rl = evaluate(pos({ mod: 'L' }), map, ctx3); expect(rl.members![0].bx!.limit).toBeCloseTo(10.0, 9); expect(rl.bonus!).toBeCloseTo(0.06, 3);
   });
   it('Ⓜ without a size control is flagged', () => {
     const r = evaluate(pos({ mod: 'M' }), map, { ...ctx, controls: [] }); expect(r.status).toBe('—'); expect(r.flag).toContain('size nominal missing');

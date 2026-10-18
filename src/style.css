@@ -360,6 +360,8 @@ input.ted:disabled { background:#f1f3f5; }
 .an-ctrl input { width:60px; } .an-ctrl input.ted.req { border-color:#d32f2f; background:#fff4f4; }
 .dia-tg, .mod-tg, .cz-tg { min-width:28px; font-weight:600; } .dia-tg.on, .mod-tg.on, .cz-tg.on { background:#1f5fa8; color:#fff; }
 .bonus { color:#2e7d32; font-weight:600; margin-left:2px; }
+.bonus.warn { color:#e65100; }
+.lbl tr.lb td { font-size:0.85em; color:#2e7d32; font-weight:600; padding-top:0; }
 #dev-legend .bar.half { background:linear-gradient(90deg,#00ff00,#ffbf00 50%,#ff0000); }
 .an-derive { display:inline-flex; gap:4px; align-items:center; padding:1px 6px; border:1px dashed #d81b60; border-radius:4px; }
 

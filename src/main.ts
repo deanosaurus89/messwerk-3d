@@ -42,6 +42,7 @@ import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
+import type { BonusInfo } from './core/datum';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, NOMINAL_MISSING, NOMINAL_UNCONFIRMED, isPattern, tedSpec, resolveBasic, TedField } from './core/datum';
 import { datumText, isZoneControl, MOD_SYM, ControlResult } from './core/features';
 import { statusText } from './core/report';
@@ -860,7 +861,7 @@ const AXIS_CTRL = ['Position', 'Rechtwinkligkeit', 'Parallelität', 'Neigung', '
 function ctrlAnalysisKind(c: Control): 'axis' | 'form' | 'cpos' | null {
   const f = state.features.find((x) => x.id === c.featureIds[0]); if (!f || !f.measured) return null;
   if (c.kind === 'Position' && isPattern(f)) return 'axis'; // bolt-circle pattern: axis view of every hole
-  if (c.kind === 'Position' && (f.type === 'Kreis' || f.type === 'Langloch') && c.datumIds?.length) return 'cpos'; // centre point in a Ø zone ⟂ aux plane
+  if (c.kind === 'Position' && (f.type === 'Kreis' || f.type === 'Langloch') && !isPattern(f) && c.datumIds?.length) return 'cpos'; // centre point in a Ø zone ⟂ aux plane
   if (!f.indices.length) return null;
   if ((f.type === 'Zylinder' || f.type === 'Kegel') && AXIS_CTRL.includes(c.kind)) return 'axis';
   if ((isZoneControl(c.kind) || isDatumControl(c.kind)) && f.type !== 'Abstand' && f.type !== 'Winkel') return 'form';
@@ -876,7 +877,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
     if (mi >= 0 && r.flag !== NOMINAL_MISSING) {
       const m = r.members![mi], many = r.members!.length > 1;
       const an = analyzeAxis(f.measured!, pts, { dir: m.dirW, point: m.nomW }, m.tol > 0 ? m.tol : null, 0,
-        `${f.name} · ${kindName(C.kind)} → ${C.datumIds.map(nameOf).join('|')}${many ? ` · ${tt('hole {0} of {1}', mi + 1, r.members!.length)}${mi === r.worst ? ' · ' + tt('worst margin') : ''}` : ''}${m.bonus > 1e-12 ? ` · t ${fmt(C.tolUp, 4)} + ${tt('bonus')} ${fmt(m.bonus, 4)}` : ''} · ${tt('margin')} ${sgn(m.margin, 4)}${r.flag === NOMINAL_UNCONFIRMED ? ` · ⚠ ${tt('Nominal unconfirmed')}` : ''}`);
+        `${f.name} · ${kindName(C.kind)} → ${C.datumIds.map(nameOf).join('|')}${many ? ` · ${tt('hole {0} of {1}', mi + 1, r.members!.length)}${mi === r.worst ? ' · ' + tt('worst margin') : ''}` : ''}${C.mod ? ` · ${tt('tol')} ${fmt(C.tolUp, 4)} + ${tt('bonus')} ${fmt(m.bonus, 4)} = ${fmt(m.tol, 4)}` : ''} · ${tt('margin')} ${sgn(m.margin, 4)}${r.flag === NOMINAL_UNCONFIRMED ? ` · ⚠ ${tt('Nominal unconfirmed')}` : ''}`);
       an.zone = m.dia; return an;
     }
   }
@@ -912,7 +913,7 @@ function analyzeItems(f: FeatureView): [string, (() => void) | null][] {
   return cs.map((c) => [`◐ ${tt('Analyze: {0}', controlLabel(c, f) + (c.datumIds?.length ? ` |${datumText(c, featMap())}|` : ''))}`, () => analyzeControl(c.id)] as [string, () => void]);
 }
 /** Position of a circle/slot centre: nominal point (foot on the zone axis), actual centre, zone axis ⟂ aux plane. */
-interface CposView { fid: number; nom: Vec3; act: Vec3; dir: Vec3; tol: number; val: number; bonus: number; radius: number; status: string; flag?: string }
+interface CposView { fid: number; nom: Vec3; act: Vec3; dir: Vec3; tol: number; val: number; bonus: number; mod?: boolean; radius: number; status: string; flag?: string }
 interface AnResult { cpos?: CposView; idx: Uint32Array; dev: Float32Array; pos?: Float32Array; dir?: Float32Array; label: string; feats?: { id: number; lo: number; hi: number }[]; axes?: AxisAnalysis[] }
 const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
   form: async () => {
@@ -936,7 +937,7 @@ const AN_SOURCES: Record<AnKind, () => Promise<AnResult | null>> = {
     const nom: Vec3 = [m.nomW[0] + t * d[0], m.nomW[1] + t * d[1], m.nomW[2] + t * d[2]];
     state.an.ids = [f.id, ...(C.datumIds ?? [])];
     return { idx: new Uint32Array(0), dev: new Float32Array(0), label: `◐ ${ctrlTitle(C)}`,
-      cpos: { fid: f.id, nom, act, dir: d, tol: m.tol, val: m.dia, bonus: m.bonus, radius: f.measured.radius ?? (f.measured.diameter ?? 2) / 2, status: r.status, flag: r.flag } };
+      cpos: { fid: f.id, nom, act, dir: d, tol: m.tol, val: m.dia, bonus: m.bonus, mod: !!C.mod, radius: f.measured.radius ?? (f.measured.diameter ?? 2) / 2, status: r.status, flag: r.flag } };
   },
   axis: async () => {
     const C = state.an.ctrl != null ? state.controls.find((c) => c.id === state.an.ctrl) : undefined;
@@ -1021,7 +1022,7 @@ function paintAnalysis(): boolean {
     viewer.setModelOpacity(a.axHide ? 0 : a.trans ? 0.35 : 1);
     let el = document.getElementById('dev-legend'); if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
     const v = r.cpos, lx = Math.max(1, a.axLoc);
-    el.innerHTML = `<b>${r.label}</b><small>${tt('Position Ø')} <b>${fmt(v.val, 4)}</b> · ${tt('permitted')} ${fmt(v.tol, 4)}${v.bonus > 1e-12 ? ` (${tt('incl. bonus')} ${fmt(v.bonus, 4)})` : ''} · ${tt('offset')} ${fmt(v.val / 2, 4)} ${v.flag ? `<span class="st missing">⚠ ${tt(v.flag)}</span>` : ''}</small>`
+    el.innerHTML = `<b>${r.label}</b><small>${tt('Position Ø')} <b>${fmt(v.val, 4)}</b> · ${tt('permitted')} ${v.mod ? `${tt('tol')} ${fmt(v.tol - v.bonus, 4)} + ${tt('bonus')} ${fmt(v.bonus, 4)} = ` : ''}${fmt(v.tol, 4)} · ${tt('offset')} ${fmt(v.val / 2, 4)} ${v.flag ? `<span class="st missing">⚠ ${tt(v.flag)}</span>` : ''}</small>`
       + `<small>${tt('Only the fitted centre counts; zone = cylinder Øt ⟂ the auxiliary plane through the TED point.')} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('True scale.')}</small>`
       + `<small><span style="color:#555">━</span> ${tt('zone axis')} · <span style="color:#555">●</span> ${tt('nominal point')} · <span style="color:#c62828">●</span>/<span style="color:#2e9e3e">●</span> ${tt('actual centre')} · <span style="color:#2e9e3e">▮</span> ${tt('tolerance zone')} · <span style="color:#1565c0">➜</span> ${tt('offset')}</small>`;
     return true;
@@ -1046,7 +1047,7 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
   const r = evaluate(c, featMap(), ctx);
   const spec = f ? tedSpec(c, f, ds, ctx) : [];
-  const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(r)} ${stHtml(r)}` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
+  const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(c, r)} ${stHtml(r)}` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
       <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${c.datumIds?.length ? '<span data-dsl></span>' : ''}<span data-teds></span><span data-dia></span> ${st}${membersHtml(c, r)}</span>`,
@@ -1329,14 +1330,29 @@ function czButton(c: Control, after: () => void): HTMLButtonElement {
 /** Per-hole table of a Position control (pattern and/or Ⓜ/Ⓛ): Ø, permitted t (+bonus), margin; worst-margin hole marked. */
 function membersHtml(c: Control, r: ControlResult, open = false): string {
   const M = r.members; if (!M || (M.length < 2 && !c.mod)) return '';
-  const rows = M.map((m, i) => `<tr class="${i === r.worst ? 'worst' : ''}${m.margin < 0 ? ' nio' : ''}"><td>${i === r.worst ? '▶ ' : ''}${m.name}</td><td>${fmt(m.dia, 4)}</td><td>${fmt(c.tolUp, 4)}${c.mod ? ` + ${fmt(m.bonus, 4)}` : ''}</td><td>${fmt(m.tol, 4)}</td><td>${sgn(m.margin, 4)}</td></tr>`).join('');
+  const rows = M.map((m, i) => `<tr class="${i === r.worst ? 'worst' : ''}${m.margin < 0 ? ' nio' : ''}"><td>${i === r.worst ? '▶ ' : ''}${m.name}</td><td>${fmt(m.dia, 4)}</td>${c.mod ? `<td title="${bonusTip(m.bx)}">${m.bx ? (m.bx.beyond ? '⚠ ' : '') + fmt(m.bx.ms, 4) : '—'}</td>` : ''}<td>${fmt(c.tolUp, 4)}${c.mod ? ` + ${fmt(m.bonus, 4)}` : ''}</td><td>${fmt(m.tol, 4)}</td><td>${sgn(m.margin, 4)}</td></tr>`).join('');
   const w = M[r.worst ?? 0];
   return `<details class="pm" ${open ? 'open' : ''}><summary title="${tt('Per hole: measured position Ø, permitted tolerance (t + bonus from Ⓜ/Ⓛ) and margin = permitted − measured. ▶ = hole with the smallest margin (decides OK/NOK)')}">${M.length > 1 ? tt('{0} holes', M.length) + ' · ' : ''}${M.length > 1 ? tt('worst margin') : tt('margin')} ${sgn(w.margin, 4)}${M.length > 1 ? ` (${w.name})` : ''}</summary>
-    <table><thead><tr><th>${tt('Hole')}</th><th>Ø</th><th>t${c.mod ? ' + ' + tt('bonus') : ''}</th><th>${tt('permitted')}</th><th>${tt('margin')}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
+    <table><thead><tr><th>${tt('Hole')}</th><th title="${tt('Position Ø (measured)')}">${tt('Pos. Ø')}</th>${c.mod ? `<th title="${tt('Mating size used for the bonus (hover a value for details)')}">${tt('size Ø')}</th>` : ''}<th>t${c.mod ? ' + ' + tt('bonus') : ''}</th><th>${tt('permitted')}</th><th>${tt('margin')}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 /** Text after the value in the frame: Ⓜ/Ⓛ and CZ. */
 const frameMods = (c: Control, f?: FeatureView) => `${c.mod ? MOD_SYM[c.mod] : ''}${f && isPattern(f) && c.cz !== false ? ' CZ' : ''}`;
-const bonusText = (r: { bonus?: number }) => (r.bonus ? ` <small class="bonus" title="${tt('Bonus tolerance from Ⓜ/Ⓛ (added to the tolerance)')}">+${fmt(r.bonus, 4)}</small>` : '');
+/** Ⓜ/Ⓛ: permitted tolerance as a sum, 'tol 0.100 + bonus 0.030 = 0.130' (worst member), or null without a modifier. */
+function tolSum(c: Control, r: ControlResult, d = 3): string | null {
+  if (!c.mod || r.measured == null || r.flag === NOMINAL_MISSING) return null;
+  const m = r.members?.[r.worst ?? 0], b = m ? m.bonus : (r.bonus ?? 0);
+  return `${tt('tol')} ${fmt(c.tolUp, d)} + ${tt('bonus')} ${fmt(b, d)} = ${fmt(c.tolUp + b, d)}`;
+}
+/** Tooltip with the size behind the bonus: hole/shaft, mating size vs Gauss Ø, MMC/LMC, why no bonus. */
+function bonusTip(bx?: BonusInfo): string {
+  if (!bx) return tt('Bonus tolerance from Ⓜ/Ⓛ (added to the tolerance)');
+  const M = bx.mod === 'M', lim = M ? 'MMC' : 'LMC';
+  const size = M ? (bx.hole ? tt('mating size (largest inscribed cylinder)') : tt('mating size (smallest circumscribed cylinder)')) : (bx.hole ? tt('least-material size (smallest circumscribed cylinder)') : tt('least-material size (largest inscribed cylinder)'));
+  return `${bx.hole ? tt('Hole') : tt('Shaft')} · ${size} Ø ${fmt(bx.ms, 4)}${bx.gauss != null ? ` (${tt('Gauss')} Ø ${fmt(bx.gauss, 4)})` : ''} · ${tt('size')} ${fmt(bx.nominal, 3)} ${sgn(bx.tolUp, 3)}/${sgn(bx.tolLo, 3)} · ${lim} ${fmt(bx.limit, 4)} → ${tt('bonus')} ${fmt(bx.bonus, 4)}`
+    + (bx.beyond ? ` · ⚠ ${tt('the size is beyond the {0} – no bonus (scan points inside the hole make the inscribed size smaller than the Gauss Ø)', lim)}` : bx.capped ? ` · ⚠ ${tt('capped at the size tolerance range – size outside its limits')}` : '');
+}
+const bonusText = (c: Control, r: ControlResult) => { const s = tolSum(c, r, 4), bx = r.members?.[r.worst ?? 0]?.bx;
+  return s ? ` <small class="bonus${bx?.beyond ? ' warn' : ''}" title="${bonusTip(bx)}">${bx?.beyond ? '⚠ ' : ''}${s}</small>` : ''; };
 
 function addControl(kind: ControlKind, id: number) {
   const t = defaultTolerance(kind);
@@ -1800,7 +1816,7 @@ function renderTable() {
         if (modApplies(c, f)) lab(tt('Material'), modButton(c, () => renderAll()));
         if (c.kind === 'Position' && isPattern(f)) lab(tt('Pattern'), czButton(c, () => renderAll()));
         ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : diaInfo(c, f).on ? 'Ø' : ''}${fmt(c.tolUp, 3)}${frameMods(c, f)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
-          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}${bonusText(r)}</span>${r.flag === NOMINAL_UNCONFIRMED ? stHtml(r) : `<span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`}`);
+          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}${bonusText(c, r)}</span>${r.flag === NOMINAL_UNCONFIRMED ? stHtml(r) : `<span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`}`);
         if (r.detail) ed.title = r.detail;
         const mh = membersHtml(c, r); if (mh) ed.insertAdjacentHTML('beforeend', mh);
         row.appendChild(ed);
@@ -1867,7 +1883,8 @@ function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
   const rows = cs.map((c) => {
     const r = evaluate(c, fm, ctx), z = isZoneControl(c.kind);
     return `<tr class="${r.status === '—' ? '' : r.status}"><td>${CTRL_SYMBOL(c, f)} ${controlLabel(c, f)}${c.datumIds?.length ? ` |${datumText(c, fm)}|` : ''}${r.flag ? ' ⚠' : ''}</td><td>${fmt(r.measured, 3)}</td>`
-      + `<td>${z ? '≤ ' + fmt(c.tolUp, 3) : c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${z || r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`;
+      + `<td>${z ? '≤ ' + fmt(c.tolUp + (c.mod ? (r.members?.[r.worst ?? 0]?.bonus ?? r.bonus ?? 0) : 0), 3) : c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${z || r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`
+      + (tolSum(c, r) ? `<tr class="lb"><td colspan="4">${MOD_SYM[c.mod!]} ${tolSum(c, r)}${r.members?.[r.worst ?? 0]?.bx?.beyond ? ' ⚠' : ''}</td></tr>` : '');
   }).join('');
   const m = f.measured!, extra: string[] = [];
   if (f.type !== 'Abstand') { if (state.annot.pts) extra.push(`${f.pointCount} ${tt('pts')}`); if (state.annot.std) extra.push(`σ ${fmt(m.nurbs?.std ?? m.rms, 4)}`); }
