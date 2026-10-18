@@ -26,6 +26,7 @@ export function reexHTML(f: RxFeature): string {
     ${inp('sigma', tt('σ filter (n·σ)'), p.sigma, tt('Remove points deviating more than n standard deviations from the mean'))}
     ${inp('maxAngleDeg', tt('Max. normal angle [°]'), p.maxAngleDeg, tt('Surface normal must agree with the geometry normal within this angle'))}
     ${inp('margin', tt('Search margin [mm]'), p.margin, tt('Search region follows the geometry (trimmed contour / shell / band) and is widened at its edges by this margin'))}
+    ${f.type === 'Ebene' ? inp('fillBand', tt('All inside boundary: band ± [mm]'), p.fillBand ?? 0, tt('Capture all points inside outer boundary: after re-extraction, take every point inside the outer contour within this band (bumps, spatter, burrs, craters; openings and walls stay out). 0 = off')) : ''}
     <div class="row"><button class="btn" id="rx-show">👁 ${tt('Show search region')}</button><button class="btn primary" id="rx-run">🔁 ${f.reex ? tt('Re-run extraction') : tt('Run extraction')}</button></div></details>`;
 }
 export function bindReex(d: HTMLElement, f: RxFeature) {

@@ -9,8 +9,9 @@
 //  line             → tube along the line (over its extent + margin)
 import { FitResult, GeomType, fitType, modelNormal, signedDistance } from './fit';
 import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
+import { fillOuterBoundary } from './fillplane';
 
-export interface ReexParams { maxDist: number; sigma: number; maxAngleDeg: number; margin: number; iterations?: number }
+export interface ReexParams { maxDist: number; sigma: number; maxAngleDeg: number; margin: number; iterations?: number; /** planes: then capture all points inside the outer boundary (band ± mm; 0 = off) */ fillBand?: number }
 export const REEX_DEFAULT: ReexParams = { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0.5, iterations: 3 };
 export interface ReexResult { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
 
@@ -100,6 +101,12 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
     const nf = fitType(type, Pp, Nn.length ? Nn : Pp.map(() => fit.normal), false);
     const nIdx = Uint32Array.from(keep); const same = nIdx.length === idx.length && nIdx.every((v, i) => v === idx[i]);
     fit = { ...nf, type }; idx = nIdx; if (same) break;
+  }
+  if (p.fillBand && p.fillBand > 0 && type === 'Ebene') {
+    // region from the re-extraction gives the outer contour; then all points inside it within the band (no σ/angle filter)
+    const fr = fillOuterBoundary(pos, nrm, idx, fit, { band: p.fillBand });
+    const Pp: Vec3[] = Array.from(fr.indices, (v) => P3(pos, v)), Nn: Vec3[] = nrm ? Array.from(fr.indices, (v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]] as Vec3) : Pp.map(() => fit.normal);
+    fit = { ...fitType(type, Pp, Nn, false), type }; idx = fr.indices; removed = 0;
   }
   return { fit, indices: idx, removedSigma: removed, candidates: cand, iterations: it + 1, region: R0 };
 }

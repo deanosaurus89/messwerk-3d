@@ -1,4 +1,5 @@
 // Web Worker: Parsen, Topologie, Regionenwachstum, Pinsel und Fits laufen hier (UI bleibt flüssig).
+import { fillOuterBoundary, FillParams } from './core/fillplane';
 import { parseByName } from './core/io';
 import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
@@ -81,11 +82,15 @@ export type Req =
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number } };
 
-export interface FitParams { k: number; nf?: NormalFilter | null; }
+export interface FitParams { k: number; nf?: NormalFilter | null; /** planes: capture all points inside the outer boundary of the region (band ± mm) */ fill?: FillParams | null; }
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   let { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Too few points selected');
-  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0;
+  let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0;
+  if (prm.fill && type === 'Ebene') {
+    const r = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, idx, fit, prm.fill);
+    use = idx = r.indices; filled = r.added; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
+  }
   if (prm.nf && n.length === p.length) {
     const keep = normalFilter(fit, p, n, prm.nf);
     removed = p.length - keep.length;
@@ -95,7 +100,7 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
     } else removed = 0;
   }
   delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
-  return { indices: use, fit, candidates: [] };
+  return { indices: use, fit, candidates: [], filled };
 }
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);

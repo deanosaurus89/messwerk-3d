@@ -62,12 +62,12 @@ type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm:
 type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
-interface FitParamsUI { k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
+interface FitParamsUI { fill?: { on: boolean; band: number }; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
-  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; }
+  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; }
 type V3 = [number, number, number];
 interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
 
@@ -87,7 +87,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string },
+  opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: 1 } },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -546,7 +546,7 @@ function ctxSpec(): CtxSpec | null {
   const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && p.fit.type === 'Ebene' && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this plane: click further faces (or Shift+click). Also for split or disjoint plane areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
+    ? `${seg}${type}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && p.fit.type === 'Ebene' && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this plane: click further faces (or Shift+click). Also for split or disjoint plane areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${p && p.fit.type === 'Ebene' && !p.aux ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Distance band ± around the plane: points farther away are not part of the face')}">${tt('Band ±')} <input id="cp-fband" type="number" min="0.01" step="0.1" value="${state.opts.fill.band}" inputmode="decimal"> mm</label>` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
     : `${seg}${type}<label>r <input id="cp-brush" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -557,10 +557,11 @@ function ctxSpec(): CtxSpec | null {
     controls: ctl + dsel, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
-        if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
+        if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'fill') { state.opts.fill.on = !state.opts.fill.on; applyFill().then(() => renderAll()); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
       el.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => (b.onclick = async () => { state.opts.lineSide = Number(b.dataset.side) as 0 | 1;
         if (state.preview?.hit && state.preview.fit.type === 'Linie') { try { await previewWithAux(state.preview.hit, 'Linie'); } catch (e: any) { toast(e.message); } } renderAll(); }));
       el.querySelector<HTMLSelectElement>('#cp-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; (state.mode as FitMode).type = v; if (state.preview) refitPreview(v); else renderAll(); };
+      const fb = el.querySelector<HTMLInputElement>('#cp-fband'); if (fb) fb.onchange = () => { const x = Number(fb.value.replace(',', '.')); if (x > 0) { state.opts.fill.band = x; applyFill().then(() => renderAll()); } };
       const dz = el.querySelector<HTMLSelectElement>('#cp-datum'); if (dz) dz.onchange = () => { state.opts.newDatum = dz.value; };
       const ar = el.querySelector<HTMLInputElement>('#cp-area'); if (ar) ar.onchange = () => { const x = Number(ar.value.replace(',', '.')); if (isFinite(x) && x >= 0) { state.opts.radius = x; renderDialog(); } };
       const br = el.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
@@ -611,19 +612,33 @@ async function previewByClick(h: Hit, add = false) {
     const r = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: m.type }));
     state.preview = { fit: r.fit, indices: r.indices, candidates: r.candidates, method: 'Klick', hit: h,
       aux: r.aux ? { plane: r.aux.plane, indices: r.aux.indices, source: tt('automatic (adjacent face)') } : undefined };
+    if (!r.aux && r.fit.type === 'Ebene' && state.opts.fill.on) await applyFill();
     if (r.aux) { status(`Automatik: ${r.fit.type} in Hilfsebene – ${r.indices.length} Wandpunkte (orange), ${r.aux.indices.length} Ebenenpunkte (blau).`); renderAll(); return; }
     status(tt('Preview: {0} from {1} points ({2} ms). ✓ creates the feature.', typeName(r.fit.type), r.indices.length, r.ms.toFixed(0)));
   } catch (e: any) { state.preview = null; status(tt('No geometry found: {0}', e.message)); }
   renderAll();
 }
 
+/** Plane preview: capture all points inside the outer boundary of the grown region(s) (or back to the grown points). */
+async function applyFill() {
+  const pv = state.preview; if (!pv || pv.fit.type !== 'Ebene' || pv.aux) return;
+  const seed = pv.seed ?? (pv.regions ? Uint32Array.from(new Set(pv.regions.flatMap((r) => Array.from(r)))) : pv.indices);
+  try {
+    const r = state.opts.fill.on
+      ? await busy(engine.call<any>({ op: 'fit', indices: seed, type: 'Ebene', params: { k: 0, nf: null, fill: { band: state.opts.fill.band } } }))
+      : await busy(engine.call<any>({ op: 'fit', indices: seed, type: 'Ebene' }));
+    state.preview = { ...pv, fit: r.fit, indices: r.indices, seed: state.opts.fill.on ? seed : undefined, filled: r.filled };
+    if (state.opts.fill.on) status(tt('Inside outer boundary: {0} points (+{1} on bumps/rims), flatness {2} mm. Outlier filters off.', r.indices.length, r.filled ?? 0, fmt(r.fit.form, 4)));
+  } catch (e: any) { toast(tt('Fit failed: {0}', e.message)); }
+}
 /** Multi-seed plane: grow another region at the click and fit one plane through all regions (also split/disjoint faces). */
 async function addPlaneRegion(h: Hit) {
   const pv = state.preview!;
   try {
     const g = await busy(engine.call<any>({ op: 'grow', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: 'Ebene' }));
-    const regions = [...(pv.regions ?? [pv.indices]), g.indices as Uint32Array];
+    const regions = [...(pv.regions ?? [pv.seed ?? pv.indices]), g.indices as Uint32Array];
     await refitRegions(regions, pv.hit);
+    if (state.opts.fill.on) await applyFill();
     status(tt('Plane from {0} regions: {1} points, flatness {2} mm.', regions.length, state.preview!.indices.length, fmt(state.preview!.fit.form, 4)));
   } catch (e: any) { status(tt('No geometry found: {0}', e.message)); }
   renderAll();
@@ -672,8 +687,9 @@ function commitPreview() {
   const f: FeatureView = {
     id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, measured: p.fit, pointCount: p.indices.length,
     method: p.method, color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: p.indices, candidates: p.candidates, refs: p.refs,
-    src: p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
+    src: p.seed ?? p.indices, hit: p.hit, fp: defaultFp(), dev: p.dev,
   };
+  if (p.seed) { f.fp!.fill = { on: true, band: state.opts.fill.band }; f.fp!.k = 0; f.fp!.nf.on = false; }
   if (p.regions) { f.hit = undefined; state.opts.multi = false; }
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
@@ -725,7 +741,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       f.measured = auxR.fit; f.indices = auxR.indices; f.src = auxR.indices;
       f.aux = { plane: auxR.aux.plane, pointCount: auxR.aux.indices.length, source: auxR.source, refId: auxR.refId } as AuxPlane; f.auxIndices = auxR.aux.indices;
     } else {
-      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null } }));
+      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band } : null } }));
       f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined; f.dev = undefined;
     }
     f.type = f.measured!.type; f.pointCount = f.indices.length; ptsCache.delete(f.id);
@@ -1619,6 +1635,8 @@ function fitParamsHTML(f: FeatureView) {
     ${fp.k ? `<div class="row"><label>${tt('Outliers &gt; k·σ, k =')}</label><input id="fp-k" value="${fp.k}" inputmode="decimal"></div>` : ''}
     ${grow ? `<div class="row"><label>${tt('Region growing: max. angle [°]')}</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
       <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection – no region growing.') : tt('Points from project file – no region growing.')}</p>`}
+    ${f.type === 'Ebene' ? `<div class="row chk"><label title="${tt('Region growing only finds the outer contour; all points inside it within the band are used (bumps, spatter, burrs, craters). Real openings and walls stay out.')}"><input type="checkbox" id="fp-fill" ${fp.fill?.on ? 'checked' : ''}> ${tt('Capture all points inside outer boundary')}</label></div>
+    ${fp.fill?.on ? `<div class="row"><label>${tt('Band ± [mm]')}</label><input id="fp-fband" value="${fp.fill.band}" inputmode="decimal"></div>` : ''}` : ''}
     <div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> ${tt('Normal direction filter')}</label></div>
     ${fp.nf.on ? `<div class="row"><label>${tt('max. normal deviation [°]')}</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
       <div class="row"><label>${tt('discard at most [%]')}</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
@@ -1636,6 +1654,8 @@ function bindFitParams(d: HTMLElement, f: FeatureView) {
   q<HTMLSelectElement>('#fp-method')?.addEventListener('change', (e) => { fp.k = (e.target as HTMLSelectElement).value === 'rob' ? 3 : 0; refitFeature(f); });
   num('#fp-k', (x) => (fp.k = Math.max(1, x)));
   num('#fp-ang', (x) => (fp.maxAngleDeg = x)); num('#fp-rad', (x) => (fp.radius = x));
+  q<HTMLInputElement>('#fp-fill')?.addEventListener('change', (e) => { const on = (e.target as HTMLInputElement).checked; fp.fill = { on, band: fp.fill?.band ?? state.opts.fill.band }; if (on) { fp.k = 0; fp.nf.on = false; } refitFeature(f); });
+  num('#fp-fband', (x) => { if (fp.fill) fp.fill.band = Math.max(0.01, x); });
   q<HTMLInputElement>('#fp-nf')?.addEventListener('change', (e) => { fp.nf.on = (e.target as HTMLInputElement).checked; refitFeature(f); });
   num('#fp-rg', (x) => ((fp.ring ??= { ...state.opts.ring }).gap = x)); num('#fp-rw', (x) => ((fp.ring ??= { ...state.opts.ring }).width = Math.max(0.2, x)));
   num('#fp-nfa', (x) => (fp.nf.angleDeg = Math.min(89, x))); num('#fp-nfp', (x) => (fp.nf.maxPct = Math.min(90, x)));
