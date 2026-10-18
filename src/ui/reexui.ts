@@ -12,7 +12,7 @@ import { parseNum } from './numfield';
 type RxFeature = Feature & { indices: Uint32Array; src?: Uint32Array; dev?: Float32Array; hit?: unknown; anchor?: { pts: Vec3[] };
   fp?: { k: number; nf: { on: boolean; angleDeg: number }; inset?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean } } };
 interface ReexOut { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
-interface Host { call(req: unknown): Promise<ReexOut>; renderAll(): void; renderScene(): void; showZone(): boolean; setShowZone(on: boolean): void; toast(t: string): void; invalidate(id: number): void; recompute(): void; autosave(): void; flash(sel: string, pending?: boolean): void; fmt(v: number, d?: number): string }
+interface Host { call(req: unknown): Promise<ReexOut>; renderAll(): void; renderScene(): void; showZone(): boolean; setShowZone(on: boolean): void; lasso(): Promise<{ m: number[]; poly: [number, number][] } | null>; toast(t: string): void; invalidate(id: number): void; recompute(): void; autosave(): void; flash(sel: string, pending?: boolean): void; fmt(v: number, d?: number): string }
 let H: Host;
 export function initReexUI(h: Host) { H = h; }
 export const REEX_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Kreis', 'Langloch', 'Linie', 'Torus'];
@@ -58,6 +58,7 @@ export function reexHTML(f: RxFeature): string {
       ${row(tt('How far the search zone reaches beyond the original contour / ends of the geometry (sideways, in the surface). Default 0 = the zone follows the original region exactly. A value > 0 grows the zone by a constant distance all around – that is why its corners then become rounded.'), tt('Lateral extension [mm]'), num('margin', p.margin ?? 0, '0'))}
     </details>
     <div class="row chk" title="${tt('Show the extraction zone (transparent body) while this dialog is open. Unchecking hides it for ALL features until you check it again (remembered; also View › Zone and the ⚙ menu).')}"><label><input type="checkbox" data-rxz ${H.showZone() ? 'checked' : ''}> ${tt('Show extraction zone')}</label></div>
+    <div class="row rx-trim" title="${tt('Trim the zone yourself: draw a lasso in the 3D view (click the corners, double-click / Enter to finish, Esc to cancel). “Remove inside” cuts the enclosed points away, “Keep inside” keeps only them. Trims are stored with the feature (in the view they were drawn) and apply on every re-extraction/recompute.')}"><label>✂ ${tt('Trim zone')}</label><button type="button" class="btn" data-trim="rm">${tt('Remove inside')}</button><button type="button" class="btn" data-trim="keep">${tt('Keep inside')}</button>${p.trims?.length ? `<span class="sub">${p.trims.length}×</span><button type="button" class="btn" data-trim="undo" title="${tt('Remove the last trim')}">↶</button><button type="button" class="btn" data-trim="clear" title="${tt('Remove all trims')}">🗑</button>` : ''}</div>
     <div class="rx-live note" id="rx-live">${tt('Change a value and press Enter (or leave the field) – the preview (zone + points) updates immediately. Nothing is changed until “Apply extraction”.')}</div>
     <div class="row"><button class="btn primary" id="rx-run" title="${tt('Runs the extraction with the values shown and overwrites the actual geometry; every click uses the current values again.')}">✓ ${tt('Apply extraction')}</button></div></details>`;
 }
@@ -103,6 +104,12 @@ export function bindReex(d: HTMLElement, f: RxFeature) {
   }));
   if (pendingLive) { pendingLive = false; live(f, d); }
   d.querySelector<HTMLInputElement>('[data-rxz]')?.addEventListener('change', (e) => H.setShowZone((e.target as HTMLInputElement).checked));
+  d.querySelectorAll<HTMLButtonElement>('[data-trim]').forEach((b) => (b.onclick = async () => {
+    const k = b.dataset.trim!, T = [...(cur.trims ?? [])];
+    if (k === 'undo') T.pop(); else if (k === 'clear') T.length = 0;
+    else { const l = await H.lasso(); if (!l) return; T.push({ ...l, keep: k === 'keep' }); }
+    cur.trims = T; drafts.set(f.id, cur); pendingLive = true; H.renderAll();
+  }));
   d.querySelector('#rx-run')?.addEventListener('click', () => runReextract(f));
 }
 async function runReextract(f: RxFeature) {

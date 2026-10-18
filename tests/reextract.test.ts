@@ -87,3 +87,14 @@ describe('unified search region (0.19)', () => {
     expect(on.indices.length).toBeLessThanOrEqual(900); expect([...on.indices].some((v) => v >= 900)).toBe(false);
   });
 });
+
+import { trimPass } from '../src/core/reextract';
+describe('zone trims (lasso)', () => {
+  it('identity view: keep / remove inside a square', () => {
+    const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], sq: [number, number][] = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+    expect(trimPass([{ m: I, poly: sq, keep: false }], [0, 0, 0])).toBe(false);
+    expect(trimPass([{ m: I, poly: sq, keep: false }], [0.9, 0, 0])).toBe(true);
+    expect(trimPass([{ m: I, poly: sq, keep: true }], [0.9, 0, 0])).toBe(false);
+    expect(trimPass(undefined, [0, 0, 0])).toBe(true);
+  });
+});
