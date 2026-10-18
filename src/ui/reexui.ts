@@ -39,7 +39,7 @@ let cur: ReexParams = { ...REEX_DEFAULT };
 const raisedTipText = () => tt('Exclude raised: raised regions inside the outer contour that belong to another feature (boss, sphere, step – surface rising above the search distance with steep walls, a flat top or higher than 2.5 mm) are shown in magenta. OFF (default) = they count to the plane (e.g. flatness incl. bumps and spatter). ON = they are excluded as a whole. ? = documentation with a picture.');
 const exclTipText = () => tt('Boundary exclusion distance ± [mm]: positive = the zone shrinks inward by this distance (points near the outer contour and holes are excluded – edge roundings, burrs, chamfer starts); negative = the zone grows outward by this distance. 0 = exactly the original contour. The preview (zone + points) updates immediately.');
 export function reexHTML(f: RxFeature): string {
-  if (f.cons || !REEX_TYPES.includes(f.type) || !f.measured) return '';
+  if (f.cons || f.derived || (!f.indices?.length && !f.src?.length && !f.anchor?.pts?.length) || !REEX_TYPES.includes(f.type) || !f.measured) return '';
   const p = paramsFor(f), plane = f.type === 'Ebene';
   const num = (k: string, v: number | string, ph = '', dis = false) => `<input data-rx="${k}" data-num="abs" value="${v}" placeholder="${ph}" inputmode="decimal" ${dis ? 'disabled' : ''}>`;
   const row = (tip: string, lbl: string, ctl: string, cls = 'row') => `<div class="${cls}" title="${tip}"><label>${lbl}</label>${ctl}</div>`;

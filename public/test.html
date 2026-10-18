@@ -87,6 +87,9 @@ body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:12px;backgr
 <div class="it" data-id="AH"><div class="h"><b>AH</b> <span class="v">0.20</span></div><div class="t">Koordinatensystem: 3 Slots Primär/Sekundär/Tertiär mit Geometrie + Achse (±X/Y/Z), Primär-Ebene → +Z aus dem Material, Dreibein springt live, Flip / Rotate 90°</div>
 <div class="s"><label><input type="radio" name="AH" value="ok">✅ Vollständig</label><label><input type="radio" name="AH" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AH" value="fail">❌ Geht nicht</label><label><input type="radio" name="AH" value="skip" checked>⏸ Nicht getestet</label></div>
 <textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
+<div class="it" data-id="AI"><div class="h"><b>AI</b> <span class="v">0.21</span></div><div class="t">Transparenz: Analyze › Darstellung › „Transparent“ klicken – Scan/CAD-Modell wird sofort halbtransparent, auch OHNE laufende Analyse; nochmal klicken = deckend. Einstellung bleibt nach Reload erhalten. Abgeleitetes Element (aus Analyze) zeigt keine leeren Extraktions-/Fit-Abschnitte mehr.</div>
+<div class="s"><label><input type="radio" name="AI" value="ok">✅ Vollständig</label><label><input type="radio" name="AI" value="warn">⚠️ Eingeschränkt</label><label><input type="radio" name="AI" value="fail">❌ Geht nicht</label><label><input type="radio" name="AI" value="skip" checked>⏸ Nicht getestet</label></div>
+<textarea placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea></div>
 <button id="go">Ergebnis kopieren</button><textarea id="out" readonly placeholder="Ergebnis erscheint hier – falls Kopieren nicht klappt, hier markieren und kopieren."></textarea>
 <script>
 const K='mw3d-test-0.17b';const st=JSON.parse(localStorage.getItem(K)||'{}');

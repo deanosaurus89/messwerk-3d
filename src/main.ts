@@ -39,7 +39,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
+import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
@@ -93,7 +93,7 @@ const state = {
   opts: { maxAngleDeg: 20, radius: 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: true, outlierK: 3, zoneSrc: 'points' as 'points' | 'geom' } },
-  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: true, scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
+  an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
   hiddenLabels: new Set<number>(),
@@ -1132,7 +1132,7 @@ function paintAnalysis(): boolean {
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }
   const { c, h } = anRange(r);
   viewer.paintScalar(r.idx, r.dev, h, a.steps, c);
-  viewer.setModelOpacity(a.trans ? 0.5 : 1);
+  viewer.setModelOpacity(a.trans ? 0.4 : 1);
   let mx = -Infinity, mn = Infinity, s2 = 0; for (const v of r.dev) { if (v > mx) mx = v; if (v < mn) mn = v; s2 += v * v; }
   let el = document.getElementById('dev-legend');
   if (!el) { el = document.createElement('div'); el.id = 'dev-legend'; viewer.el.appendChild(el); }
@@ -1205,15 +1205,15 @@ function analysisSpec(): CtxSpec | null {
   const cp = ctrlPanel();
   if (a.res.cpos) return { title: `◐ ${tt('Circle position')}`, cls: 'an',
     controls: `${cp.html}<label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show/hide the tolerance zone cylinder')}">▭ ${tt('Zones')}</button>${otherLabelsHtml()}`,
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Transparent model: the scan is drawn semi-transparent so the tolerance zones and axes inside the part are visible (same switch as Analyze › Transparent)')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show/hide the tolerance zone cylinder')}">▭ ${tt('Zones')}</button>${otherLabelsHtml()}`,
     bind: (el) => { cp.bind(el); const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
-      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'hide') a.axHide = !a.axHide; else if (b.dataset.a === 'zones') a.axZones = !a.axZones; else a.trans = !a.trans; renderAll(); }));
+      el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'hide') a.axHide = !a.axHide; else if (b.dataset.a === 'zones') a.axZones = !a.axZones; else { a.trans = !a.trans; localStorage.setItem('mw3d-trans', a.trans ? '1' : '0'); } renderAll(); }));
       el.querySelectorAll<HTMLButtonElement>('[data-ol]').forEach((b) => (b.onclick = () => { state.an.otherLabels = !state.an.otherLabels; renderAll(); })); },
     cancel: { run: analyzeOff, title: tt('Close analysis') } };
   if (a.res.axes) return { title: `◐ ${tt('Axis analysis')}`, cls: 'an',
     controls: `${cp.html}<label title="${tt('Form exaggeration: bend of the median line around its own axis (its location stays true). 0 = automatic')}">${tt('Form')} × <input id="an-ax" type="number" min="0" step="10" value="${a.axExag}"></label>
       <label title="${tt('Location exaggeration: scales the offset from the nominal axis and the zones. 1 = true scale (labelled when > 1)')}">${tt('Location')} × <input id="an-lx" type="number" min="1" step="10" value="${a.axLoc}"></label>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Semi-transparent model')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show the tolerance zone (green, Ø t or two planes) and the required zone of the control (orange)')}">▭ ${tt('Zones')}</button><button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" ${a.axHide ? 'disabled' : ''} title="${tt('Transparent model: the scan is drawn semi-transparent so the tolerance zones and axes inside the part are visible (same switch as Analyze › Transparent)')}">◌ ${tt('Transparent')}</button><button data-a="hide" class="${a.axHide ? 'on' : ''}" title="${tt('Hide the polygon model so that only the axis analysis (median line, nominal axis, zones) is visible')}">▢ ${tt('Hide mesh')}</button><button data-a="zones" class="${a.axZones ? 'on' : ''}" title="${tt('Show the tolerance zone (green, Ø t or two planes) and the required zone of the control (orange)')}">▭ ${tt('Zones')}</button><button data-a="env" class="${a.axEnv ? 'on' : ''}" title="${tt('Show the envelope: the minimum-zone cylinder (purple) that encloses the derived median line; its Ø is the straightness of the axis')}">◎ ${tt('Envelope')}</button><button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
     bind: (el) => { cp.bind(el); bindDerive(el); const i = el.querySelector<HTMLInputElement>('#an-ax')!; i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (isFinite(v) && v >= 0) { a.axExag = v; renderAll(); } };
       const lx = el.querySelector<HTMLInputElement>('#an-lx')!; lx.onchange = () => { const v = Number(lx.value.replace(',', '.')); if (isFinite(v) && v >= 1) { a.axLoc = v; renderAll(); } };
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { if (b.dataset.a === 'help') showDocs('analyze'); else if (b.dataset.a === 'hide') { a.axHide = !a.axHide; renderAll(); } else if (b.dataset.a === 'zones') { a.axZones = !a.axZones; renderAll(); } else if (b.dataset.a === 'env') { a.axEnv = !a.axEnv; renderAll(); } else { a.trans = !a.trans; renderAll(); } })); },
@@ -1227,7 +1227,7 @@ function analysisSpec(): CtxSpec | null {
       <button data-a="whisk" class="${a.whisk ? 'on' : ''}" ${a.res.dir ? '' : 'disabled'} title="${tt('Deviation arrows: one colored arrow per point along the surface normal, length = deviation × exaggeration')}">➚ ${tt('Arrows')}</button>
       <label title="${tt('Exaggeration: arrow length = deviation × this factor (deviations are often µm, invisible at 1×)')}">× <input id="an-ex" type="number" min="1" step="10" value="${a.exag}"></label>
       <button data-a="zones" class="${a.zones ? 'on' : ''}" ${a.kind === 'form' ? '' : 'disabled'} title="${tt('Show the bounding surfaces of the form zone (ISO 1101), e.g. two parallel planes for flatness, two coaxial cylinders for cylindricity')}">▤ ${tt('Zone')}</button>
-      <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Semi-transparent model under the color map')}">◌ ${tt('Transparent')}</button>
+      <button data-a="trans" class="${a.trans ? 'on' : ''}" title="${tt('Transparent model: the scan is drawn semi-transparent under the color map so hidden features/zones show through (same switch as Analyze › Transparent, remembered)')}">◌ ${tt('Transparent')}</button>
       <button data-a="help" title="${tt('Explain the analysis settings')}">?</button>${otherLabelsHtml()}${deriveHtml()}`,
     bind: (el) => {
       cp.bind(el); bindDerive(el);
@@ -1238,7 +1238,7 @@ function analysisSpec(): CtxSpec | null {
         const k = b.dataset.a;
         if (k === 'help') { showDocs('analyze'); return; }
         if (k === 'whisk') { a.whisk = !a.whisk; if (a.whisk && a.res && a.res.dev.length > 1e6) toast(tt('{0} points – more than 1 million: arrows are thinned out to 4000 for display speed', a.res.dev.length.toLocaleString())); }
-        else if (k === 'zones') a.zones = !a.zones; else a.trans = !a.trans; renderAll();
+        else if (k === 'zones') a.zones = !a.zones; else { a.trans = !a.trans; localStorage.setItem('mw3d-trans', a.trans ? '1' : '0'); } renderAll();
       }));
     },
     cancel: { run: analyzeOff, title: tt('Close analysis') },
@@ -1279,7 +1279,7 @@ function showDatumInfo() {
 $('#btn-an-ctrl').onclick = () => { const v = ($('#an-ctrl') as HTMLSelectElement).value; if (v) void analyzeControl(+v); };
 document.querySelector('#btn-an-off')?.addEventListener('click', analyzeOff);
 document.querySelector('#btn-an-whisk')?.addEventListener('click', () => { state.an.whisk = !state.an.whisk; renderAll(); });
-document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state.an.trans = !state.an.trans; renderAll(); });
+document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state.an.trans = !state.an.trans; localStorage.setItem('mw3d-trans', state.an.trans ? '1' : '0'); status(state.an.trans ? tt('Model semi-transparent (also outside Analyze) – click again for opaque.') : tt('Model opaque.')); renderAll(); });
 document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!state.an.on) analyze(state.an.kind); else document.querySelector<HTMLInputElement>('#an-sc')?.focus(); });
 
 // ------------------------------------------------------------------ Auswahl, Prüfmerkmale
@@ -1555,7 +1555,7 @@ function renderRibbon() {
     (state.mode?.kind === 'fit' && state.mode.type === b.dataset.ftype) || (state.mode?.kind === 'dist' && b.dataset.ftype === 'Abstand')));
   document.querySelectorAll<HTMLButtonElement>('[data-con]').forEach((b) => b.classList.toggle('on', state.mode?.kind === 'con' && (b.dataset.con === state.mode.out || b.dataset.con === state.mode.key) && !(b.dataset.con === 'Kreis' && state.mode.key === 'bc-pattern')));
   $('#btn-toggle-prims').classList.toggle('on', state.showPrims);
-  $('#btn-toggle-trim').classList.toggle('on', state.trimGeo);
+  $('#btn-toggle-trim').classList.toggle('on', state.trimGeo); document.querySelector('#btn-an-trans')?.classList.toggle('on', !!state.an.trans);
   $('#btn-toggle-zone')?.classList.toggle('on', showZone); document.querySelector('#view-gear [data-vg="zone"]')?.classList.toggle('on', showZone);
   document.querySelectorAll<HTMLInputElement>('[data-rxz]').forEach((i) => (i.checked = showZone));
   $('#btn-toggle-pts').classList.toggle('on', state.colorPts);
@@ -1854,6 +1854,7 @@ function bindNurbsParams(d: HTMLElement, f: FeatureView) {
 }
 function fitParamsHTML(f: FeatureView) {
   if (f.measured?.nurbs) return nurbsParamsHTML(f);
+  if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
   const m = f.measured!;
@@ -2020,7 +2021,7 @@ function renderScene() {
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
   const peOn = paintPolyCompare() || paintLayout() || paintAnalysis();
-  if (!state.an.on) viewer.setModelOpacity(1);
+  if (!state.an.on) { viewer.setModelOpacity(state.an.trans ? 0.4 : 1); setCadOpacity(state.an.trans ? 0.4 : 1); }
   if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) { const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i)); viewer.paint(Uint32Array.from(ids), [0.62, 0.2, 0.95]); }
   if (state.colorPts && !peOn) for (const f of state.features) {
     if (f.type === 'Abstand' || !vis(f)) continue;
@@ -2569,7 +2570,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { applyExtract, setShowZone, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
