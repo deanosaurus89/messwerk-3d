@@ -4,7 +4,7 @@ import { NurbsInfo, evalCurve, evalSurface, insideTrim, tessellate } from './cor
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
-import { AxisAnalysis, displayPoint, nominalFoot } from './core/axisan';
+import { AxisAnalysis, axisColorScale, displayPoint, nominalFoot } from './core/axisan';
 import type { SearchRegion } from './core/reextract';
 import type { Vec3 } from './core/linalg';
 import { Labels, ViewCube } from './overlay';
@@ -127,8 +127,7 @@ export class Viewer {
     for (let k = 0; k < idx.length; k++) {
       let t = Math.max(-1, Math.min(1, (val[k] - c0) / r)); let c: number[];
       if (steps > 0) t = Math.max(-1, Math.min(1, (Math.round(((t + 1) / 2) * steps - 0.5) + 0.5) / steps * 2 - 1));
-      if (t < 0) { const a = -t; c = a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]; }
-      else { const a = t; c = a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0]; }
+      c = devRGB(t);
       this.colors.set(c, 3 * idx[k]);
     }
   }
@@ -244,10 +243,15 @@ export class Viewer {
       if (!an.missing) cyl((an.zone / 2) * locEx, 0xff8c1a, 0.14);
     }
     // actual median line (real location, form exaggerated around its own axis)
+    // coloured by deviation (app colour scale, 0 = green … h = red): radial distance from the reference axis
     const P = an.centers.map((c) => V(displayPoint(an, c, formEx, locEx)));
-    if (P.length >= 2) line(P, 0xc62828);
+    const { vals, h } = axisColorScale(an), col = vals.map((v) => new THREE.Color(...devRGB(Math.min(1, v / h))));
     const r = Math.max(an.radius / 90, this.radius / 1500);
-    for (const p of P) { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc62828, depthTest: false })); s.position.copy(p); s.renderOrder = 8; s.raycast = () => {}; this.prims.add(s); }
+    for (let i = 0; i + 1 < P.length; i++) { // tube segments
+      const a0 = P[i], a1 = P[i + 1], len = a0.distanceTo(a1); if (len < 1e-12) continue;
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.45, len, 8, 1, true), new THREE.MeshBasicMaterial({ color: col[i].clone().lerp(col[i + 1], 0.5), depthTest: false }));
+      m.position.copy(a0.clone().lerp(a1, 0.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize()); m.renderOrder = 8; m.raycast = () => {}; this.prims.add(m); }
+    P.forEach((p, i) => { const s = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: col[i], depthTest: false })); s.position.copy(p); s.renderOrder = 8; s.raycast = () => {}; this.prims.add(s); });
     // its own LSQ axis (dashed)
     const ml0 = V(displayPoint(an, an.mlPoint, formEx, locEx)), md = V(an.mlDir);
     line([ml0.clone().addScaledVector(md, -L / 2), ml0.clone().addScaledVector(md, L / 2)], 0xe57373, true);
@@ -602,4 +606,10 @@ export class Viewer {
   }
 
   snapshot(): string { return this.renderer.domElement.toDataURL('image/png'); }
+}
+
+/** App colour ramp for t ∈ [−1, 1]: blue (−1) … green (0) … yellow … red (+1). */
+export function devRGB(t: number): [number, number, number] {
+  if (t < 0) { const a = -t; return a < 0.5 ? [0, 0.75 + 0.25 * (1 - 2 * a), 2 * a] : [0, 1.5 * (1 - a), 1]; }
+  const a = t; return a < 0.5 ? [2 * a, 0.75 + 0.25 * (1 - 2 * a), 0] : [1, 1.5 * (1 - a), 0];
 }

@@ -39,6 +39,7 @@ import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './
 import { evalBSpline } from './core/curves';
 import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
+import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
 import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING, hasTedAngle } from './core/datum';
 import { datumText, isZoneControl } from './core/features';
@@ -816,7 +817,7 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
     `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
   if (miss) { an.missing = true; an.tol = null; }
-  if (C?.kind === 'Geradheit Achse') an.zone = an.straightness; // straightness control: zone = minimum-zone straightness
+  if (C?.kind === 'Geradheit Achse') { an.colorBy = 'form'; an.zone = an.straightness; } // straightness control: zone = minimum-zone straightness
   return an;
 }
 /** Analyse exactly one control (form → colour map, axis-based → axis view). */
@@ -910,7 +911,9 @@ function paintAnalysis(): boolean {
     const fx = axisExag(r), lx = Math.max(1, a.axLoc);
     el.innerHTML = `<b>${r.label}</b>` + r.axes.map((x) => `<small><b>${x.label}</b><br>${tt('tilt')} ${fmt(x.tiltDeg, 4)}° · ${x.missing ? `<span class="st missing" title="${tt('Enter the TED in the panel below (or ⋯ → Use actual as nominal) to get the zone and OK/NOK')}">${tt('zone')}: ${tt('Nominal missing')}</span>` : `${tt('zone')} ${x.planeN ? `⟷ ${tt('(two planes)')}` : 'Ø'} ${fmt(x.zone, 4)}${x.tol != null ? ` / t ${fmt(x.tol, 3)} ${x.zone <= x.tol ? '✔' : '✘'}` : ''}`}${x.mode === 'position' ? `<br>${tt('location offset')} Δ ${fmt(x.offsetLen, 4)} mm` : ''}<br>${tt('median line: {0} sections · straightness Ø {1} (minimum zone)', x.centers.length, fmt(x.straightness, 4))}</small>`).join('')
       + `<small>${tt('Median line at its true location; its bend is shown ×{0}.', fx)} ${lx > 1 ? `<b style="color:#1565c0">${tt('Location offset and zones shown ×{0} (not true scale).', lx)}</b>` : tt('Location and zones: true scale.')}</small>`
-      + `<small><span style="color:#555">━</span> ${tt('nominal axis')} · <span style="color:#c62828">━●</span> ${tt('median line')} · <span style="color:#e57373">┅</span> ${tt('its axis')} · <span style="color:#1565c0">➝</span> ${tt('offset')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('required zone')}</small>`;
+      + r.axes.slice(0, 1).map((x) => { const cs = axisColorScale(x), REF = { nominal: tt('distance from the nominal axis'), zone: tt('distance from the zone axis'), planes: tt('distance from the zone mid-plane'), form: tt('distance from the minimum-zone axis') };
+        return `<small title="${tt('Median-line points and segments are coloured by their deviation: green = on the reference, red = at the zone boundary (t/2) or beyond')}">${tt('Colour')}: ${REF[cs.ref]}<div class="bar half"></div><div class="ticks"><span>0</span><span>${fmt(cs.h / 2, 4)}</span><span>≥ ${fmt(cs.h, 4)}${x.tol != null ? ' (t/2)' : ''}</span></div></small>`; }).join('')
+      + `<small><span style="color:#555">━</span> ${tt('nominal axis')} · <span style="color:#2e9e3e">━</span><span style="color:#c62828">●</span> ${tt('median line (coloured)')} · <span style="color:#e57373">┅</span> ${tt('its axis')} · <span style="color:#1565c0">➝</span> ${tt('offset')} · <span style="color:#22aa44">▮</span> ${tt('tolerance')} · <span style="color:#ff8c1a">▮</span> ${tt('required zone')}</small>`;
     return true;
   }
   if (r.idx.length && r.idx[r.idx.length - 1] >= viewer.colors.length / 3) { a.on = false; a.res = null; return false; }

@@ -10,13 +10,17 @@
 import { FitResult, fitCircle2D } from './fit';
 import { Vec3, add, basis, dot, norm, scale, sub, unit } from './linalg';
 import { buildDRF, positionNominal } from './datum';
-import { lsqLine, medianLine, minCircle, orientNominal, orientZone, resolveOrient, straightnessMZ } from './median';
+import { floatZone, lsqLine, medianLine, minCircle, orientNominal, orientZone, resolveOrient, straightnessMZ } from './median';
 export { medianLine, minCircle };
 import type { Feature } from './features';
 
 export interface AxisAnalysis {
   /** nominal location (TED) missing: no zone value / verdict shown */
   missing?: boolean;
+  /** distances of the median-line points from the minimum-zone straightness axis */
+  formDevs: number[];
+  /** colour the median line by form (straightness control) instead of by the zone of the control */
+  colorBy?: 'zone' | 'form';
   /** orientation zone between two parallel planes (normal) instead of a cylinder Ø */
   planeN?: Vec3;
   dir: Vec3; origin: Vec3;              // nominal axis (direction, point on it)
@@ -49,10 +53,12 @@ export function analyzeAxis(fit: FitResult, pts: Vec3[], nominal0?: { dir: Vec3;
     const along = dot(fit.center, d); o = add(scale(d, along), add(scale(u, mc.x), scale(v, mc.y))); }
   const devs = centers.map((C) => norm(orth(sub(C, o), d)));
   const zone = centers.length ? (mode === 'position' ? 2 * Math.max(...devs) : nominal?.planeN ? orientZone(centers, nominal) : floatingZone(centers, d)) : 0;
-  const st = straightnessMZ(centers, a), ml = centers.length >= 2 ? lsqLine(centers, a) : { p: fit.center, d: a };
+  const st = straightnessMZ(centers, a), fz = centers.length ? floatZone(centers, st.dir) : { dia: 0, centre: [0, 0, 0] as Vec3 };
+  const formDevs = centers.map((C) => norm(orth(sub(C, fz.centre), st.dir)));
+  const ml = centers.length >= 2 ? lsqLine(centers, a) : { p: fit.center, d: a };
   const off = mode === 'position' ? orth(sub(ml.p, o), d) : [0, 0, 0] as Vec3;
   const tilt = Math.acos(Math.min(1, Math.abs(dot(a, d)))) * 180 / Math.PI;
-  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness: st.dia, straightnessLSQ: st.diaLSQ, mlPoint: ml.p, mlDir: ml.d, offset: off, offsetLen: norm(off), mode, tol, label, planeN: nominal?.planeN, length: L, radius: fit.radius ?? 1 };
+  return { dir: d, origin: o, actualDir: a, actualTop: top, actualBot: bot, centers, devs, tiltDeg: tilt, zone, straightness: st.dia, straightnessLSQ: st.diaLSQ, mlPoint: ml.p, mlDir: ml.d, offset: off, offsetLen: norm(off), mode, tol, label, planeN: nominal?.planeN, formDevs, length: L, radius: fit.radius ?? 1 };
 }
 /**
  * Display position of a median-line point: the line stays at its REAL location. Only its deviation from its own
@@ -77,4 +83,13 @@ export function axisNominal(kind: string, DS: Feature[], basic: (number | null)[
   }
   if (kind === 'Koaxialität') return { dir: g, point: D.center };
   return orientNominal(kind, D.type === 'Ebene', g, a, kind === 'Neigung' ? (basic?.[0] ?? 0) : 0, dia);
+}
+
+/** Values and half range for colouring the median line: distance from the reference (nominal/zone axis, zone mid-plane,
+ *  or the minimum-zone axis for straightness) and h = t/2 (or zone/2 without tolerance). */
+export function axisColorScale(an: AxisAnalysis): { vals: number[]; h: number; ref: 'nominal' | 'zone' | 'planes' | 'form' } {
+  const h = Math.max(1e-9, (an.tol ?? an.zone) / 2);
+  if (an.colorBy === 'form') return { vals: an.formDevs, h, ref: 'form' };
+  if (an.planeN && an.centers.length) { const t = an.centers.map((c) => dot(c, an.planeN!)), m = (Math.max(...t) + Math.min(...t)) / 2; return { vals: t.map((x) => Math.abs(x - m)), h, ref: 'planes' }; }
+  return { vals: an.devs, h, ref: an.mode === 'position' ? 'nominal' : 'zone' };
 }

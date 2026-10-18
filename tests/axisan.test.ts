@@ -66,3 +66,15 @@ describe('median line: minimum-zone straightness and true-location display', () 
     const dl = displayPoint(an, mid, 1, 10); expect(dl[0]).toBeGreaterThan(5); expect(dl[0]).toBeLessThan(5.3); // location ×10
   });
 });
+
+import { axisColorScale } from '../src/core/axisan';
+describe('median-line colouring', () => {
+  it('position: colour values = distance from the nominal axis, h = t/2; straightness: from the minimum-zone axis', () => {
+    const P: Vec3[] = []; for (let i = 0; i < 4000; i++) { const z = (20 * i) / 4000, a = i * 0.37, bow = 0.02 * (1 - ((z - 10) / 10) ** 2); P.push([0.05 + bow + 6 * Math.cos(a), 6 * Math.sin(a), z]); }
+    const fitR = { type: 'Zylinder', center: [0.06, 0, 10], normal: [0, 0, 1], radius: 6, length: 20, rms: 0, form: 0.02, maxPos: 0, maxNeg: 0, n: 4000 } as any;
+    const an = analyzeAxis(fitR, P, { dir: [0, 0, 1], point: [0, 0, 0] }, 0.2);
+    const cs = axisColorScale(an); expect(cs.ref).toBe('nominal'); expect(cs.h).toBeCloseTo(0.1, 12);
+    expect(Math.max(...cs.vals)).toBeCloseTo(an.zone / 2, 9); expect(Math.min(...cs.vals)).toBeGreaterThan(0.04);
+    an.colorBy = 'form'; const f = axisColorScale(an); expect(f.ref).toBe('form'); expect(Math.max(...f.vals)).toBeCloseTo(an.straightness / 2, 6);
+  });
+});
