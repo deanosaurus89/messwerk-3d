@@ -304,6 +304,8 @@ $('#btn-report2').onclick = () => makeReport();
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
 $('#btn-delete-feat').onclick = () => deleteSelected();
+document.getElementById('btn-toggle-wcs')!.onclick = () => setWcsVisible(!wcsVisible); document.getElementById('btn-toggle-wcs')!.classList.toggle('on', localStorage.getItem('mw3d-wcs') === '1');
+document.getElementById('btn-center-wcs')!.onclick = () => centerOnWcs();
 $('#btn-props').onclick = () => { const f = state.features.find((x) => x.id === state.sel[0]); if (f && state.sel.length === 1) openFeatureProps(f); else toast(tt('Select one feature first (tree or 3D view).')); };
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-toggle-wire').onclick = () => toggleWire();
@@ -2271,7 +2273,7 @@ function syncViewToggles() {
 {
   const g = document.createElement('div'); g.id = 'view-gear';
   g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
-    <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ ${tt('Fit all')}</button>
+    <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="wcs" title="${tt('Center the view on the origin of the global coordinate system (scan/CAD import) and show its triad')}">⌖ ${tt('Center on origin (WCS)')}</button><button data-vg="iso">◩ ISO</button><button data-vg="fit">⤢ ${tt('Fit all')}</button>
     <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button><button data-vg="relabel" title="${tt('Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected')}">↺ ${tt('Reset positions')}</button>
     <button data-vg="zone" title="${tt('Show the extraction zone of the feature whose dialog is open (global preference, remembered)')}">⬚ ${tt('Extraction zone')}</button><button data-vg="wire" data-vt="wire">▦ ${tt('Mesh edges')}</button><button data-vg="curves" data-vt="curves" class="on">〰 ${tt('Curves/CAD edges')}</button>
     <button data-vg="opts">⚙ ${tt('Options …')}</button></div>`;
@@ -2279,7 +2281,7 @@ function syncViewToggles() {
   g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => g.classList.toggle('open');
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
     if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status(tt('Fitted to view.')); }
-    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'zone') setShowZone(!showZone); else if (a === 'opts') openOptions(); else toggleCurves();
+    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'zone') setShowZone(!showZone); else if (a === 'wcs') centerOnWcs(); else if (a === 'opts') openOptions(); else toggleCurves();
     g.classList.remove('open'); }));
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   viewer.el.appendChild(g);
@@ -3336,7 +3338,7 @@ function csTree(node: (html: string, cls: string, onClick?: (e: MouseEvent) => v
   const item = (id: number, name: string, extra: string, cs?: CSys) => {
     const act = state.activeCs === (cs ? id : null);
     const n = node(`<span class="tw"></span><span class="cs-dot" title="${act ? tt('active') : tt('Activate')}">${act ? '●' : '○'}</span>${ICON.csys}${act ? `<b>${name}</b>` : name}${extra}`, 'indent2 cs-node', () => csSelect(id), state.csSel === id, undefined,
-      cs ? eyeBtn(cs.visible, () => { cs.visible = !cs.visible; renderTree(); renderScene(); scheduleAutosave(); }) : undefined);
+      cs ? eyeBtn(cs.visible, () => { cs.visible = !cs.visible; renderTree(); renderScene(); scheduleAutosave(); }) : eyeBtn(wcsVisible, () => setWcsVisible(!wcsVisible)));
     n.dataset.csid = String(id); n.dataset.gk = 'cs' + id;
     n.querySelector<HTMLElement>('.cs-dot')!.onclick = (e) => { e.stopPropagation(); csActivate(cs ? id : null); };
     n.ondblclick = () => (cs ? csEditStart(id) : csActivate(null));
@@ -3357,13 +3359,20 @@ function openCsContext(x: number, y: number, id: number) {
     [cs.visible ? `👁 ${tt('Hide triad')}` : `👁 ${tt('Show triad')}`, () => { cs.visible = !cs.visible; renderAll(); }],
     [`✎ ${tt('Rename …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#csd-name')?.select(), 30); }]);
   items.push([`⬇ ${tt('View along Z')}`, () => csViewZ(cs ? id : null)]);
+  if (!cs) items.push([wcsVisible ? `👁 ${tt('Hide triad')}` : `👁 ${tt('Show triad')}`, () => setWcsVisible(!wcsVisible)], [`⌖ ${tt('Center on origin')}`, () => centerOnWcs()]);
+  else items.push([`⌖ ${tt('Center on origin')}`, () => { const r = csResult(cs); if (r.frame) { viewer.focus(r.frame.o as [number, number, number], (state.data?.diag ?? 100) / 6); status(tt('{0}: origin centered.', cs.name)); } }]);
   if (cs) items.push(null, [`✕ ${tt('Delete')}`, () => csDelete(id)]);
   ctxMenu.className = 'ctx-menu';
   ctxMenu.innerHTML = items.map((it, i) => (it ? `<button data-i="${i}">${it[0]}</button>` : '<hr>')).join('');
   ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!]![1](); }));
   ctxMenu.style.left = Math.min(x, innerWidth - ctxMenu.offsetWidth - 4) + 'px'; ctxMenu.style.top = Math.min(y, innerHeight - ctxMenu.offsetHeight - 4) + 'px';
 }
+/** Global coordinate system (from the scan/CAD import): triad at the origin, eye in the tree, 'Center on origin'. */
+var wcsVisible = localStorage.getItem('mw3d-wcs') === '1';
+function setWcsVisible(on: boolean) { wcsVisible = on; localStorage.setItem('mw3d-wcs', on ? '1' : '0'); document.getElementById('btn-toggle-wcs')?.classList.toggle('on', on); renderAll(); }
+function centerOnWcs() { if (!wcsVisible) setWcsVisible(true); viewer.focus([0, 0, 0], (state.data?.diag ?? 100) / 6); status(tt('Global (WCS) origin centered.')); }
 function renderCsTriads() {
+  if (wcsVisible && state.showCs && !state.csEdit) viewer.addTriad([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tt('Global (WCS)'), state.activeCs == null);
   if (state.csEdit) { const r = csResult(state.csEdit.draft); if (r.frame) viewer.addTriad(r.frame.o, r.frame.R, state.csEdit.draft.name, true, true); }
   if (!state.showCs) return;
   for (const cs of state.csys) {
@@ -3401,7 +3410,7 @@ $('#btn-cs-del').onclick = () => { if (state.csSel) csDelete(state.csSel); else 
 $('#btn-cs-show').onclick = () => { state.showCs = !state.showCs; renderAll(); };
 $('#btn-cs-view').onclick = () => csViewZ(state.activeCs);
 renderCsIndicator();
-Object.assign((window as any).__app, { csNew, csActivate, csOk, csEditStart, csResult, csPick, ensurePosition, ensureDatum });
+Object.assign((window as any).__app, { setWcsVisible, centerOnWcs, csNew, csActivate, csOk, csEditStart, csResult, csPick, ensurePosition, ensureDatum });
 
 
 // ------------------------------------------------------------------ Constructed features
