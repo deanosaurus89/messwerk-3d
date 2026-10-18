@@ -77,8 +77,8 @@ describe('pattern position', () => {
     const r = evaluate(pc([1], [null, null, null, null, null, 40, null]), patternMap(rot, [0.3, -0.2, 0]));
     expect(r.measured!).toBeLessThan(1e-3);
   });
-  it('PCD missing → Nominal missing', () => {
-    expect(evaluate(pc([1, 2, 3], [50, 50, null, null, null, null, 0]), patternMap(rot)).flag).toBe('Nominal missing');
+  it('PCD not entered → actual PCD suggested, flagged unconfirmed', () => {
+    expect(evaluate(pc([1, 2, 3], [50, 50, null, null, null, null, 0]), patternMap(rot)).flag).toBe('Nominal unconfirmed');
   });
 });
 

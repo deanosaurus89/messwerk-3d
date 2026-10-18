@@ -345,7 +345,13 @@ body.thumb #cs-ind { display:none !important; }
 .split{display:inline-flex;align-items:stretch}.split .split-dd{border:none;background:none;padding:0 3px;font-size:10px;color:#556;cursor:pointer;border-radius:3px}.split .split-dd:hover{background:#e6eef8}.ctx-menu button:disabled{color:#aab;cursor:default}
 .cat-ed input.ted.req { border-color:#d32f2f; background:#fff4f4; }
 .cat-ed input.ted::placeholder { color:#b0b8c2; font-size:11px; }
-.ted-more { padding:0 6px !important; min-width:0 !important; }
+.ted-more, .ted-ok { padding:0 6px !important; min-width:0 !important; }
+input.ted.sug { color:#8a96a3; font-style:italic; border-style:dashed; }
+input.ted:disabled { background:#f1f3f5; }
+.ted-f { display:inline-flex; align-items:center; gap:2px; }
+.ted-ok { color:#1f7a3a; font-weight:700; }
+.flag.unconf { color:#8a6d00; font-style:italic; font-size:11px; }
+.st.unconf { outline:1px dashed #8a6d00; font-style:italic; }
 .flag.missing, .st.missing { color:#b26a00; }
 .an-pick { align-items:center; gap:6px; } .an-pick select { max-width:260px; font:inherit; padding:3px; }
 .an-row { color:#1f5fa8; } .an-row:disabled { opacity:.3; }

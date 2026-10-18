@@ -212,7 +212,7 @@ export function evaluate(c: Control, feats: Map<number, Feature>, ctx: EvalCtx =
     const r = evalDatumControl(c, feats, ctx);
     if (r.value == null) return { measured: null, deviation: null, status: '—', flag: r.flag, detail: r.detail };
     const ok = r.value <= c.tolUp + (r.bonus ?? 0) + 1e-12;
-    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail, bonus: r.bonus };
+    return { measured: r.value, deviation: r.value, status: ok ? 'IO' : 'NIO', detail: r.detail, bonus: r.bonus, flag: r.flag };
   }
   const m = measuredValue(c, feats, ctx);
   if (m == null) return { measured: null, deviation: null, status: '—' };

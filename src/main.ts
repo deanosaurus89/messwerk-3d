@@ -42,7 +42,7 @@ import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
 import { defaultDia } from './core/median';
-import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, requiredBasic, missingBasic, NOMINAL_MISSING, hasTedAngle, isPattern } from './core/datum';
+import { DATUM_COUNT, DATUM_LETTERS, buildDRF, datumKind, dirLocal, isDatumControl, toLocal, NOMINAL_MISSING, NOMINAL_UNCONFIRMED, isPattern, tedSpec, resolveBasic, TedField } from './core/datum';
 import { datumText, isZoneControl, MOD_SYM, parseDatumText } from './core/features';
 import { statusText } from './core/report';
 import { idbDel, idbGet, idbSet, packIndices, readProject, unpackIndex, writeProject } from './project';
@@ -826,11 +826,11 @@ function axisFor(f: FeatureView, C: Control | null): AxisAnalysis {
   const c = C && C.kind !== 'Geradheit Achse' && C.datumIds?.length ? C : null;
   // nominal axis from the full datum reference frame of the control (buildDRF: A|B|C); TED missing → direction only
   const DS = c ? c.datumIds!.map((i) => state.features.find((x) => x.id === i)).filter((x): x is FeatureView => !!x?.measured) : [];
-  const miss = c ? missingBasic(c, f, DS) : false;
-  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, c.basic, f.measured!.normal, f, c.dia) : undefined;
+  const rb = c ? resolveBasic(c, f, DS) : null, miss = !!rb?.missing.length;
+  let nominal = c && DS.length ? axisNominal(c.kind, simulateDatums(DS, ctx).feats, rb!.basic, f.measured!.normal, f, c.dia) : undefined;
   if (nominal && miss) nominal = { dir: nominal.dir };
   const an = analyzeAxis(f.measured!, pts, nominal, C && C.tolUp > 0 ? C.tolUp : null, 0,
-    `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : ''}`);
+    `${f.name}${C ? ` · ${kindName(C.kind)}${c ? ` → ${c.datumIds!.map(nameOf).join('|')}` : ''}` : ` · ${tt('vs. fitted axis')}`}${miss ? ` · ⚠ ${tt('Nominal missing')}` : rb?.unconfirmed.length ? ` · ⚠ ${tt('Nominal unconfirmed')}` : ''}`);
   if (miss) { an.missing = true; an.tol = null; }
   else if (c?.kind === 'Position') {
     // the table value accounts for DOF the datums leave free, datum shift and Ⓜ/Ⓛ bonus → show the same zone and limit
@@ -956,23 +956,19 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
   const c = state.an.ctrl != null ? state.controls.find((x) => x.id === state.an.ctrl) : undefined; if (!c) return { html: '', bind: () => {} };
   const f = state.features.find((x) => x.id === c.featureIds[0]);
   const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
-  const req = f ? requiredBasic(c, f, ds) : [];
   const r = evaluate(c, featMap(), ctx);
-  const ted = tedFields(c, req).map(([a, k, tip]) =>
-    `<label title="${tip ?? (req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)'))}">${a} <input data-ted="${k}" class="ted${req.includes(k) && c.basic?.[k] == null ? ' req' : ''}" inputmode="decimal" placeholder="${req.includes(k) ? tt('required') : tt('optional')}" value="${c.basic?.[k] ?? ''}"></label>`).join('');
-  const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(r)} <span class="st ${r.status}">${statusText(r.status)}</span>` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
+  const spec = f ? tedSpec(c, f, ds) : [];
+  const st = r.flag === NOMINAL_MISSING ? `<span class="st missing">${tt('Nominal missing')}</span>` : r.measured != null ? `<b>${fmt(r.measured)}</b>${bonusText(r)} ${stHtml(r)}` : r.flag ? `<span class="st missing" title="${r.flag}">⚠ ${tt(r.flag)}</span>` : '';
   return {
     html: `<span class="an-ctrl" title="${tt('Active control – changes recompute the analysis immediately')}"><b>${ctrlTitle(c)}</b>
-      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label>${ted}${req.length ? `<button class="btn ted-more" data-more title="${tt('More')}">⋯</button>` : ''}<span data-dia></span> ${st}</span>`,
+      <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" value="${c.tolUp}"></label><span data-teds></span><span data-dia></span> ${st}</span>`,
     bind: (el) => {
       const upd = () => { void analyzeControl(c.id, true); };
       const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = Number(t.value.replace(',', '.')); if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; upd(); } };
-      el.querySelectorAll<HTMLInputElement>('[data-ted]').forEach((i) => (i.onchange = () => { const k = +i.dataset.ted!, s2 = i.value.replace(',', '.').trim(), v = s2 === '' ? null : Number(s2);
-        if (v != null && !isFinite(v)) return; const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = v; c.basic = b; upd(); }));
+      const tz = el.querySelector('.an-ctrl [data-teds]'); if (tz) for (const t of spec) tz.appendChild(tedEl(c, t, upd, true));
+      if (tz) { const all = tedConfirmAll(c, spec, upd); if (all) tz.appendChild(all); }
       const dz = el.querySelector('.an-ctrl [data-dia]'); if (dz && f && diaInfo(c, f).applies) dz.appendChild(diaButton(c, f, upd));
       if (dz && f && modApplies(c, f)) dz.appendChild(modButton(c, upd));
-      const mo = el.querySelector<HTMLButtonElement>('.an-ctrl [data-more]');
-      if (mo && f) mo.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); upd(); } }]]); };
     } };
 }
 /** Parent feature for “Derive feature”: the analysed control's feature, or the single analysed feature. */
@@ -1131,49 +1127,38 @@ function diaButton(c: Control, f: FeatureView, after: () => void): HTMLButtonEle
   b.title = on ? tt('Ø in the feature control frame: cylindrical tolerance zone. Click for a zone between two parallel planes') : tt('No Ø: zone between two parallel planes (worst direction if the drawing gives none). Click for a cylindrical Ø zone');
   b.onclick = (e) => { e.stopPropagation(); c.dia = !on; after(); }; return b;
 }
-/** TED input fields of a control: [label, index into basic, tooltip override]. Position: X Y Z + optional angles θ/φ. */
-function tedFields(c: Control, req: number[]): [string, number, string | null][] {
-  const ang = hasTedAngle(c.basic);
-  const xyz = (['X', 'Y', 'Z'] as const).map((a, k) => [`[${a}]`, k, !req.includes(k) && ang ? tt('Coordinate of the TED point along the oblique nominal direction (empty = 0: the point lies on that DRF plane)') : null] as [string, number, string | null]);
-  const f = state.features.find((x) => x.id === c.featureIds[0]);
-  if (c.kind === 'Position' && f && isPattern(f)) return [...xyz,
-    ['[PCD Ø]', 5, tt('Pitch circle diameter of the hole pattern from the drawing (TED)')],
-    ['[α°]', 6, tt('Angular position of the first hole from the DRF X axis in degrees (TED). Not needed if no datum fixes the rotation')]];
-  if (c.kind === 'Position') return [...xyz,
-    ['[θ°]', 3, tt('Oblique nominal direction (TED angle): angle from the DRF Z axis in degrees. Empty θ and φ = parallel to the nearest DRF axis')],
-    ['[φ°]', 4, tt('Oblique nominal direction (TED angle): angle about Z, measured from the DRF X axis, in degrees')]];
-  if (c.kind === 'Profil (Bezug)') return xyz;
-  if (c.kind === 'Neigung') return [['[∠°]', 0, null]];
-  return [];
+/** Status badge; an unconfirmed nominal keeps the verdict but marks it as provisional. */
+function stHtml(r: { status: string; flag?: string }): string {
+  if (r.flag === NOMINAL_UNCONFIRMED) return `<span class="st ${r.status} unconf" title="${tt('Computed with TED suggested from the actual part – confirm ✓ or enter the drawing values')}">${statusText(r.status as any)}?</span> <span class="flag unconf">${tt('Nominal unconfirmed')}</span>`;
+  return `<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status as any)}</span>`;
+}
+/** One TED input: confirmed value (normal), suggestion from the actual part (grey italic + ✓), optional or not applicable. */
+function tedEl(c: Control, t: TedField, after: () => void, inline = false): HTMLElement {
+  const wrap = document.createElement(inline ? 'label' : 'span'); wrap.className = 'ted-f ' + t.state;
+  const conf = c.basic?.[t.k] != null && isFinite(c.basic[t.k]!), sug = !conf && t.state === 'req' && t.sug != null;
+  if (inline) wrap.append(t.label + ' ');
+  const i = document.createElement('input'); i.inputMode = 'decimal'; i.className = 'ted' + (sug ? ' sug' : '') + (t.state === 'req' && !conf && !sug ? ' req' : '');
+  i.dataset.ted = String(t.k);
+  i.value = conf ? String(c.basic![t.k]) : sug ? String(t.sug) : '';
+  i.placeholder = t.state === 'free' ? tt('n/a') : t.state === 'opt' ? tt('optional') : tt('required');
+  i.disabled = t.state === 'free';
+  i.title = tt(t.why) + (sug ? ' · ' + tt('Suggested from the actual part (unconfirmed): tick ✓ to confirm, or type the drawing value') : '');
+  const set = (v: number | null) => { const b = c.basic ?? []; while (b.length <= t.k) b.push(null); b[t.k] = v; c.basic = b; after(); };
+  i.onchange = () => { const s2 = i.value.replace(',', '.').trim(), v = s2 === '' ? null : Number(s2); if (v != null && !isFinite(v)) return; set(v); };
+  wrap.appendChild(i);
+  if (sug) { const ok = document.createElement('button'); ok.className = 'btn ted-ok'; ok.textContent = '✓'; ok.dataset.cf = String(t.k); ok.title = tt('Confirm the suggested value {0} as TED from the drawing', String(t.sug)); ok.onclick = (e) => { e.stopPropagation(); set(t.sug); }; wrap.appendChild(ok); }
+  return wrap;
+}
+function tedConfirmAll(c: Control, spec: TedField[], after: () => void): HTMLButtonElement | null {
+  const open = spec.filter((t) => t.state === 'req' && t.sug != null && (c.basic?.[t.k] == null)); if (open.length < 2) return null;
+  const b = document.createElement('button'); b.className = 'btn ted-ok all'; b.textContent = '✓ ' + tt('all'); b.title = tt('Confirm all suggested TED values (only if they match the drawing)');
+  b.onclick = (e) => { e.stopPropagation(); const bb = c.basic ?? []; while (bb.length < 7) bb.push(null); for (const t of open) bb[t.k] = t.sug; c.basic = bb; after(); }; return b;
 }
 function tedInputs(c: Control, f: FeatureView, lab: (t: string, el: HTMLElement) => void) {
-  const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i)).filter(Boolean) as FeatureView[];
-  const req = requiredBasic(c, f, ds);
-  const inp = (k: number) => { const i = numInput(c.basic?.[k] ?? null, (x) => { const b = c.basic ?? []; while (b.length <= k) b.push(null); b[k] = x; c.basic = b; });
-    i.placeholder = req.includes(k) ? tt('required') : tt('optional'); i.classList.add('ted'); if (req.includes(k) && c.basic?.[k] == null) i.classList.add('req');
-    i.title = req.includes(k) ? tt('Theoretically exact dimension from the drawing (required)') : tt('Not needed for this feature (does not affect the result)'); return i; };
-  for (const [l, k, tip] of tedFields(c, req)) { const i = inp(k); if (tip) i.title = tip; lab(l, i); }
-  if (req.length) { const m = document.createElement('button'); m.className = 'btn ted-more'; m.textContent = '⋯'; m.title = tt('More');
-    m.onclick = (e) => { e.stopPropagation(); showMenu(e.clientX, e.clientY, [[tt('Use actual as nominal (TED)'), () => { const b = defaultBasic(c.kind, f, c.datumIds ?? []); if (b) { c.basic = b; toast(tt('Actual values copied as TED – check them against the drawing.')); renderAll(); } }]]); };
-    lab('', m); }
-}
-function defaultBasic(kind: ControlKind, f: FeatureView, datumIds: number[]): number[] | undefined {
-  const fm = featMap();
-  if (kind === 'Neigung') {
-    const d = fm.get(datumIds[0]); if (!d) return [45];
-    const a = Math.acos(Math.min(1, Math.abs(f.measured!.normal.reduce((s, v, i) => s + v * d.measured!.normal[i], 0)))) * DEG;
-    return [Math.round(a * 2) / 2];
-  }
-  if (kind === 'Position' || kind === 'Profil (Bezug)') {
-    const F = buildDRF(datumIds.map((i) => fm.get(i)!).filter(Boolean));
-    const loc = toLocal(F, f.measured!.center);
-    // Achse: Lage entlang der Achse ist für die Position bedeutungslos → Soll-Koordinate 0 (in der Bezugsebene)
-    if (datumKind(f.type) === 'axis' && f.type !== 'Torus') {
-      const a = dirLocal(F, f.measured!.normal); const ax = [0, 1, 2].reduce((q, k) => (Math.abs(a[k]) > Math.abs(a[q]) ? k : q), 0); loc[ax] = 0;
-    }
-    return loc.map((v) => Math.round(v * 10) / 10 + 0);
-  }
-  return undefined;
+  const ds = (c.datumIds ?? []).map((i) => state.features.find((x) => x.id === i));
+  const spec = tedSpec(c, f, ds);
+  for (const t of spec) lab(t.label, tedEl(c, t, () => renderAll()));
+  const all = tedConfirmAll(c, spec, () => renderAll()); if (all) lab('', all);
 }
 function parseDatumRef(txt: string): number[] | null { return parseDatumMods(txt)?.ids ?? null; }
 /** Datum reference with material modifiers, e.g. "A|B(M)|C" or "A|BⓂ|C". */
@@ -1659,7 +1644,7 @@ function renderTable() {
         if (modApplies(c, f)) lab(tt('Material'), modButton(c, () => renderAll()));
         if (c.kind === 'Position' && isPattern(f)) lab(tt('Pattern'), czButton(c, () => renderAll()));
         ed.insertAdjacentHTML('beforeend', `<span class="frame">${it.symbol} ${c.kind === 'Position' && datumKind(f.type) !== 'plane' ? (f.type === 'Kugel' || f.type === 'Punkt' || f.type === 'Torus' ? 'SØ' : 'Ø') : diaInfo(c, f).on ? 'Ø' : ''}${fmt(c.tolUp, 3)}${frameMods(c, f)}${c.datumIds?.length ? ' | ' + datumText(c, fm) : ''}</span>
-          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}${bonusText(r)}</span><span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
+          <span class="dev ${r.status}">${r.measured == null ? '' : fmt(r.measured)}${bonusText(r)}</span>${r.flag === NOMINAL_UNCONFIRMED ? stHtml(r) : `<span class="st ${r.flag === NOMINAL_MISSING ? 'missing' : r.status === '—' ? 'none' : r.status}">${r.flag ? '⚠' : r.status}</span>${r.flag ? `<span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`}`);
         if (r.detail) ed.title = r.detail;
         row.appendChild(ed);
       } else if (c && r) {
@@ -1696,14 +1681,14 @@ function renderTable() {
     if (state.selControl === c.id) tr.className = 'sel';
     const td = (html: string | HTMLElement, cls = '') => { const e = document.createElement('td'); e.className = cls; if (typeof html === 'string') e.innerHTML = html; else e.appendChild(html); tr.appendChild(e); return e; };
     td(fc?.name ?? '?');
-    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag ? ` <span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
+    td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag && r.flag !== NOMINAL_UNCONFIRMED ? ` <span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
     const zone = isZoneControl(c.kind);
     td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => (c.nominal = x)), 'num');
     td(fmt(r.measured), 'num');
     td(zone ? '' : fmt(r.deviation), `num dev ${r.status}`);
     td(numInput(c.tolUp, (x) => (c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0)), 'num');
     td(zone ? '<span class="note" title="' + tt('Form/orientation tolerance zone 0..t') + '">0</span>' : numInput(c.tolLo, (x) => (c.tolLo = x == null ? 0 : -Math.abs(x))), 'num');
-    td(r.flag === NOMINAL_MISSING ? `<span class="st missing" title="${tt('Enter the theoretically exact dimensions (TED) from the drawing in the control catalog')}">${tt('Nominal missing')}</span>` : `<span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
+    td(r.flag === NOMINAL_MISSING ? `<span class="st missing" title="${tt('Enter the theoretically exact dimensions (TED) from the drawing in the control catalog')}">${tt('Nominal missing')}</span>` : stHtml(r));
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = tt('Delete');
     x.onclick = (e) => { e.stopPropagation(); state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); };
     const ak = ctrlAnalysisKind(c), an = document.createElement('button'); an.className = 'x an-row'; an.textContent = '◐'; an.disabled = !ak;

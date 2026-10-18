@@ -64,18 +64,25 @@ describe('Position from the derived median line', () => {
   });
 });
 
-import { requiredBasic, NOMINAL_MISSING } from '../src/core/datum';
-describe('TED never prefilled: nominal missing', () => {
-  it('Position of a hole: X and Y (⟂ axis) required, Z not; missing → flag, no OK/NOK', () => {
+import { requiredBasic, tedSpec, NOMINAL_UNCONFIRMED } from '../src/core/datum';
+describe('TED suggestions: computed but unconfirmed until confirmed', () => {
+  it('Position of a hole: X and Y (⟂ axis) required with actual values as suggestion, Z not shown', () => {
     expect(requiredBasic({ kind: 'Position' }, Z1, [A, B, C])).toEqual([0, 1]);
-    const r = evaluate(ctl('Position', [1, 2, 3], { basic: [null, null, null] }), map()); expect(r.flag).toBe(NOMINAL_MISSING); expect(r.status).toBe('—'); expect(r.measured).toBeNull();
-    const half = evaluate(ctl('Position', [1, 2, 3], { basic: [20, null, null] }), map()); expect(half.flag).toBe(NOMINAL_MISSING);
+    const sp = tedSpec({ kind: 'Position' }, Z1, [A, B, C]); expect(sp.map((t) => t.label)).toEqual(['[X]', '[Y]', '[θ°]', '[φ°]']);
+    expect(sp[0].sug).toBeCloseTo(20.03, 3); expect(sp[2].state).toBe('opt');
+    const r = evaluate(ctl('Position', [1, 2, 3], { basic: [null, null, null] }), map()); expect(r.flag).toBe(NOMINAL_UNCONFIRMED); expect(r.status).toBe('IO'); expect(r.measured!).toBeGreaterThan(0);
+    const half = evaluate(ctl('Position', [1, 2, 3], { basic: [20, null, null] }), map()); expect(half.flag).toBe(NOMINAL_UNCONFIRMED);
     const ok = evaluate(ctl('Position', [1, 2, 3], { basic: [20, 20, null] }), map()); expect(ok.flag).toBeUndefined(); expect(ok.measured).toBeGreaterThan(0);
   });
-  it('Angularity needs the angle; plane position needs only the normal component', () => {
-    expect(evaluate(ctl('Neigung', [1], { basic: [null] }), map()).flag).toBe(NOMINAL_MISSING);
-    expect(evaluate(ctl('Neigung', [1], {}), map()).flag).toBe(NOMINAL_MISSING);
+  it('free DOF are not applicable; angularity suggests the actual angle; plane position needs only the normal component', () => {
+    const sp = tedSpec({ kind: 'Position' }, Z1, [A]); expect(sp.filter((t) => t.state === 'free').map((t) => t.label)).toEqual(['[X]', '[Y]']);
+    expect(evaluate(ctl('Neigung', [1], { basic: [null] }), map()).flag).toBe(NOMINAL_UNCONFIRMED);
+    expect(tedSpec({ kind: 'Neigung' }, Z1, [A])[0].sug).toBeCloseTo(90 - 0.0573, 3);
     const P2 = F(7, 'Ebene 7', 'Ebene', fit('Ebene', [50, 30, 25], [0, 0, 1])); expect(requiredBasic({ kind: 'Position' }, P2, [A, B, C])).toEqual([2]);
+  });
+  it('oblique hole: θ/φ required with actual angles as suggestion', () => {
+    const t = 30 * Math.PI / 180, Zo = F(8, 'Zo', 'Zylinder', fit('Zylinder', [20, 20, 10], [Math.sin(t), 0, Math.cos(t)], { radius: 3, diameter: 6, length: 10 }));
+    const sp = tedSpec({ kind: 'Position' }, Zo, [A, B, C]); const th = sp.find((x) => x.k === 3)!; expect(th.state).toBe('req'); expect(th.sug).toBeCloseTo(30, 3);
   });
 });
 
@@ -131,9 +138,10 @@ describe('Oblique TEDs (θ/φ) for position', () => {
     const r = evaluate(c, m, ctx); expect(r.detail).toContain('oblique');
     expect(r.measured!).toBeCloseTo(2 * 0.01 * Math.cos(th), 4);
   });
-  it('without angles the nominal snaps to the nearest DRF axis (Z) → large value', () => {
+  it('without angles the actual oblique direction is suggested (unconfirmed); explicit 0° snaps to Z → large value', () => {
     const c = ctl('Position', [1, 2, 3], { basic: [20, 20, null] }); c.featureIds = [11];
-    expect(evaluate(c, m, ctx).measured!).toBeGreaterThan(5);
+    const r = evaluate(c, m, ctx); expect(r.flag).toBe('Nominal unconfirmed');
+    c.basic = [20, 20, null, 0, 0]; expect(evaluate(c, m, ctx).measured!).toBeGreaterThan(5);
   });
   it('positionNominal: θ=90, φ=90 → nominal ∥ Y', () => {
     const N = positionNominal({ o: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], text: '', free: [], freeT: [], freeR: false }, Zo, [1, 2, 3, 90, 90]);

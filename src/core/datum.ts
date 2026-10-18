@@ -100,22 +100,69 @@ export const DATUM_COUNT: Record<DatumKindCtl, [number, number]> = {
 };
 
 export interface EvalCtx extends SimCtx { /** all controls (size nominal/tolerances for Ⓜ/Ⓛ) */ controls?: Control[]; points?: (featureId: number) => Vec3[] | null; /** active coordinate system (outputs X/Y/Z, angles, distance components) */ frame?: { o: Vec3; R: [Vec3, Vec3, Vec3] } | null; }
-/** TED components the user must enter for a control (indices into basic): Neigung → angle; Position/Profile →
- *  the DRF components that matter (plane: along its normal; axis: the two ⟂ to the nominal axis; point/sphere: all). */
-export function requiredBasic(c: { kind: string }, f: Feature | undefined, ds: Feature[]): number[] {
-  if (c.kind === 'Neigung') return [0];
-  if (c.kind !== 'Position' && c.kind !== 'Profil (Bezug)') return [];
-  if (!f?.measured || !ds.length || ds.some((d) => !d?.measured)) return [0, 1, 2];
-  const F = buildDRF(ds), k = datumKind(f.type);
-  const ax = nominalDirLocal(F, f.measured.normal, (c as { basic?: (number | null)[] }).basic).ax;
-  const fr = (i: number) => !F.freeT.includes(i); // components along free DRF translations are not needed
-  if (k === 'plane') return [ax].filter(fr);
-  if (k === 'axis' && f.type !== 'Torus') {
-    const r = [0, 1, 2].filter((i) => i !== ax && fr(i));
-    return isPattern(f) && c.kind === 'Position' ? [...r, 5, ...(F.freeR ? [] : [6])] : r;
+/** One TED input of a datum control: index into basic, label, state and why (tooltip), suggestion from the actual part. */
+export interface TedField { k: number; label: string; state: 'req' | 'opt' | 'free'; why: string; sug: number | null; }
+const r3 = (v: number) => Math.round(v * 1000) / 1000 + 0;
+const AX = 'XYZ';
+/**
+ * TED fields of a control, derived from the situation: the nominal direction of the feature in the DRF and the DOF the
+ * datums lock. Coordinates ⟂ to the axis that the datums lock are required; the coordinate along the axis is not
+ * shown; coordinates along free DRF translations are not applicable. Each required field carries the actual value as
+ * suggestion (unconfirmed until the user ticks ✓ or types the drawing value).
+ */
+export function tedSpec(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): TedField[] {
+  if (!f?.measured || ds.some((d) => !d?.measured)) return [];
+  const m = f.measured;
+  if (c.kind === 'Neigung') {
+    const D = ds[0]; if (!D) return [{ k: 0, label: '[∠°]', state: 'req', why: 'Angle between the feature and the datum from the drawing', sug: null }];
+    const cls = elemClass(f.type), same = (cls !== 'axis') === (datumKind(D.type) === 'plane');
+    const gam = Math.acos(Math.min(1, Math.abs(dot(unit(m.normal), unit(D.measured!.normal))))) / DEG;
+    return [{ k: 0, label: '[∠°]', state: 'req', why: 'Required: the nominal angle between the feature and datum ' + (D.datum ?? '') + ' from the drawing (TED)', sug: r3(same ? gam : 90 - gam) }];
   }
-  return [0, 1, 2].filter(fr);
+  if (c.kind !== 'Position' && c.kind !== 'Profil (Bezug)') return [];
+  if (!ds.length) return [];
+  const F = buildDRF(ds as Feature[]), k = datumKind(f.type), out: TedField[] = [];
+  const a0 = unit(dirLocal(F, unit(m.normal))), a = a0[2] < 0 ? scale(a0, -1) : a0;
+  const big = [0, 1, 2].reduce((q, i) => (Math.abs(a[i]) > Math.abs(a[q]) ? i : q), 0);
+  const oblique = Math.acos(Math.min(1, Math.abs(a[big]))) > 0.5 * DEG;
+  const directional = k === 'plane' || (k === 'axis' && f.type !== 'Torus');
+  const userAng = hasTedAngle(c.basic);
+  const angB: (number | null)[] = [null, null, null, userAng ? c.basic![3] ?? null : oblique ? Math.acos(a[2]) / DEG : null, userAng ? c.basic![4] ?? null : oblique ? Math.atan2(a[1], a[0]) / DEG : null];
+  const n = nominalDirLocal(F, m.normal, angB), loc = toLocal(F, m.center);
+  const what = k === 'plane' ? 'plane normal' : 'axis';
+  const sugAt = (i: number) => r3(n.angled ? loc[i] - (loc[n.ax] * n.g[i]) / n.g[n.ax] : loc[i]);
+  const comp = (i: number, req: string) => F.freeT.includes(i)
+    ? out.push({ k: i, label: `[${AX[i]}]`, state: 'free', why: `Not applicable: the datums ${F.text} do not lock the location along ${AX[i]} – the zone may move in that direction`, sug: null })
+    : out.push({ k: i, label: `[${AX[i]}]`, state: 'req', why: req, sug: sugAt(i) });
+  if (k === 'plane') comp(n.ax, `Required: location of the plane along its normal (${AX[n.ax]}) from the datum origin – locked by ${F.text}`);
+  else if (directional) { for (const i of [0, 1, 2]) if (i !== n.ax) comp(i, `Required: location of the ${n.angled ? 'axis where it meets the DRF plane ⟂ ' + AX[n.ax] : 'axis'} along ${AX[i]} (⟂ to the axis ∥ ${AX[n.ax]}) – locked by ${F.text}. The coordinate along the axis is not needed.`); }
+  else for (const i of [0, 1, 2]) comp(i, `Required: location of the centre along ${AX[i]} – locked by ${F.text}`);
+  if (directional && c.kind === 'Position') {
+    const tip = oblique || userAng ? 'Required: nominal direction of the ' + what + ' is oblique – angle from the drawing (TED)' : 'Optional: empty = ' + what + ' parallel to DRF ' + AX[big] + ' (implicit 0°/90°). Enter only if the drawing gives an angle';
+    const st = oblique || userAng ? 'req' : 'opt';
+    out.push({ k: 3, label: '[θ°]', state: st, why: tip + ' · θ = angle from the DRF Z axis', sug: oblique ? r3(angB[3]!) : null });
+    out.push({ k: 4, label: '[φ°]', state: st, why: tip + ' · φ = angle about Z measured from the DRF X axis', sug: oblique ? r3(angB[4]!) : null });
+  }
+  if (isPattern(f) && c.kind === 'Position' && k === 'axis') {
+    out.push({ k: 5, label: '[PCD Ø]', state: 'req', why: 'Required: pitch circle diameter of the hole pattern from the drawing (TED)', sug: r3(m.diameter ?? 2 * (m.radius ?? 0)) });
+    const i1 = (n.ax + 1) % 3, i2 = (n.ax + 2) % 3, d = m.direction ? dirLocal(F, unit(m.direction)) : null, pitch = 360 / (m.pattern?.n || 1);
+    if (F.freeR) out.push({ k: 6, label: '[α°]', state: 'free', why: `Not applicable: no datum of ${F.text} locks the rotation about ${AX[n.ax]} – the pattern may rotate`, sug: null });
+    else out.push({ k: 6, label: '[α°]', state: 'req', why: `Required: angle of the first hole from DRF ${AX[i1]} (about ${AX[n.ax]}) – the rotation is locked by ${F.text}`, sug: d ? r3((((Math.atan2(d[i2], d[i1]) / DEG) % pitch) + pitch) % pitch) : null });
+  }
+  return out;
 }
+/** Indices of the required TED components (see tedSpec). */
+export function requiredBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): number[] {
+  return tedSpec(c, f, ds).filter((t) => t.state === 'req').map((t) => t.k);
+}
+/** Effective TED: confirmed values (user) plus suggestions for required fields still unconfirmed. */
+export function resolveBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): { basic: (number | null)[]; unconfirmed: TedField[]; missing: TedField[] } {
+  const spec = tedSpec(c, f, ds), basic = [...(c.basic ?? [])]; while (basic.length < 7) basic.push(null);
+  const unconfirmed: TedField[] = [], missing: TedField[] = [];
+  for (const t of spec) if (t.state === 'req' && (basic[t.k] == null || !isFinite(basic[t.k]!))) { if (t.sug != null) { basic[t.k] = t.sug; unconfirmed.push(t); } else missing.push(t); }
+  return { basic, unconfirmed, missing };
+}
+export const NOMINAL_UNCONFIRMED = 'Nominal unconfirmed';
 /** Bolt-circle pattern feature (constructed from member holes). */
 export const isPattern = (f: Feature) => !!f.measured?.pattern && f.cons?.key === 'bc-pattern' && !!f.cons.refs.length;
 const E3 = (i: number): Vec3 => { const e: Vec3 = [0, 0, 0]; e[i] = 1; return e; };
@@ -150,7 +197,7 @@ export function positionNominal(F: DRF, f: Feature, basic?: (number | null)[]): 
   const W = (v: Vec3): Vec3 => add(scale(F.x, v[0]), add(scale(F.y, v[1]), scale(F.z, v[2])));
   return { ...n, b, dirW: W(n.g), pointW: add(F.o, W(b)) };
 }
-export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: Feature[]): boolean {
+export function missingBasic(c: { kind: string; basic?: (number | null)[] }, f: Feature | undefined, ds: (Feature | undefined)[]): boolean {
   return requiredBasic(c, f, ds).some((i) => c.basic?.[i] == null || !isFinite(c.basic[i]!));
 }
 export interface DatumEval { value: number | null; flag?: string; detail?: string; /** bonus tolerance from Ⓜ/Ⓛ (added to t) */ bonus?: number; }
@@ -161,6 +208,14 @@ const elemSize = (f: Feature) => { const m = f.measured!; return f.type === 'Lan
 
 /** Wert einer Toleranz mit Bezug (Toleranzzonenbreite bzw. -durchmesser in mm). */
 export function evalDatumControl(c: Control, feats: Map<number, Feature>, ctx: EvalCtx = {}): DatumEval {
+  const f = feats.get(c.featureIds[0]), ds = (c.datumIds ?? []).map((id) => feats.get(id));
+  const rb = resolveBasic(c, f, ds);
+  if (rb.missing.length || !rb.unconfirmed.length) return evalDatumControl0(c, feats, ctx);
+  const r = evalDatumControl0({ ...c, basic: rb.basic }, feats, ctx);
+  if (r.value == null || r.flag) return r;
+  return { ...r, flag: NOMINAL_UNCONFIRMED, detail: `TED suggested from the actual part, not confirmed: ${rb.unconfirmed.map((t) => `${t.label} ${t.sug}`).join(', ')} – confirm ✓ or enter the drawing values. ${r.detail ?? ''}` };
+}
+function evalDatumControl0(c: Control, feats: Map<number, Feature>, ctx: EvalCtx = {}): DatumEval {
   const f = feats.get(c.featureIds[0]); if (!f?.measured) return { value: null };
   const kind = c.kind as DatumKindCtl;
   const ds = (c.datumIds ?? []).map((id) => feats.get(id));
