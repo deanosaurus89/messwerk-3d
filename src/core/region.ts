@@ -53,11 +53,17 @@ export class MeshTopology {
     // Nadel-/Splitterdreiecke (Formqualität q < NEEDLE_Q): eigene Normale ist vom Rauschen dominiert -> robuste Nachbarschafts-Normale.
     // Gut geformte Dreiecke behalten ihre Normale (dort stimmen Dreiecks- und Nachbarschaftsnormale überein, gemessen: p95 < 3°),
     // damit scharfe Kanten zwischen Regelgeometrien scharf bleiben (die Nachbarschaftsnormale verschmiert sie über ±R).
-    this.needle = needleTris(mesh);
-    this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, verticesOf(mesh, this.needle));
-    const rt = triFromVertex(mesh, this.robustVN), fn0 = mesh.faceNormals!; this.smooth = new Float32Array(fn0);
-    let nn = 0; for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) { nn++; for (let k = 0; k < 3; k++) this.smooth[3 * t + k] = rt[3 * t + k]; }
-    this.needleCount = nn;
+    // 0.37 (Martin 19.10. 21:52): EINE Methode für alle Dreiecke – Knotennormale = Nachbarschafts-Ebenen-Fit
+    // (robust gewichtet, siehe robustVertexNormals), Dreiecksnormale = Mittel ihrer drei Knotennormalen. Kein Formschalter.
+    this.needle = needleTris(mesh); this.needleCount = 0; for (const x of this.needle) this.needleCount += x;
+    if (NORMAL_MODE === 'needle036') {
+      this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, verticesOf(mesh, this.needle), false);
+      const rt = triFromVertex(mesh, this.robustVN), fn0 = mesh.faceNormals!; this.smooth = new Float32Array(fn0);
+      for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) for (let k = 0; k < 3; k++) this.smooth[3 * t + k] = rt[3 * t + k];
+    } else {
+      this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, undefined, NORMAL_MODE === 'robust');
+      this.smooth = triFromVertex(mesh, this.robustVN);
+    }
     this.robustMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
     this.sliver = this.findSlivers();
     this.anchorDist = Math.max(1.0, 1.2 * this.medianEdge());
@@ -147,7 +153,7 @@ export class MeshTopology {
   /** Glatte Dreiecksnormalen (Knotennormalen gemittelt) – einmalig berechnet. */
   private _sn: Float32Array | null = null;
   get smoothN(): Float32Array {
-    if (this._sn) return this._sn; const o = this.smoothNormals();
+    if (this._sn) return this._sn; if (NORMAL_MODE !== 'needle036') return (this._sn = this.smooth); const o = this.smoothNormals();
     for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) for (let k = 0; k < 3; k++) o[3 * t + k] = this.smooth[3 * t + k];
     return (this._sn = o); }
   /** alte 1-Ring-Glättung (nur Vergleich) */
@@ -396,6 +402,10 @@ export class MeshTopology {
 }
 
 export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
+/** Normalenverfahren: 'robust' = Standard ab 0.37 (gewichteter Nachbarschafts-Fit für alle), 'plain' = ungewichteter Fit für alle,
+ *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
+export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
+export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
 export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
   const p = m.positions, f = m.indices, fa = m.faceAreas!, nt = f.length / 3, out = new Uint8Array(nt);
   const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
@@ -405,9 +415,10 @@ export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
 function verticesOf(m: MeshData, mark: Uint8Array): Uint8Array { const f = m.indices, out = new Uint8Array(m.positions.length / 3); for (let t = 0; t < mark.length; t++) if (mark[t]) { out[f[3 * t]] = out[f[3 * t + 1]] = out[f[3 * t + 2]] = 1; } return out; }
 /** 0.36: robuste Knotennormalen (siehe MeshTopology.robustVN). Nachbarschaft über das Netz (nicht durch dünne Wände),
  *  Radius R = 1,3 × Median der anliegenden Kantenlängen; kleinster Eigenvektor der Kovarianz per inverser Potenziteration-Variante. */
-export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tris: Uint32Array }, k = ROBUST_K, minPts = ROBUST_MIN, only?: Uint8Array): Float32Array {
+export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tris: Uint32Array }, k = ROBUST_K, minPts = ROBUST_MIN, only?: Uint8Array, weighted = true): Float32Array {
   const p = m.positions, f = m.indices, vn = m.vertexNormals!, nv = p.length / 3, { offsets, tris } = vt;
   const out = new Float32Array(3 * nv); const stamp = new Int32Array(nv).fill(-1); const q = new Int32Array(nv); const el: number[] = [];
+  const W = new Float64Array(4096);
   for (let v = 0; v < nv; v++) {
     const o0 = offsets[v], o1 = offsets[v + 1]; if (o1 === o0) continue;
     if (only && !only[v]) { out[3 * v] = vn[3 * v]; out[3 * v + 1] = vn[3 * v + 1]; out[3 * v + 2] = vn[3 * v + 2]; continue; }
@@ -415,15 +426,15 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
     for (let j = o0; j < o1; j++) { const t = tris[j]; for (let e = 0; e < 3; e++) { const a = f[3 * t + e], b = f[3 * t + (e + 1) % 3]; el.push(Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2])); } }
     el.sort((x, y) => x - y); let R = k * (el[el.length >> 1] || 1);
     const px = p[3 * v], py = p[3 * v + 1], pz = p[3 * v + 2];
-    let n = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+    let nb = 0; let n = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
     for (let tries = 0; tries < 4; tries++) {
-      const R2 = R * R, tag = v * 4 + tries; let head = 0, tail = 0; q[tail++] = v; stamp[v] = tag;
+      const R2 = R * R, tag = v * 4 + tries; let head = 0, tail = 0; q[tail++] = v; stamp[v] = tag; void head;
       n = 0; sx = sy = sz = xx = xy = xz = yy = yz = zz = 0;
       while (head < tail) { const w = q[head++]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz;
         n++; sx += dx; sy += dy; sz += dz; xx += dx * dx; xy += dx * dy; xz += dx * dz; yy += dy * dy; yz += dy * dz; zz += dz * dz;
         for (let j = offsets[w]; j < offsets[w + 1]; j++) { const t = tris[j]; for (let e = 0; e < 3; e++) { const u = f[3 * t + e]; if (stamp[u] === tag) continue; stamp[u] = tag;
           const ex = p[3 * u] - px, ey = p[3 * u + 1] - py, ez = p[3 * u + 2] - pz; if (ex * ex + ey * ey + ez * ez <= R2) q[tail++] = u; } } }
-      if (n >= minPts || tries === 3) break; R *= 1.5;
+      nb = tail; if (n >= minPts || tries === 3) break; R *= 1.5;
     }
     let nx = vn[3 * v], ny = vn[3 * v + 1], nz = vn[3 * v + 2];
     if (n >= 4) {
@@ -433,6 +444,27 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
       const tr = a + d + g; let x = nx, y = ny, z = nz;
       for (let it = 0; it < 12; it++) { const X = tr * x - (a * x + b * y + c * z), Y = tr * y - (b * x + d * y + e * z), Z = tr * z - (c * x + e * y + g * z); const l = Math.hypot(X, Y, Z) || 1; x = X / l; y = Y / l; z = Z / l; }
       if (x * nx + y * ny + z * nz < 0) { x = -x; y = -y; z = -z; }
+      // Robust gewichtet (kantenerhaltend, gleiches Verfahren für alle Knoten): Nachbarn abseits der lokalen Ebene
+      // werden heruntergewichtet (Cauchy-Gewicht, Skala s = 0,1·R), 3 Iterationen. Ist der ungewichtete Fit schlecht
+      // (Knoten an einer Kante: Punkte zweier Flächen), startet die Gewichtung von der Ebene durch den Knoten mit seiner
+      // Flächennormale – so gewinnt die Fläche, auf der der Knoten liegt, statt einer Mittelung über die Kante.
+      if (weighted && nb <= W.length) {
+        const sc = 0.1 * R, s2 = sc * sc; let cxw = cx, cyw = cy, czw = cz;
+        let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
+        if (Math.sqrt(rr / nb) > 0.5 * sc) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
+        for (let iter = 0; iter < 3; iter++) {
+          let sw = 0, mx = 0, my = 0, mz = 0;
+          for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz; const d = (dx - cxw) * x + (dy - cyw) * y + (dz - czw) * z;
+            const wt = 1 / (1 + (d * d) / s2); W[i] = wt; sw += wt; mx += wt * dx; my += wt * dy; mz += wt * dz; }
+          mx /= sw; my /= sw; mz /= sw; let A = 0, B = 0, Cc = 0, D = 0, E = 0, G = 0;
+          for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px - mx, dy = p[3 * w + 1] - py - my, dz = p[3 * w + 2] - pz - mz, wt = W[i];
+            A += wt * dx * dx; B += wt * dx * dy; Cc += wt * dx * dz; D += wt * dy * dy; E += wt * dy * dz; G += wt * dz * dz; }
+          const t2 = A + D + G;
+          for (let it = 0; it < 12; it++) { const X = t2 * x - (A * x + B * y + Cc * z), Y = t2 * y - (B * x + D * y + E * z), Z = t2 * z - (Cc * x + E * y + G * z); const l = Math.hypot(X, Y, Z) || 1; x = X / l; y = Y / l; z = Z / l; }
+          cxw = mx; cyw = my; czw = mz;
+        }
+        if (x * nx + y * ny + z * nz < 0) { x = -x; y = -y; z = -z; }
+      }
       if (Number.isFinite(x)) { nx = x; ny = y; nz = z; }
     }
     out[3 * v] = nx; out[3 * v + 1] = ny; out[3 * v + 2] = nz;
