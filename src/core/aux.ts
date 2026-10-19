@@ -121,7 +121,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
         const sn = topo.NF(u); if (Math.abs(sn[3 * u] * N[0] + sn[3 * u + 1] * N[1] + sn[3 * u + 2] * N[2]) < 0.15) {
           let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.1 });
           if (!gt.length) gt = topo.growFit(u, seedPoint, { ...o, radius: 0, prismAxis: N });
-          if (!gt.length) return undefined; const g = mk(gt); return g.verts.length >= 8 && !isPlanar(g).ok && prismatic(g, N) ? g : undefined; }
+          // 0.38: einzelnes Kanten-Dreieck (Normale schon ⟂, Nachbarn noch nicht) -> weiterlaufen statt aufgeben
+          if (!gt.length) return undefined; const g = mk(gt); if (g.verts.length < 8) { nq.push(u); continue; } return !isPlanar(g).ok && prismatic(g, N) ? g : undefined; }
         nq.push(u); }
       q = nq; }
     return undefined;
