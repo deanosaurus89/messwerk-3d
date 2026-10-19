@@ -115,10 +115,10 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   };
   /** Von der Klickstelle über die Fläche zur nächsten Wand (Normale ⟂ Ebenennormale) laufen und dort prismatisch wachsen. */
   const wallByWalk = (N: Vec3): Region | undefined => {
-    const sn = topo.smoothN, seen = new Set<number>([seedTri]); let q = [seedTri]; const lim = Math.min(maxDist, 60 * topo.localEdge(seedTri));
+    const seen = new Set<number>([seedTri]); let q = [seedTri]; const lim = Math.min(maxDist, 60 * topo.localEdge(seedTri));
     for (let it = 0; it < 4000 && q.length; it++) { const nq: number[] = [];
       for (const t of q) for (const u of topo.neighbors(t)) { if (seen.has(u)) continue; seen.add(u); if (triDist(u) > lim) continue;
-        if (Math.abs(sn[3 * u] * N[0] + sn[3 * u + 1] * N[1] + sn[3 * u + 2] * N[2]) < 0.15) {
+        const sn = topo.NF(u); if (Math.abs(sn[3 * u] * N[0] + sn[3 * u + 1] * N[1] + sn[3 * u + 2] * N[2]) < 0.15) {
           let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: 0.1 });
           if (!gt.length) gt = topo.growFit(u, seedPoint, { ...o, radius: 0, prismAxis: N });
           if (!gt.length) return undefined; const g = mk(gt); return g.verts.length >= 8 && !isPlanar(g).ok && prismatic(g, N) ? g : undefined; }

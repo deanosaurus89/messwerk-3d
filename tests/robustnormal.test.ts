@@ -17,7 +17,7 @@ function needlePlane(seed = 1): MeshData {
 describe('robust neighbourhood normal on needle triangles', () => {
   const m = needlePlane(); const topo = new MeshTopology(m); const nt = m.indices.length / 3;
   it('raw triangle normals of the needles are tilted (> 20° for many), robust ones are not', () => {
-    let raw = 0, rob = 0; const fn = m.faceNormals!, sm = topo.smooth;
+    let raw = 0, rob = 0; const fn = m.faceNormals!, sm = topo.allN();
     for (let t = 0; t < nt; t++) { if (Math.abs(fn[3 * t + 2]) < Math.cos(20 * Math.PI / 180)) raw++; if (Math.abs(sm[3 * t + 2]) < Math.cos(20 * Math.PI / 180)) rob++; }
     expect(topo.needleCount).toBe(nt); expect(raw / nt).toBeGreaterThan(0.1); expect(rob).toBe(0);
   });

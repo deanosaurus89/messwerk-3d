@@ -48,7 +48,7 @@ export class MeshTopology {
   /** Nadeldreiecke (1 = robuste Normale) */
   needle: Uint8Array; needleCount = 0;
   constructor(public mesh: MeshData) {
-    this.vt = vertexTriangles(mesh);
+    this.vt = vertexTriangles(mesh); const nt0 = mesh.indices.length / 3; this.sReady = new Uint8Array(nt0); this.kReady = new Uint8Array(nt0);
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     // Nadel-/Splitterdreiecke (Formqualität q < NEEDLE_Q): eigene Normale ist vom Rauschen dominiert -> robuste Nachbarschafts-Normale.
     // Gut geformte Dreiecke behalten ihre Normale (dort stimmen Dreiecks- und Nachbarschaftsnormale überein, gemessen: p95 < 3°),
@@ -60,15 +60,42 @@ export class MeshTopology {
       this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, verticesOf(mesh, this.needle), false);
       const rt = triFromVertex(mesh, this.robustVN), fn0 = mesh.faceNormals!; this.smooth = new Float32Array(fn0);
       for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) for (let k = 0; k < 3; k++) this.smooth[3 * t + k] = rt[3 * t + k];
+      this.sReady.fill(1);
     } else {
-      this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, undefined, NORMAL_MODE === 'robust');
-      this.smooth = triFromVertex(mesh, this.robustVN);
+      // 0.38: lazy – Knoten-/Dreiecksnormalen erst beim ersten Zugriff (Wachstumsfront), dann im Cache
+      this.rn = new RobustNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, NORMAL_MODE === 'robust');
+      this.robustVN = this.rn.out; this.smooth = new Float32Array(mesh.faceNormals!);
     }
     this.robustMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
     this.sliver = this.findSlivers();
     this.anchorDist = Math.max(1.0, 1.2 * this.medianEdge());
     this.isotropic = this.checkIsotropic();
-    this.kappa = this.isotropic ? this.computeKappa() : new Float32Array(0);
+    this.kappa = new Float32Array(this.isotropic ? nt0 : 0); this.kRaw = new Float32Array(this.isotropic ? nt0 : 0); this.kRawReady = new Uint8Array(this.isotropic ? nt0 : 0);
+  }
+  rn: RobustNormals | null = null; sReady: Uint8Array; kReady: Uint8Array; kRaw: Float32Array; kRawReady: Uint8Array;
+  /** robuste Dreiecksnormale t (lazy): gibt das Normalen-Array zurück, Eintrag t ist danach gültig */
+  N(t: number): Float32Array {
+    if (this.sReady[t]) return this.smooth; this.sReady[t] = 1;
+    const f = this.mesh.indices, rn = this.rn!; let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 3; k++) { const v = f[3 * t + k], o = rn.get(v); x += o[3 * v]; y += o[3 * v + 1]; z += o[3 * v + 2]; }
+    const l = Math.hypot(x, y, z) || 1; const s = this.smooth; s[3 * t] = x / l; s[3 * t + 1] = y / l; s[3 * t + 2] = z / l; return s;
+  }
+  /** Normalen für das fit-geführte Wachsen (needle036: alte 1-Ring-Normalen außer Nadeln) */
+  NF(t: number): Float32Array { return NORMAL_MODE === 'needle036' ? this.smoothN : this.N(t); }
+  /** alle Normalen vorab (Tests/Vergleich) */
+  allN(): Float32Array { for (let t = 0; t < this.sReady.length; t++) this.N(t); return this.smooth; }
+  private cenK(t: number, out: number[]) { const p = this.mesh.positions, f = this.mesh.indices; for (let k = 0; k < 3; k++) out[k] = (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3; }
+  private kr(t: number): number {
+    if (this.kRawReady[t]) return this.kRaw[t]; this.kRawReady[t] = 1;
+    const ct = [0, 0, 0], cu = [0, 0, 0]; this.cenK(t, ct); const fn = this.N(t); let s = 0, n = 0;
+    for (const u of this.neighbors(t)) { this.cenK(u, cu); const d = Math.hypot(cu[0] - ct[0], cu[1] - ct[1], cu[2] - ct[2]); if (d < 1e-9) continue; this.N(u);
+      const dot = fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2]; s += Math.acos(Math.max(-1, Math.min(1, dot))) / d; n++; }
+    return (this.kRaw[t] = n ? s / n : 0);
+  }
+  /** lokale Krümmung t (lazy, 1-Ring-geglättet) */
+  K(t: number): number {
+    if (this.kReady[t]) return this.kappa[t]; this.kReady[t] = 1;
+    let s = this.kr(t), n = 1; for (const u of this.neighbors(t)) { s += this.kr(u); n++; } return (this.kappa[t] = s / n);
   }
   /** Gleichmäßiges Scan-/CT-Netz (gute Dreiecksform)? Nur dann gelten Krümmungs-/Ankerkriterium beim Wachsen;
    *  bei tessellierten CAD-Netzen (lange Splitter, sehr unterschiedliche Größen) wären sie bedeutungslos. */
@@ -86,24 +113,6 @@ export class MeshTopology {
   /** Lokale Krümmung je Dreieck [rad/mm] (Normalenwinkel zu Nachbarn / Abstand, über 1-Ring geglättet).
    *  Damit stoppt das Wachsen auch an tangentialen Verrundungen (Scan-/CT-Daten), wo der Winkel von Dreieck zu Dreieck klein ist. */
   kappa: Float32Array;
-  private computeKappa(): Float32Array {
-    const p = this.mesh.positions, f = this.mesh.indices, fn = this.smooth, nt = f.length / 3;
-    const c = new Float32Array(3 * nt);
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) c[3 * t + k] = (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3;
-    const raw = new Float32Array(nt);
-    for (let t = 0; t < nt; t++) {
-      let s = 0, n = 0;
-      for (const u of this.neighbors(t)) {
-        const d = Math.hypot(c[3 * u] - c[3 * t], c[3 * u + 1] - c[3 * t + 1], c[3 * u + 2] - c[3 * t + 2]); if (d < 1e-9) continue;
-        const dot = fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2];
-        s += Math.acos(Math.max(-1, Math.min(1, dot))) / d; n++;
-      }
-      raw[t] = n ? s / n : 0;
-    }
-    const out = new Float32Array(nt);
-    for (let t = 0; t < nt; t++) { let s = raw[t], n = 1; for (const u of this.neighbors(t)) { s += raw[u]; n++; } out[t] = s / n; }
-    return out;
-  }
   /** Bezugsabstand für die Krümmungsprüfung beim Wachsen (≈ 1 mm bzw. 1,2 × mittlere Kantenlänge). */
   anchorDist: number;
   medianEdge(): number {
@@ -153,7 +162,7 @@ export class MeshTopology {
   /** Glatte Dreiecksnormalen (Knotennormalen gemittelt) – einmalig berechnet. */
   private _sn: Float32Array | null = null;
   get smoothN(): Float32Array {
-    if (this._sn) return this._sn; if (NORMAL_MODE !== 'needle036') return (this._sn = this.smooth); const o = this.smoothNormals();
+    if (this._sn) return this._sn; if (NORMAL_MODE !== 'needle036') return (this._sn = this.allN()); const o = this.smoothNormals();
     for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) for (let k = 0; k < 3; k++) o[3 * t + k] = this.smooth[3 * t + k];
     return (this._sn = o); }
   /** alte 1-Ring-Glättung (nur Vergleich) */
@@ -230,9 +239,9 @@ export class MeshTopology {
   }
   /** RMS der besten Regelgeometrie (autoFit) an eine Dreiecksmenge, null wenn nicht bestimmbar. */
   regionRms(tris: ArrayLike<number>, lim = 0, planeOnly = false): number | null {
-    const f = this.mesh.indices, p = this.mesh.positions, sn = this.smoothN; const seen = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = [];
+    const f = this.mesh.indices, p = this.mesh.positions, sn0 = 0; void sn0; const seen = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = [];
     const step = Math.max(1, Math.floor(tris.length / 400));
-    for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seen.has(v)) continue; seen.add(v); P.push([p[3 * v], p[3 * v + 1], p[3 * v + 2]]); N.push([sn[3 * t], sn[3 * t + 1], sn[3 * t + 2]]); } }
+    for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seen.has(v)) continue; seen.add(v); P.push([p[3 * v], p[3 * v + 1], p[3 * v + 2]]); N.push([this.NF(t)[3 * t], this.NF(t)[3 * t + 1], this.NF(t)[3 * t + 2]]); } }
     if (P.length < 6) return 0;
     try { const pl = fitType('Ebene', P, N); if (pl.rms < lim) return pl.rms;
       // prismatisch (Zylinder, Langloch, beliebige Wand): alle Normalen ⟂ einer Achse
@@ -243,11 +252,12 @@ export class MeshTopology {
       const r = autoFit(P, N); const c = [r.best, ...r.candidates].filter((x) => x && x.type !== 'Freiformfläche' && isFinite(x.rms)).map((x) => x.rms); return c.length ? Math.min(...c) : null; } catch { return null; }
   }
   growFit(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
-    const m = this.mesh, f = m.indices, p = m.positions, nt = f.length / 3, fa = m.faceAreas!, sn = this.smoothN, fn = m.faceNormals!;
+    const m = this.mesh, f = m.indices, p = m.positions, nt = f.length / 3, fa = m.faceAreas!, fn = m.faceNormals!;
     const cosA = Math.cos((Math.max(1, o.maxAngleDeg) * Math.PI) / 180);
     const r2 = o.radius > 0 ? o.radius * o.radius : Infinity;
     const vpos = (v: number): Vec3 => [p[3 * v], p[3 * v + 1], p[3 * v + 2]];
     const inRad = (t: number) => { if (r2 === Infinity) return true; const a = 3 * f[3 * t]; return (p[a] - seedPoint[0]) ** 2 + (p[a + 1] - seedPoint[1]) ** 2 + (p[a + 2] - seedPoint[2]) ** 2 <= r2; };
+    const dotS = (a: number, b: number) => { this.NF(a); const N = this.NF(b); return N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2]; };
     const dotN = (N: Float32Array, a: number, b: number) => N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2];
     // 1) lokale Kantenlänge
     const near: number[] = []; { const seen = new Set([seedTri]), q = [seedTri]; while (q.length && near.length < 150) { const t = q.shift()!; near.push(t); for (const u of this.neighbors(t)) if (!seen.has(u)) { seen.add(u); q.push(u); } } }
@@ -256,9 +266,9 @@ export class MeshTopology {
     // 2) Saat-Fleck: glatte Nachbarn (Winkel zur Saat < 25°) im Radius 8h um den Klickpunkt
     const R0 = o.seedR && o.seedR > 0 ? o.seedR : 6 * h, cos0 = Math.cos((15 * Math.PI) / 180); const seed: number[] = []; const sMark = new Uint8Array(nt);
     { const q = [seedTri]; sMark[seedTri] = 1; while (q.length) { const t = q.shift()!; seed.push(t); for (const u of this.neighbors(t)) { if (sMark[u]) continue; const c = this.cen(u);
-      if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R0 * R0) continue; if (dotN(sn, seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
+      if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R0 * R0) continue; if (dotS(seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
     const ptsOf = (tris: ArrayLike<number>, max = 3000) => { const seenV = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = []; const step = Math.max(1, Math.floor(tris.length / max));
-      for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seenV.has(v)) continue; seenV.add(v); P.push(vpos(v)); } N.push([sn[3 * t], sn[3 * t + 1], sn[3 * t + 2]]); }
+      for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seenV.has(v)) continue; seenV.add(v); P.push(vpos(v)); } N.push([this.NF(t)[3 * t], this.NF(t)[3 * t + 1], this.NF(t)[3 * t + 2]]); }
       // Normalen je Punkt: Dreiecksnormale genügt für Achs-/Typbestimmung (Länge kann von P abweichen)
       return { P, N }; };
     const fitOf = (tris: ArrayLike<number>, type: GeomType | 'auto'): FitResult | null => {
@@ -284,7 +294,7 @@ export class MeshTopology {
     if (model && (model.type === 'Zylinder' || model.type === 'Kugel') && (model.radius ?? 0) > 400 * R0) model = fitOf(seed, 'Ebene');
     const resid = (mdl: FitResult, tris: ArrayLike<number>) => { const { P } = ptsOf(tris, 1500); const a = P.map((q) => Math.abs(modelDist(mdl, q))).sort((x, y) => x - y); return 1.4826 * (a[a.length >> 1] ?? 0); };
     const angOf = (mdl: FitResult, tris: ArrayLike<number>) => { const a: number[] = []; for (let i = 0; i < tris.length; i += Math.max(1, Math.floor(tris.length / 800))) { const t = tris[i]; const c = this.cen(t); const mn = modelNormal(mdl, c);
-      a.push(Math.acos(Math.min(1, Math.abs(mn[0] * sn[3 * t] + mn[1] * sn[3 * t + 1] + mn[2] * sn[3 * t + 2])))); } a.sort((x, y) => x - y); return a[Math.floor(a.length * 0.9)] ?? 0; };
+      a.push(Math.acos(Math.min(1, Math.abs(mn[0] * this.NF(t)[3 * t] + mn[1] * this.NF(t)[3 * t + 1] + mn[2] * this.NF(t)[3 * t + 2])))); } a.sort((x, y) => x - y); return a[Math.floor(a.length * 0.9)] ?? 0; };
     let pax: Vec3 | null = o.prismAxis ?? null;
     if (prism && !pax) { const N = ptsOf(seed).N; const a = axisFromNormals(N); // ebener Saat-Fleck: Achse unbestimmt -> Ebene wachsen
       let spread = 0; for (const q of N) spread = Math.max(spread, 1 - Math.abs(q[0] * N[0][0] + q[1] * N[0][1] + q[2] * N[0][2]));
@@ -294,12 +304,12 @@ export class MeshTopology {
     if (prism) angTol = (12 * Math.PI) / 180;
     const info: GrowInfo = { model: prism ? 'Prisma' : model ? model.type : 'keins', h, sigma, tol, angDeg: (angTol * 180) / Math.PI, seedTris: seed.length, refits: 0, capped: false };
     const accept = (u: number): boolean => {
-      if (prism && pax) { const d = Math.abs(sn[3 * u] * pax[0] + sn[3 * u + 1] * pax[1] + sn[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
+      if (prism && pax) { const d = Math.abs(this.NF(u)[3 * u] * pax[0] + this.NF(u)[3 * u + 1] * pax[1] + this.NF(u)[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
       if (!model) return true;
       // 0.36: Abstand zum mitwachsenden Fit < 3σ am Schwerpunkt (Rauschen /√3), jeder Knoten < 1,5 × Toleranz
       for (let k = 0; k < 3; k++) if (Math.abs(modelDist(model, vpos(f[3 * u + k]))) > 1.5 * tol) return false;
       if (Math.abs(modelDist(model, this.cen(u))) > tol) return false;
-      const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * sn[3 * u] + mn[1] * sn[3 * u + 1] + mn[2] * sn[3 * u + 2]) > Math.cos(angTol);
+      const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * this.NF(u)[3 * u] + mn[1] * this.NF(u)[3 * u + 1] + mn[2] * this.NF(u)[3 * u + 2]) > Math.cos(angTol);
     };
     const inR = new Uint8Array(nt); const out: number[] = [seedTri]; inR[seedTri] = 1; let area = fa[seedTri];
     const cap = 0.6 * this.totalArea; let next = Math.max(40, seed.length * 1.6);
@@ -309,7 +319,7 @@ export class MeshTopology {
       const t = out[head++];
       for (const u of this.neighbors(t)) {
         if (inR[u]) continue;
-        if (dotN(fn, t, u) < cosA && dotN(sn, t, u) < cosA) continue;
+        if (dotN(fn, t, u) < cosA && dotS(t, u) < cosA) continue;
         if (!inRad(u)) continue;
         if (!accept(u)) { inR[u] = 2; rej.push(u); continue; }
         inR[u] = 1; out.push(u); area += fa[u];
@@ -336,16 +346,16 @@ export class MeshTopology {
     const cosA = Math.cos((o.maxAngleDeg * Math.PI) / 180);
     const cosC = o.maxCurvatureDeg ? Math.cos((o.maxCurvatureDeg * Math.PI) / 180) : -2;
     const r2 = o.radius > 0 ? o.radius * o.radius : Infinity;
-    const sn = [fn[3 * seedTri], fn[3 * seedTri + 1], fn[3 * seedTri + 2]];
+    const sn = [this.N(seedTri)[3 * seedTri], this.N(seedTri)[3 * seedTri + 1], this.N(seedTri)[3 * seedTri + 2]];
     // Bezugskrümmung: Median der Krümmung in der Saat-Umgebung (kleines Vorwachsen nur mit Winkelkriterium)
     const kap = this.kappa, iso = this.isotropic && !o.noCurv; let kLo = -1, kHi = Infinity;
     if (iso) {
       const seen = new Set<number>([seedTri]), q = [seedTri], ks: number[] = [];
       while (q.length && ks.length < 80) {
-        const t = q.shift()!; ks.push(kap[t]);
+        const t = q.shift()!; ks.push(this.K(t));
         for (const u of this.neighbors(t)) {
           if (seen.has(u)) continue;
-          if (fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2] < cosA) continue;
+          if (this.N(t)[3 * t] * this.N(u)[3 * u] + this.N(t)[3 * t + 1] * this.N(u)[3 * u + 1] + this.N(t)[3 * t + 2] * this.N(u)[3 * u + 2] < cosA) continue;
           seen.add(u); q.push(u);
         }
       }
@@ -364,18 +374,18 @@ export class MeshTopology {
       const t = stack.pop()!;
       for (const u of this.neighbors(t)) {
         if (inR[u]) continue;
-        const c = fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2];
+        const c = this.N(t)[3 * t] * this.N(u)[3 * u] + this.N(t)[3 * t + 1] * this.N(u)[3 * u + 1] + this.N(t)[3 * t + 2] * this.N(u)[3 * u + 2];
         if (c < cosA) continue;
-        if (cosC > -2 && sn[0] * fn[3 * u] + sn[1] * fn[3 * u + 1] + sn[2] * fn[3 * u + 2] < cosC) continue;
+        if (cosC > -2 && sn[0] * this.N(u)[3 * u] + sn[1] * this.N(u)[3 * u + 1] + sn[2] * this.N(u)[3 * u + 2] < cosC) continue;
         if (r2 < Infinity) {
           const a = 3 * f[3 * u];
           const dx = p[a] - seedPoint[0], dy = p[a + 1] - seedPoint[1], dz = p[a + 2] - seedPoint[2];
           if (dx * dx + dy * dy + dz * dz > r2) continue;
         }
-        if (iso && (kap[u] > kHi || kap[u] < kLo)) continue;
+        if (iso && (this.K(u) > kHi || this.K(u) < kLo)) continue;
         let an = anchor[t], an2 = anchor2[t];           // an: ≥ D zurück, an2: jüngerer Anker
         if (dist2(u, an2) > D2) { an = an2; an2 = t; }
-        if (iso && fn[3 * an] * fn[3 * u] + fn[3 * an + 1] * fn[3 * u + 1] + fn[3 * an + 2] * fn[3 * u + 2] < cosK) continue;
+        if (iso && this.N(an)[3 * an] * this.N(u)[3 * u] + this.N(an)[3 * an + 1] * this.N(u)[3 * u + 1] + this.N(an)[3 * an + 2] * this.N(u)[3 * u + 2] < cosK) continue;
         anchor[u] = an; anchor2[u] = an2;
         inR[u] = 1; if (++cnt > maxTris) return null;
         if (this.sliver[u] && !this.needle[u]) continue; // Splitter: aufnehmen, aber nicht weiterwachsen (0.36: mit robuster Normale schon)
@@ -418,20 +428,27 @@ export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
 function verticesOf(m: MeshData, mark: Uint8Array): Uint8Array { const f = m.indices, out = new Uint8Array(m.positions.length / 3); for (let t = 0; t < mark.length; t++) if (mark[t]) { out[f[3 * t]] = out[f[3 * t + 1]] = out[f[3 * t + 2]] = 1; } return out; }
 /** 0.36: robuste Knotennormalen (siehe MeshTopology.robustVN). Nachbarschaft über das Netz (nicht durch dünne Wände),
  *  Radius R = 1,3 × Median der anliegenden Kantenlängen; kleinster Eigenvektor der Kovarianz per inverser Potenziteration-Variante. */
-export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tris: Uint32Array }, k = ROBUST_K, minPts = ROBUST_MIN, only?: Uint8Array, weighted = true): Float32Array {
-  const p = m.positions, f = m.indices, vn = m.vertexNormals!, nv = p.length / 3, { offsets, tris } = vt;
-  const out = new Float32Array(3 * nv); const stamp = new Int32Array(nv).fill(-1); const q = new Int32Array(nv); const el: number[] = [];
-  const W = new Float64Array(4096);
-  for (let v = 0; v < nv; v++) {
-    const o0 = offsets[v], o1 = offsets[v + 1]; if (o1 === o0) continue;
-    if (only && !only[v]) { out[3 * v] = vn[3 * v]; out[3 * v + 1] = vn[3 * v + 1]; out[3 * v + 2] = vn[3 * v + 2]; continue; }
+/** 0.38: robuste Knotennormalen bei Bedarf (lazy, mit Cache) – gleiches Verfahren für alle Knoten. */
+export class RobustNormals {
+  readonly out: Float32Array; readonly done: Uint8Array; private stamp: Int32Array; private q: Int32Array; private W = new Float64Array(4096); private el: number[] = []; private tag = 0;
+  computed = 0; ms = 0;
+  constructor(private m: MeshData, private vt: { offsets: Uint32Array; tris: Uint32Array }, private k = ROBUST_K, private minPts = ROBUST_MIN, private weighted = true) {
+    const nv = m.positions.length / 3; this.out = new Float32Array(3 * nv); this.done = new Uint8Array(nv); this.stamp = new Int32Array(nv).fill(-1); this.q = new Int32Array(nv);
+  }
+  /** Knotennormale v (berechnet beim ersten Zugriff) */
+  get(v: number): Float32Array { if (!this.done[v]) { this.done[v] = 1; this.computed++; this.compute(v); } return this.out; }
+  private compute(v: number): void {
+    const m = this.m, p = m.positions, f = m.indices, vn = m.vertexNormals!, { offsets, tris } = this.vt, k = this.k, minPts = this.minPts, weighted = this.weighted;
+    const out = this.out, stamp = this.stamp, q = this.q, W = this.W, el = this.el;
+    out[3 * v] = vn[3 * v]; out[3 * v + 1] = vn[3 * v + 1]; out[3 * v + 2] = vn[3 * v + 2];
+    const o0 = offsets[v], o1 = offsets[v + 1]; if (o1 === o0) return;
     el.length = 0;
     for (let j = o0; j < o1; j++) { const t = tris[j]; for (let e = 0; e < 3; e++) { const a = f[3 * t + e], b = f[3 * t + (e + 1) % 3]; el.push(Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2])); } }
     el.sort((x, y) => x - y); let R = k * (el[el.length >> 1] || 1);
     const px = p[3 * v], py = p[3 * v + 1], pz = p[3 * v + 2];
     let nb = 0; let n = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
     for (let tries = 0; tries < 4; tries++) {
-      const R2 = R * R, tag = v * 4 + tries; let head = 0, tail = 0; q[tail++] = v; stamp[v] = tag; void head;
+      const R2 = R * R, tag = ++this.tag; let head = 0, tail = 0; q[tail++] = v; stamp[v] = tag; void head;
       n = 0; sx = sy = sz = xx = xy = xz = yy = yz = zz = 0;
       while (head < tail) { const w = q[head++]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz;
         n++; sx += dx; sy += dy; sz += dz; xx += dx * dx; xy += dx * dy; xz += dx * dz; yy += dy * dy; yz += dy * dz; zz += dz * dz;
@@ -476,7 +493,11 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
     }
     out[3 * v] = nx; out[3 * v + 1] = ny; out[3 * v + 2] = nz;
   }
-  return out;
+}
+export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tris: Uint32Array }, k = ROBUST_K, minPts = ROBUST_MIN, only?: Uint8Array, weighted = true): Float32Array {
+  const R = new RobustNormals(m, vt, k, minPts, weighted), vn = m.vertexNormals!, nv = m.positions.length / 3;
+  for (let v = 0; v < nv; v++) { if (only && !only[v]) { R.out[3 * v] = vn[3 * v]; R.out[3 * v + 1] = vn[3 * v + 1]; R.out[3 * v + 2] = vn[3 * v + 2]; continue; } R.get(v); }
+  return R.out;
 }
 export function triFromVertex(m: MeshData, VN: Float32Array): Float32Array {
   const f = m.indices, fn = m.faceNormals!, nt = f.length / 3, out = new Float32Array(3 * nt);
