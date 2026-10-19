@@ -406,6 +406,7 @@ export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
  *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
+export let ROBUST_S = 0.1; export function setRobustS(x: number) { ROBUST_S = x; }
 export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
   const p = m.positions, f = m.indices, fa = m.faceAreas!, nt = f.length / 3, out = new Uint8Array(nt);
   const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
@@ -449,7 +450,7 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
       // (Knoten an einer Kante: Punkte zweier Flächen), startet die Gewichtung von der Ebene durch den Knoten mit seiner
       // Flächennormale – so gewinnt die Fläche, auf der der Knoten liegt, statt einer Mittelung über die Kante.
       if (weighted && nb <= W.length) {
-        const sc = 0.1 * R, s2 = sc * sc; let cxw = cx, cyw = cy, czw = cz;
+        const sc = ROBUST_S * R, s2 = sc * sc; let cxw = cx, cyw = cy, czw = cz;
         let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
         if (Math.sqrt(rr / nb) > 0.5 * sc) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
         for (let iter = 0; iter < 3; iter++) {

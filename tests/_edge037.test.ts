@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { it } from 'vitest';
 import { parseSTL } from '../src/core/io';
-import { MeshTopology, setNormalMode } from '../src/core/region';
+import { MeshTopology, setNormalMode, setRobustS } from '../src/core/region';
 type V3 = [number, number, number];
 const R = (x: number, y: number, cx: number, cy: number) => Math.hypot(x - cx, y - cy);
 const topE = (x: number, y: number) => Math.min(x, 100 - x, y, 60 - y, Math.abs(R(x, y, 20, 20) - 6.04), Math.abs(R(x, y, 85, 10) - 3), Math.abs(R(x, y, 55.05, 30) - 8), Math.abs(R(x, y, 82, 38) - 10), Math.abs(R(x, y, 60, 8) - Math.sqrt(40)), Math.abs(R(x, y, 40, 10) - 4.167), Math.abs(R(x, y, 40, 10) - 7.833), Math.abs(Math.hypot(x - Math.min(30, Math.max(10, x)), y - 45) - 5));
@@ -19,8 +19,9 @@ const F: { name: string; seed: V3; n: V3; d: (p: V3) => number; e: (p: V3) => nu
 ];
 const BINS = [0, 0.25, 0.5, 1, 2, 1e9];
 const out: any = {};
-for (const file of ['public/samples/beispielteil.stl', '/tmp/beispielteil-old.stl']) for (const mode of ['needle036', 'plain', 'robust'] as const) it(`${file} ${mode}`, () => {
-  setNormalMode(mode); const b = readFileSync(file); const m = parseSTL(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), 'x');
+const FILES = (process.env.FILES ?? 'public/samples/beispielteil.stl,/tmp/beispielteil-old.stl').split(','), MODES = (process.env.MODES ?? 'needle036,plain,robust').split(',') as any[], SS = (process.env.SS ?? '0.1').split(',').map(Number);
+for (const file of FILES) for (const mode of MODES) for (const S of SS) it(`${file} ${mode} ${S}`, () => {
+  setNormalMode(mode); setRobustS(S); const b = readFileSync(file); const m = parseSTL(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), 'x');
   const t0 = performance.now(); const topo = new MeshTopology(m); const ms = performance.now() - t0; const p = m.positions, f = m.indices, fn = m.faceNormals!, nv = p.length / 3;
   const res: any = { ms: Math.round(ms) };
   for (const ft of F) {
@@ -31,5 +32,5 @@ for (const file of ['public/samples/beispielteil.stl', '/tmp/beispielteil-old.st
     // edge "stop distance": smallest e such that ≥ 50 % of the face points beyond it are selected (per 0.05 mm step)
     res[ft.name] = { sel: nsel, wrong, frac: got.map((g, i) => (tot[i] ? +(g / tot[i]).toFixed(3) : null)), tot, minE: +minE.toFixed(3), info: topo.lastGrow?.legacy ? 'kante' : topo.lastGrow?.model };
   }
-  out[`${file.includes('old') ? 'ALT-Nadelnetz' : 'neu'} ${mode}`] = res; writeFileSync('/workspace/research/edge037/edge.json', JSON.stringify(out, null, 1));
+  out[`${file.includes('old') ? 'ALT-Nadelnetz' : 'neu'} ${mode} s=${S}`] = res; writeFileSync(process.env.OUT ?? '/workspace/research/edge037/edge.json', JSON.stringify(out, null, 1));
 }, 300000);
