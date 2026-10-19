@@ -10,14 +10,15 @@ import { GrowOptions, MeshTopology, gather } from './region';
 const projOnPlane = (pl: FitResult, q: Vec3): Vec3 => sub(q, scale(pl.normal, dot(sub(q, pl.center), pl.normal)));
 
 /** Kreis/Langloch in einer gegebenen Ebene fitten (robust, 3σ-Ausreißer iterativ). */
-export function fitInPlane(type: 'Kreis' | 'Langloch', p: Vec3[], plane: FitResult): FitResult {
+/** robust = drop > 3σ outliers iteratively (selection intelligence); raw (robust = false) = every point counts (Create, 0.30) */
+export function fitInPlane(type: 'Kreis' | 'Langloch', p: Vec3[], plane: FitResult, robust = true): FitResult {
   const n = plane.normal;
   const run = (pp: Vec3[]): FitResult => {
     const f = type === 'Kreis' ? fitCircle3D(pp, n) : fitSlot(pp, n);
     return { ...f, center: projOnPlane(plane, f.center), normal: n };
   };
   let r = run(p), P = p;
-  for (let it = 0; it < 3; it++) {
+  for (let it = 0; robust && it < 3; it++) {
     const res = r.residuals!, abs = Array.from(res, Math.abs).sort((a, b) => a - b);
     const thr = Math.max(3 * 1.4826 * abs[abs.length >> 1], 1e-9);
     const keep = P.filter((_, i) => Math.abs(res[i]) <= thr);

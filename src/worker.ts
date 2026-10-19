@@ -7,7 +7,7 @@ import { MeshTopology, brushSelect, gather } from './core/region';
 import { FitCrit, applyCrit, critSupported, formByCrit } from './core/chebyshev';
 import { autoFit, fitType, FitResult, GeomType, modelNormal, normalFilter, NormalFilter, signedDistance } from './core/fit';
 import type { Vec3 } from './core/linalg';
-import { autoExtract, extractAtRim, extractLine, extractWithAuxPlane } from './core/aux';
+import { autoExtract, extractAtRim, extractLine, extractWithAuxPlane, fitInPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
@@ -119,6 +119,22 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
   return { indices: use, fit, candidates: [], filled, raised, contour, band };
 }
+/** Refit the final selection without outlier rejection (only if the robust fit had dropped points – otherwise identical). */
+function rawFinal(result: any) {
+  const f = result.fit as FitResult; if (!f || f.type === 'Freiformfläche' || f.type === 'Punkt' || (f as any).nurbs) return;
+  const ax = result.aux as { plane: FitResult; indices: Uint32Array } | undefined;
+  if (ax?.plane && (f.type === 'Kreis' || f.type === 'Langloch')) {
+    let changed = !!f.outliers;
+    if (ax.plane.outliers && ax.indices?.length) { // own aux plane: raw too (an assigned existing plane stays as it is)
+      const g = gather(mesh!, ax.indices); let pl = fitType('Ebene', g.p, g.n, 0); if (dot3(pl.normal, ax.plane.normal) < 0) pl = { ...pl, normal: [-pl.normal[0], -pl.normal[1], -pl.normal[2]] as Vec3 };
+      delete pl.residuals; pl.n = ax.indices.length; pl.outliers = 0; ax.plane = pl; changed = true; }
+    if (!changed) return;
+    const g = gather(mesh!, result.indices), r = fitInPlane(f.type, g.p, ax.plane, false); delete r.residuals; r.n = result.indices.length; r.outliers = 0; result.fit = r; return;
+  }
+  if (!f.outliers) return;
+  const g = gather(mesh!, result.indices); const r = fitType(f.type, g.p, g.n, 0); delete r.residuals; r.n = result.indices.length; r.outliers = 0; result.fit = { ...r, type: f.type };
+}
+const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 function doFit(idx: Uint32Array, type: GeomType | 'auto'): { fit: FitResult; candidates: { type: string; rms: number }[] } {
   const { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Too few points selected');
@@ -226,6 +242,10 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
     } else if (req.op === 'fit') {
       result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
     }
+    // Phase 1 step 3 (0.30): Create uses the selection as-is – the final fit of a new selection (Click & grow, Auto, aux plane,
+    // brush) is a RAW fit of all selected points; the robust fits above only steer detection/growing. Explicit filters
+    // (Parameters: outliers / normal angle) go through req.params (fitWithParams) and stay as chosen.
+    if (['grow', 'aux', 'fit'].includes(req.op) && !(req as any).params && result?.fit && result.indices?.length) rawFinal(result);
     // fit criterion (minimum zone / tangential circumscribed / inscribed) on the final points; form under every criterion
     const crit = (req as any).crit as FitCrit | undefined;
     if (crit && result?.fit && result?.indices?.length && ['fit', 'aux', 'auxLine', 'reex', 'grow'].includes(req.op)) {

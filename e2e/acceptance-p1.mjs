@@ -37,10 +37,10 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
       const h = A.hitAt(p, n); if (!h) return { err: 'no hit' };
       try { await A.previewByClick(h); } catch (e) { return { err: e.message }; } await w(300);
       const pv = S.preview; if (!pv) return { err: 'no preview' };
-      const stats = [...document.querySelectorAll('.cp-kv small')].map((e) => e.textContent);
+      const stats = [...document.querySelectorAll('.cp-kv')].map((e) => e.dataset.kv);
       const n0 = S.features.length; await A.commitPreview(); await w(300); const f = S.features[n0]; if (!f) return { err: 'not created' };
       const m = f.measured; return { type: m.type, center: m.center, normal: m.normal, diameter: m.diameter ?? (m.radius != null ? 2 * m.radius : undefined), radius: m.radius, minorRadius: m.minorRadius, length: m.length, width: m.width,
-        halfAngleDeg: m.halfAngle != null ? m.halfAngle * 180 / Math.PI : undefined, rms: m.rms, form: m.form, n: m.n, pts: f.indices?.length, aux: f.aux?.pointCount ?? 0, outliers: m.outliers ?? 0, nf: m.nfRemoved ?? 0, previewPts: pv.indices.length, stats }; }, { mode, p, n });
+        halfAngleDeg: m.halfAngle != null ? m.halfAngle * 180 / Math.PI : undefined, rms: m.rms, form: m.form, n: m.n, pts: f.indices?.length, aux: f.aux?.pointCount ?? 0, auxOut: f.aux?.plane?.outliers ?? 0, outliers: m.outliers ?? 0, nf: m.nfRemoved ?? 0, previewPts: pv.indices.length, stats }; }, { mode, p, n });
     const errs = [];
     if (r.err) errs.push(r.err);
     else {
@@ -51,8 +51,11 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
       if (ex.c3 && !(Math.hypot(r.center[0] - ex.c3[0], r.center[1] - ex.c3[1], r.center[2] - ex.c3[2]) <= 0.01)) errs.push(`centre ${r.center.map((x) => x.toFixed(4))}`);
       if (ex.onPlane != null && !(Math.abs(r.center[2] - ex.onPlane) <= 0.01)) errs.push(`plane z ${r.center[2]}`);
       if (ex.minPts && r.n < ex.minPts) errs.push(`only ${r.n} points`);
-      // step 3 (create = raw fit of the selection, no filters) – enforced once released: P1_RAW=1
-      if (process.env.P1_RAW && (r.outliers || r.nf)) errs.push(`filters removed points (${r.outliers} outliers, ${r.nf} normal filter)`);
+      // step 3 (0.30): Create = raw fit of the selection – no point removed by filters
+      if (!process.env.P1_NORAW && (r.outliers || r.nf)) errs.push(`filters removed points (${r.outliers} outliers, ${r.nf} normal filter)`);
+      if (!process.env.P1_NORAW && r.auxOut) errs.push(`aux plane: ${r.auxOut} outliers removed`);
+      // step 2 (0.30): feedback = exactly point count, form deviation, std. dev.
+      if (r.stats.join() !== 'pts,form,std') errs.push(`feedback rows ${r.stats.join()}`);
       if (ex.aux && r.aux < 100) errs.push(`aux plane ${r.aux} points`);
       // noise model: std. dev. ≈ σ (tessellation adds a little), form within a few σ … ~10 σ (Gauss range of n points)
       if (!(r.rms >= 0.6 * SIGMA && r.rms <= 1.6 * SIGMA)) errs.push(`std dev ${r.rms.toFixed(4)} not ≈ σ ${SIGMA}`);

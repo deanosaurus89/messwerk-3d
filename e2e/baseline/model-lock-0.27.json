@@ -1,0 +1,2570 @@
+{
+ "desktop": {
+  "activeCs": 1,
+  "controls": [
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 1,
+     "kind": "Durchmesser",
+     "nominal": 12,
+     "tolLo": -0.05,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": 0.07780345781,
+     "measured": 12.07780346,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      1
+     ],
+     "id": 2,
+     "kind": "Form",
+     "nominal": null,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.04362252306,
+     "measured": 0.04362252306,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 3,
+     "kind": "Form",
+     "nominal": null,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.04344768821,
+     "measured": 0.04344768821,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      1
+     ],
+     "id": 4,
+     "kind": "Std.-Abw.",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.007287628118,
+     "measured": 0.007287628118,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "basic": [
+      null,
+      null,
+      null
+     ],
+     "datumIds": [
+      1,
+      2,
+      3
+     ],
+     "featureIds": [
+      4
+     ],
+     "id": 5,
+     "kind": "Position",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.1
+    },
+    "res": {
+     "detail": "TED suggested from the actual part, not confirmed: [X] 20.024, [Y] 20.023 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.01008630244,
+     "flag": "Nominal unconfirmed",
+     "measured": 0.01008630244,
+     "members": [
+      {
+       "bonus": 0,
+       "dia": 0.01008630244,
+       "dirW": [
+        8.095887853e-7,
+        -0.00003860535238,
+        0.9999999993
+       ],
+       "fid": 4,
+       "margin": 0.08991369756,
+       "name": "Cylinder 1",
+       "nomW": [
+        20.00038518,
+        19.99984233,
+        9.999900426
+       ],
+       "tol": 0.1
+      }
+     ],
+     "status": "IO",
+     "worst": 0
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      4
+     ],
+     "id": 6,
+     "kind": "Rechtwinkligkeit",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "detail": "derived median line (16 sections) in floating Ø zone",
+     "deviation": 0.006005182458,
+     "measured": 0.006005182458,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      1
+     ],
+     "id": 7,
+     "kind": "Parallelität",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": null,
+     "flag": "feature is its own datum",
+     "measured": null,
+     "status": "—"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      2
+     ],
+     "id": 8,
+     "kind": "Rechtwinkligkeit",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "detail": "Zone ⟂ -0.000 -1.000 -0.000",
+     "deviation": 0.05716693768,
+     "measured": 0.05716693768,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      5
+     ],
+     "id": 9,
+     "kind": "Durchmesser",
+     "nominal": 16,
+     "tolLo": -0.05,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": -0.002612833603,
+     "measured": 15.99738717,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "basic": [
+      null,
+      null,
+      null
+     ],
+     "datumIds": [
+      1,
+      2,
+      3
+     ],
+     "featureIds": [
+      5
+     ],
+     "id": 10,
+     "kind": "Position",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.2
+    },
+    "res": {
+     "detail": "TED suggested from the actual part, not confirmed: [X] 55.073, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (8 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.002279060198,
+     "flag": "Nominal unconfirmed",
+     "measured": 0.002279060198,
+     "members": [
+      {
+       "bonus": 0,
+       "dia": 0.002279060198,
+       "dirW": [
+        8.095887853e-7,
+        -0.00003860535238,
+        0.9999999993
+       ],
+       "fid": 5,
+       "margin": 0.1977209398,
+       "name": "Cylinder 2",
+       "nomW": [
+        55.04951337,
+        29.99982079,
+        25.99996082
+       ],
+       "tol": 0.2
+      }
+     ],
+     "status": "IO",
+     "worst": 0
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      6
+     ],
+     "id": 11,
+     "kind": "Durchmesser",
+     "nominal": 12.08,
+     "tolLo": -0.02,
+     "tolUp": 0.02
+    },
+    "res": {
+     "deviation": -0.002210092636,
+     "measured": 12.07778991,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      7
+     ],
+     "id": 12,
+     "kind": "Länge",
+     "nominal": 30,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -0.002254949434,
+     "measured": 29.99774505,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      7
+     ],
+     "id": 13,
+     "kind": "Breite",
+     "nominal": 10,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -0.001286545009,
+     "measured": 9.998713455,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      8
+     ],
+     "id": 14,
+     "kind": "Kegelwinkel",
+     "nominal": null,
+     "tolLo": -0.5,
+     "tolUp": 0.5
+    },
+    "res": {
+     "deviation": null,
+     "measured": 61.94444334,
+     "status": "—"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      9
+     ],
+     "id": 15,
+     "kind": "Radius",
+     "nominal": 7,
+     "tolLo": -0.02,
+     "tolUp": 0.02
+    },
+    "res": {
+     "deviation": -0.001811855698,
+     "measured": 6.998188144,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      10
+     ],
+     "id": 16,
+     "kind": "Rohrdurchmesser",
+     "nominal": 4,
+     "tolLo": -0.05,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": -0.00055414138,
+     "measured": 3.999445859,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 17,
+     "kind": "X",
+     "nominal": 20,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -39.99978471,
+     "measured": -19.99978471,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      9
+     ],
+     "id": 18,
+     "kind": "Z",
+     "nominal": 17,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -19.99801759,
+     "measured": -2.998017589,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      4
+     ],
+     "featureIds": [
+      5
+     ],
+     "id": 19,
+     "kind": "Koaxialität",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": null,
+     "flag": "Bezug entfernt",
+     "measured": null,
+     "status": "—"
+    }
+   }
+  ],
+  "csys": [
+   {
+    "c": {
+     "id": 1,
+     "name": "Coordinate System 1",
+     "origin": {
+      "X": {
+       "auto": "secondary plane fixes the X translation",
+       "fid": 2,
+       "off": 0
+      },
+      "Y": {
+       "auto": "tertiary plane fixes the Y translation",
+       "fid": 3,
+       "off": 0
+      },
+      "Z": {
+       "auto": "primary plane fixes the Z translation",
+       "fid": 1,
+       "off": 0
+      }
+     },
+     "primary": {
+      "axis": "Z",
+      "fid": 1,
+      "flip": false,
+      "inv": false
+     },
+     "secondary": {
+      "axis": "X",
+      "fid": 2,
+      "flip": false,
+      "inv": false
+     },
+     "tertiary": {
+      "axis": "Y",
+      "fid": 3,
+      "flip": false
+     },
+     "visible": true
+    },
+    "res": {
+     "dof": 6,
+     "frame": {
+      "R": [
+       [
+        -0.000003724609206,
+        -1,
+        0.000005728620091
+       ],
+       [
+        1,
+        -0.000003724607518,
+        2.946077143e-7
+       ],
+       [
+        -2.945863774e-7,
+        0.000005728621188,
+        1
+       ]
+      ],
+      "o": [
+       -0.00003019750225,
+       0.0003349973398,
+       20.00018936
+      ]
+     },
+     "warnings": []
+    }
+   }
+  ],
+  "features": [
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "A",
+    "fit": {
+     "center": [
+      51.60329455,
+      26.98411349,
+      20.00004998
+     ],
+     "form": 0.04362252306,
+     "maxNeg": -0.02183199709,
+     "maxPos": 0.02179052597,
+     "n": 14702,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 67,
+     "rms": 0.007287628118,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 1,
+    "idx": [
+     14702,
+     1211470865
+    ],
+    "method": "Klick",
+    "name": "Plane 1",
+    "pointCount": 14702,
+    "reex": null,
+    "refs": null,
+    "src": [
+     14702,
+     1211470865
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "B",
+    "fit": {
+     "center": [
+      50.02566398,
+      0.00009143227104,
+      10.00844497
+     ],
+     "form": 0.04657811736,
+     "maxNeg": -0.02262268373,
+     "maxPos": 0.02395543364,
+     "n": 2081,
+     "normal": [
+      -0.000003724594529,
+      -0.999999999,
+      -0.00004407616456
+     ],
+     "outliers": 6,
+     "rms": 0.00791015702,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 2,
+    "idx": [
+     2081,
+     2801340481
+    ],
+    "method": "Klick",
+    "name": "Plane 2",
+    "pointCount": 2081,
+    "reex": null,
+    "refs": null,
+    "src": [
+     2081,
+     2801340481
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "C",
+    "fit": {
+     "center": [
+      0.00008452321212,
+      30.00945259,
+      9.991865569
+     ],
+     "form": 0.0470720123,
+     "maxNeg": -0.02373446809,
+     "maxPos": 0.0233375442,
+     "n": 1505,
+     "normal": [
+      -0.9999999995,
+      -0.000004921042333,
+      -0.00003020874192
+     ],
+     "outliers": 4,
+     "rms": 0.007910541679,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 3,
+    "idx": [
+     1505,
+     1875792699
+    ],
+    "method": "Klick",
+    "name": "Plane 3",
+    "pointCount": 1505,
+    "reex": null,
+    "refs": null,
+    "src": [
+     1505,
+     1875792699
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      20.0000756,
+      19.99998792,
+      9.999900432
+     ],
+     "diameter": 12.07780346,
+     "form": 0.04344768821,
+     "length": 17.54996252,
+     "maxNeg": -0.02177756814,
+     "maxPos": 0.02167012008,
+     "n": 6183,
+     "normal": [
+      0.00006743372898,
+      0.000008842568316,
+      0.9999999977
+     ],
+     "outliers": 18,
+     "radius": 6.038901729,
+     "rms": 0.007277111062,
+     "type": "Zylinder"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 4,
+    "idx": [
+     6183,
+     3948711625
+    ],
+    "method": "Klick",
+    "name": "Cylinder 1",
+    "pointCount": 6183,
+    "reex": null,
+    "refs": null,
+    "src": [
+     6183,
+     3948711625
+    ],
+    "type": "Zylinder"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      55.04998968,
+      29.99968386,
+      25.99996082
+     ],
+     "diameter": 15.99738717,
+     "form": 0.04565561388,
+     "length": 9.063699256,
+     "maxNeg": -0.02256093272,
+     "maxPos": 0.02309468117,
+     "n": 3132,
+     "normal": [
+      0.000008792571734,
+      0.00007224374624,
+      0.9999999974
+     ],
+     "outliers": 16,
+     "radius": 7.998693583,
+     "rms": 0.007625616842,
+     "type": "Zylinder"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 5,
+    "idx": [
+     3132,
+     2291993129
+    ],
+    "method": "Klick",
+    "name": "Cylinder 2",
+    "pointCount": 3132,
+    "reex": null,
+    "refs": null,
+    "src": [
+     3132,
+     2291993129
+    ],
+    "type": "Zylinder"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      20.0000897,
+      20.00006003,
+      20.00008068
+     ],
+     "diameter": 12.07778991,
+     "form": 0.04388560073,
+     "maxNeg": -0.02189945319,
+     "maxPos": 0.02198614754,
+     "n": 6183,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 16,
+     "radius": 6.038894954,
+     "rms": 0.007290636775,
+     "type": "Kreis"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 6,
+    "idx": [
+     6183,
+     3948711625
+    ],
+    "method": "Klick",
+    "name": "Circle 1",
+    "pointCount": 6183,
+    "reex": null,
+    "refs": null,
+    "src": [
+     6183,
+     3948711625
+    ],
+    "type": "Kreis"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      19.9998646,
+      44.9999595,
+      19.99993747
+     ],
+     "direction": [
+      0.9999999999,
+      -0.00001170686189,
+      2.946534416e-7
+     ],
+     "form": 0.04332426968,
+     "length": 29.99774505,
+     "maxNeg": -0.02152208071,
+     "maxPos": 0.02180218897,
+     "n": 5429,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 18,
+     "radius": 4.999356727,
+     "rms": 0.007347520437,
+     "type": "Langloch",
+     "width": 9.998713455
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 7,
+    "idx": [
+     5429,
+     1819982069
+    ],
+    "method": "Klick",
+    "name": "Slot 1",
+    "pointCount": 5429,
+    "reex": null,
+    "refs": null,
+    "src": [
+     5429,
+     1819982069
+    ],
+    "type": "Langloch"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "apex": [
+      82.00405381,
+      38.00173362,
+      36.66285728
+     ],
+     "center": [
+      82.0011359,
+      38.00088103,
+      25.61486219
+     ],
+     "diameter": 13.2620348,
+     "form": 0.04385917281,
+     "halfAngle": 0.5405672448,
+     "length": 8.770385834,
+     "maxNeg": -0.02222392027,
+     "maxPos": 0.02163525254,
+     "n": 705,
+     "normal": [
+      -0.0002641115857,
+      -0.00007717148305,
+      -0.9999999621
+     ],
+     "outliers": 2,
+     "radius": 6.631017402,
+     "rms": 0.007846444924,
+     "type": "Kegel"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 8,
+    "idx": [
+     705,
+     1422642835
+    ],
+    "method": "Klick",
+    "name": "Cone 1",
+    "pointCount": 705,
+    "reex": null,
+    "refs": null,
+    "src": [
+     705,
+     1422642835
+    ],
+    "type": "Kegel"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      60.00002725,
+      8.000383072,
+      17.00214362
+     ],
+     "diameter": 13.99637629,
+     "form": 0.04456876009,
+     "maxNeg": -0.02223306232,
+     "maxPos": 0.02233569776,
+     "n": 2442,
+     "normal": [
+      0.003827905228,
+      0.000421731286,
+      0.9999925846
+     ],
+     "outliers": 10,
+     "radius": 6.998188144,
+     "rms": 0.007665851144,
+     "type": "Kugel"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 9,
+    "idx": [
+     2442,
+     1252550727
+    ],
+    "method": "Klick",
+    "name": "Sphere 1",
+    "pointCount": 2442,
+    "reex": null,
+    "refs": null,
+    "src": [
+     2442,
+     1252550727
+    ],
+    "type": "Kugel"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      39.9998274,
+      10.00047663,
+      20.80041685
+     ],
+     "diameter": 12.00012287,
+     "form": 0.04677848805,
+     "length": 3.999445859,
+     "maxNeg": -0.02343766609,
+     "maxPos": 0.02334082195,
+     "minorRadius": 1.999722929,
+     "n": 10077,
+     "normal": [
+      0.00006109353958,
+      0.000008261525099,
+      0.9999999981
+     ],
+     "outliers": 27,
+     "radius": 6.000061436,
+     "rms": 0.00783168245,
+     "type": "Torus"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 10,
+    "idx": [
+     10077,
+     579553587
+    ],
+    "method": "Klick",
+    "name": "Torus 1",
+    "pointCount": 10077,
+    "reex": null,
+    "refs": null,
+    "src": [
+     10077,
+     579553587
+    ],
+    "type": "Torus"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      85.00021074,
+      10.0001437,
+      20.00015712
+     ],
+     "diameter": 5.998784955,
+     "form": 0.03727469836,
+     "maxNeg": -0.0184506482,
+     "maxPos": 0.01882405016,
+     "n": 1918,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 3,
+     "radius": 2.999392478,
+     "rms": 0.006299580109,
+     "type": "Kreis"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 11,
+    "idx": [
+     1918,
+     875788438
+    ],
+    "method": "Klick",
+    "name": "Circle 2",
+    "pointCount": 1918,
+    "reex": null,
+    "refs": null,
+    "src": [
+     1918,
+     875788438
+    ],
+    "type": "Kreis"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": {
+     "key": "pt-3planes",
+     "params": {},
+     "refs": [
+      1,
+      2,
+      3
+     ]
+    },
+    "datum": null,
+    "fit": {
+     "center": [
+      -0.00007013707162,
+      -0.0001626399239,
+      20.00018937
+     ],
+     "form": 0,
+     "maxNeg": 0,
+     "maxPos": 0,
+     "n": 1,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "rms": 0,
+     "type": "Punkt"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 12,
+    "idx": [
+     0,
+     0
+    ],
+    "method": "Konstruiert",
+    "name": "Point 1",
+    "pointCount": 0,
+    "reex": null,
+    "refs": [
+     1,
+     2,
+     3
+    ],
+    "src": [
+     0,
+     0
+    ],
+    "type": "Punkt"
+   }
+  ],
+  "labelOffsets": [
+   [
+    "f4",
+    [
+     5,
+     6
+    ]
+   ]
+  ],
+  "nextCtrl": 20,
+  "nextId": 13,
+  "reports": [],
+  "typeCount": {
+   "Ebene": 3,
+   "Kegel": 1,
+   "Kreis": 2,
+   "Kugel": 1,
+   "Langloch": 1,
+   "Punkt": 1,
+   "Torus": 1,
+   "Zylinder": 2
+  }
+ },
+ "iphone": {
+  "activeCs": 1,
+  "controls": [
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 1,
+     "kind": "Durchmesser",
+     "nominal": 12,
+     "tolLo": -0.05,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": 0.07780345781,
+     "measured": 12.07780346,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      1
+     ],
+     "id": 2,
+     "kind": "Form",
+     "nominal": null,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.04362252306,
+     "measured": 0.04362252306,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 3,
+     "kind": "Form",
+     "nominal": null,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.04344768821,
+     "measured": 0.04344768821,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      1
+     ],
+     "id": 4,
+     "kind": "Std.-Abw.",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": 0.007287628118,
+     "measured": 0.007287628118,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "basic": [
+      null,
+      null,
+      null
+     ],
+     "datumIds": [
+      1,
+      2,
+      3
+     ],
+     "featureIds": [
+      4
+     ],
+     "id": 5,
+     "kind": "Position",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.1
+    },
+    "res": {
+     "detail": "TED suggested from the actual part, not confirmed: [X] 20.024, [Y] 20.023 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.01008630244,
+     "flag": "Nominal unconfirmed",
+     "measured": 0.01008630244,
+     "members": [
+      {
+       "bonus": 0,
+       "dia": 0.01008630244,
+       "dirW": [
+        8.095887853e-7,
+        -0.00003860535238,
+        0.9999999993
+       ],
+       "fid": 4,
+       "margin": 0.08991369756,
+       "name": "Cylinder 1",
+       "nomW": [
+        20.00038518,
+        19.99984233,
+        9.999900426
+       ],
+       "tol": 0.1
+      }
+     ],
+     "status": "IO",
+     "worst": 0
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      4
+     ],
+     "id": 6,
+     "kind": "Rechtwinkligkeit",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "detail": "derived median line (16 sections) in floating Ø zone",
+     "deviation": 0.006005182458,
+     "measured": 0.006005182458,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      1
+     ],
+     "id": 7,
+     "kind": "Parallelität",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": null,
+     "flag": "feature is its own datum",
+     "measured": null,
+     "status": "—"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      1
+     ],
+     "featureIds": [
+      2
+     ],
+     "id": 8,
+     "kind": "Rechtwinkligkeit",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.05
+    },
+    "res": {
+     "detail": "Zone ⟂ -0.000 -1.000 -0.000",
+     "deviation": 0.05716693768,
+     "measured": 0.05716693768,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      5
+     ],
+     "id": 9,
+     "kind": "Durchmesser",
+     "nominal": 16,
+     "tolLo": -0.05,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": -0.002612833603,
+     "measured": 15.99738717,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "basic": [
+      null,
+      null,
+      null
+     ],
+     "datumIds": [
+      1,
+      2,
+      3
+     ],
+     "featureIds": [
+      5
+     ],
+     "id": 10,
+     "kind": "Position",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.2
+    },
+    "res": {
+     "detail": "TED suggested from the actual part, not confirmed: [X] 55.073, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (8 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.002279060198,
+     "flag": "Nominal unconfirmed",
+     "measured": 0.002279060198,
+     "members": [
+      {
+       "bonus": 0,
+       "dia": 0.002279060198,
+       "dirW": [
+        8.095887853e-7,
+        -0.00003860535238,
+        0.9999999993
+       ],
+       "fid": 5,
+       "margin": 0.1977209398,
+       "name": "Cylinder 2",
+       "nomW": [
+        55.04951337,
+        29.99982079,
+        25.99996082
+       ],
+       "tol": 0.2
+      }
+     ],
+     "status": "IO",
+     "worst": 0
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      6
+     ],
+     "id": 11,
+     "kind": "Durchmesser",
+     "nominal": 12.08,
+     "tolLo": -0.02,
+     "tolUp": 0.02
+    },
+    "res": {
+     "deviation": -0.002210092636,
+     "measured": 12.07778991,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      7
+     ],
+     "id": 12,
+     "kind": "Länge",
+     "nominal": 30,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -0.002254949434,
+     "measured": 29.99774505,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      7
+     ],
+     "id": 13,
+     "kind": "Breite",
+     "nominal": 10,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -0.001286545009,
+     "measured": 9.998713455,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      8
+     ],
+     "id": 14,
+     "kind": "Kegelwinkel",
+     "nominal": null,
+     "tolLo": -0.5,
+     "tolUp": 0.5
+    },
+    "res": {
+     "deviation": null,
+     "measured": 61.94444334,
+     "status": "—"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      9
+     ],
+     "id": 15,
+     "kind": "Radius",
+     "nominal": 7,
+     "tolLo": -0.02,
+     "tolUp": 0.02
+    },
+    "res": {
+     "deviation": -0.001811855698,
+     "measured": 6.998188144,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      10
+     ],
+     "id": 16,
+     "kind": "Rohrdurchmesser",
+     "nominal": 4,
+     "tolLo": -0.05,
+     "tolUp": 0.05
+    },
+    "res": {
+     "deviation": -0.00055414138,
+     "measured": 3.999445859,
+     "status": "IO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      4
+     ],
+     "id": 17,
+     "kind": "X",
+     "nominal": 20,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -39.99978471,
+     "measured": -19.99978471,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "featureIds": [
+      9
+     ],
+     "id": 18,
+     "kind": "Z",
+     "nominal": 17,
+     "tolLo": -0.1,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": -19.99801759,
+     "measured": -2.998017589,
+     "status": "NIO"
+    }
+   },
+   {
+    "c": {
+     "datumIds": [
+      4
+     ],
+     "featureIds": [
+      5
+     ],
+     "id": 19,
+     "kind": "Koaxialität",
+     "nominal": 0,
+     "tolLo": 0,
+     "tolUp": 0.1
+    },
+    "res": {
+     "deviation": null,
+     "flag": "Bezug entfernt",
+     "measured": null,
+     "status": "—"
+    }
+   }
+  ],
+  "csys": [
+   {
+    "c": {
+     "id": 1,
+     "name": "Coordinate System 1",
+     "origin": {
+      "X": {
+       "auto": "secondary plane fixes the X translation",
+       "fid": 2,
+       "off": 0
+      },
+      "Y": {
+       "auto": "tertiary plane fixes the Y translation",
+       "fid": 3,
+       "off": 0
+      },
+      "Z": {
+       "auto": "primary plane fixes the Z translation",
+       "fid": 1,
+       "off": 0
+      }
+     },
+     "primary": {
+      "axis": "Z",
+      "fid": 1,
+      "flip": false,
+      "inv": false
+     },
+     "secondary": {
+      "axis": "X",
+      "fid": 2,
+      "flip": false,
+      "inv": false
+     },
+     "tertiary": {
+      "axis": "Y",
+      "fid": 3,
+      "flip": false
+     },
+     "visible": true
+    },
+    "res": {
+     "dof": 6,
+     "frame": {
+      "R": [
+       [
+        -0.000003724609206,
+        -1,
+        0.000005728620091
+       ],
+       [
+        1,
+        -0.000003724607518,
+        2.946077143e-7
+       ],
+       [
+        -2.945863774e-7,
+        0.000005728621188,
+        1
+       ]
+      ],
+      "o": [
+       -0.00003019750225,
+       0.0003349973398,
+       20.00018936
+      ]
+     },
+     "warnings": []
+    }
+   }
+  ],
+  "features": [
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "A",
+    "fit": {
+     "center": [
+      51.60329455,
+      26.98411349,
+      20.00004998
+     ],
+     "form": 0.04362252306,
+     "maxNeg": -0.02183199709,
+     "maxPos": 0.02179052597,
+     "n": 14702,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 67,
+     "rms": 0.007287628118,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 1,
+    "idx": [
+     14702,
+     1211470865
+    ],
+    "method": "Klick",
+    "name": "Plane 1",
+    "pointCount": 14702,
+    "reex": null,
+    "refs": null,
+    "src": [
+     14702,
+     1211470865
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "B",
+    "fit": {
+     "center": [
+      50.02566398,
+      0.00009143227104,
+      10.00844497
+     ],
+     "form": 0.04657811736,
+     "maxNeg": -0.02262268373,
+     "maxPos": 0.02395543364,
+     "n": 2081,
+     "normal": [
+      -0.000003724594529,
+      -0.999999999,
+      -0.00004407616456
+     ],
+     "outliers": 6,
+     "rms": 0.00791015702,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 2,
+    "idx": [
+     2081,
+     2801340481
+    ],
+    "method": "Klick",
+    "name": "Plane 2",
+    "pointCount": 2081,
+    "reex": null,
+    "refs": null,
+    "src": [
+     2081,
+     2801340481
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": "C",
+    "fit": {
+     "center": [
+      0.00008452321212,
+      30.00945259,
+      9.991865569
+     ],
+     "form": 0.0470720123,
+     "maxNeg": -0.02373446809,
+     "maxPos": 0.0233375442,
+     "n": 1505,
+     "normal": [
+      -0.9999999995,
+      -0.000004921042333,
+      -0.00003020874192
+     ],
+     "outliers": 4,
+     "rms": 0.007910541679,
+     "type": "Ebene"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 3,
+    "idx": [
+     1505,
+     1875792699
+    ],
+    "method": "Klick",
+    "name": "Plane 3",
+    "pointCount": 1505,
+    "reex": null,
+    "refs": null,
+    "src": [
+     1505,
+     1875792699
+    ],
+    "type": "Ebene"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      20.0000756,
+      19.99998792,
+      9.999900432
+     ],
+     "diameter": 12.07780346,
+     "form": 0.04344768821,
+     "length": 17.54996252,
+     "maxNeg": -0.02177756814,
+     "maxPos": 0.02167012008,
+     "n": 6183,
+     "normal": [
+      0.00006743372898,
+      0.000008842568316,
+      0.9999999977
+     ],
+     "outliers": 18,
+     "radius": 6.038901729,
+     "rms": 0.007277111062,
+     "type": "Zylinder"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 4,
+    "idx": [
+     6183,
+     3948711625
+    ],
+    "method": "Klick",
+    "name": "Cylinder 1",
+    "pointCount": 6183,
+    "reex": null,
+    "refs": null,
+    "src": [
+     6183,
+     3948711625
+    ],
+    "type": "Zylinder"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      55.04998968,
+      29.99968386,
+      25.99996082
+     ],
+     "diameter": 15.99738717,
+     "form": 0.04565561388,
+     "length": 9.063699256,
+     "maxNeg": -0.02256093272,
+     "maxPos": 0.02309468117,
+     "n": 3132,
+     "normal": [
+      0.000008792571734,
+      0.00007224374624,
+      0.9999999974
+     ],
+     "outliers": 16,
+     "radius": 7.998693583,
+     "rms": 0.007625616842,
+     "type": "Zylinder"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 5,
+    "idx": [
+     3132,
+     2291993129
+    ],
+    "method": "Klick",
+    "name": "Cylinder 2",
+    "pointCount": 3132,
+    "reex": null,
+    "refs": null,
+    "src": [
+     3132,
+     2291993129
+    ],
+    "type": "Zylinder"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      20.0000897,
+      20.00006003,
+      20.00008068
+     ],
+     "diameter": 12.07778991,
+     "form": 0.04388560073,
+     "maxNeg": -0.02189945319,
+     "maxPos": 0.02198614754,
+     "n": 6183,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 16,
+     "radius": 6.038894954,
+     "rms": 0.007290636775,
+     "type": "Kreis"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 6,
+    "idx": [
+     6183,
+     3948711625
+    ],
+    "method": "Klick",
+    "name": "Circle 1",
+    "pointCount": 6183,
+    "reex": null,
+    "refs": null,
+    "src": [
+     6183,
+     3948711625
+    ],
+    "type": "Kreis"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      19.9998646,
+      44.9999595,
+      19.99993747
+     ],
+     "direction": [
+      0.9999999999,
+      -0.00001170686189,
+      2.946534416e-7
+     ],
+     "form": 0.04332426968,
+     "length": 29.99774505,
+     "maxNeg": -0.02152208071,
+     "maxPos": 0.02180218897,
+     "n": 5429,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 18,
+     "radius": 4.999356727,
+     "rms": 0.007347520437,
+     "type": "Langloch",
+     "width": 9.998713455
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 7,
+    "idx": [
+     5429,
+     1819982069
+    ],
+    "method": "Klick",
+    "name": "Slot 1",
+    "pointCount": 5429,
+    "reex": null,
+    "refs": null,
+    "src": [
+     5429,
+     1819982069
+    ],
+    "type": "Langloch"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "apex": [
+      82.00405381,
+      38.00173362,
+      36.66285728
+     ],
+     "center": [
+      82.0011359,
+      38.00088103,
+      25.61486219
+     ],
+     "diameter": 13.2620348,
+     "form": 0.04385917281,
+     "halfAngle": 0.5405672448,
+     "length": 8.770385834,
+     "maxNeg": -0.02222392027,
+     "maxPos": 0.02163525254,
+     "n": 705,
+     "normal": [
+      -0.0002641115857,
+      -0.00007717148305,
+      -0.9999999621
+     ],
+     "outliers": 2,
+     "radius": 6.631017402,
+     "rms": 0.007846444924,
+     "type": "Kegel"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 8,
+    "idx": [
+     705,
+     1422642835
+    ],
+    "method": "Klick",
+    "name": "Cone 1",
+    "pointCount": 705,
+    "reex": null,
+    "refs": null,
+    "src": [
+     705,
+     1422642835
+    ],
+    "type": "Kegel"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      60.00002725,
+      8.000383072,
+      17.00214362
+     ],
+     "diameter": 13.99637629,
+     "form": 0.04456876009,
+     "maxNeg": -0.02223306232,
+     "maxPos": 0.02233569776,
+     "n": 2442,
+     "normal": [
+      0.003827905228,
+      0.000421731286,
+      0.9999925846
+     ],
+     "outliers": 10,
+     "radius": 6.998188144,
+     "rms": 0.007665851144,
+     "type": "Kugel"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 9,
+    "idx": [
+     2442,
+     1252550727
+    ],
+    "method": "Klick",
+    "name": "Sphere 1",
+    "pointCount": 2442,
+    "reex": null,
+    "refs": null,
+    "src": [
+     2442,
+     1252550727
+    ],
+    "type": "Kugel"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      39.9998274,
+      10.00047663,
+      20.80041685
+     ],
+     "diameter": 12.00012287,
+     "form": 0.04677848805,
+     "length": 3.999445859,
+     "maxNeg": -0.02343766609,
+     "maxPos": 0.02334082195,
+     "minorRadius": 1.999722929,
+     "n": 10077,
+     "normal": [
+      0.00006109353958,
+      0.000008261525099,
+      0.9999999981
+     ],
+     "outliers": 27,
+     "radius": 6.000061436,
+     "rms": 0.00783168245,
+     "type": "Torus"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 10,
+    "idx": [
+     10077,
+     579553587
+    ],
+    "method": "Klick",
+    "name": "Torus 1",
+    "pointCount": 10077,
+    "reex": null,
+    "refs": null,
+    "src": [
+     10077,
+     579553587
+    ],
+    "type": "Torus"
+   },
+   {
+    "aux": {
+     "plane": {
+      "center": [
+       51.60329455,
+       26.98411349,
+       20.00004998
+      ],
+      "form": 0.04362252306,
+      "maxNeg": -0.02183199709,
+      "maxPos": 0.02179052597,
+      "n": 14635,
+      "normal": [
+       -2.945863774e-7,
+       0.000005728621188,
+       1
+      ],
+      "outliers": 67,
+      "rms": 0.007287628118,
+      "type": "Ebene"
+     },
+     "pointCount": 14702,
+     "source": "automatic (adjacent face)"
+    },
+    "auxIdx": [
+     14702,
+     1211470865
+    ],
+    "cons": null,
+    "datum": null,
+    "fit": {
+     "center": [
+      85.00021074,
+      10.0001437,
+      20.00015712
+     ],
+     "diameter": 5.998784955,
+     "form": 0.03727469836,
+     "maxNeg": -0.0184506482,
+     "maxPos": 0.01882405016,
+     "n": 1918,
+     "normal": [
+      -2.945863774e-7,
+      0.000005728621188,
+      1
+     ],
+     "outliers": 3,
+     "radius": 2.999392478,
+     "rms": 0.006299580109,
+     "type": "Kreis"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 11,
+    "idx": [
+     1918,
+     875788438
+    ],
+    "method": "Klick",
+    "name": "Circle 2",
+    "pointCount": 1918,
+    "reex": null,
+    "refs": null,
+    "src": [
+     1918,
+     875788438
+    ],
+    "type": "Kreis"
+   },
+   {
+    "aux": null,
+    "auxIdx": null,
+    "cons": {
+     "key": "pt-3planes",
+     "params": {},
+     "refs": [
+      1,
+      2,
+      3
+     ]
+    },
+    "datum": null,
+    "fit": {
+     "center": [
+      -0.00007013707162,
+      -0.0001626399239,
+      20.00018937
+     ],
+     "form": 0,
+     "maxNeg": 0,
+     "maxPos": 0,
+     "n": 1,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "rms": 0,
+     "type": "Punkt"
+    },
+    "fp": {
+     "aux": "auto",
+     "k": 3,
+     "maxAngleDeg": 20,
+     "nf": {
+      "angleDeg": 30,
+      "maxPct": 10,
+      "on": false
+     },
+     "radius": 0,
+     "ring": {
+      "gap": 0.5,
+      "width": 3
+     }
+    },
+    "id": 12,
+    "idx": [
+     0,
+     0
+    ],
+    "method": "Konstruiert",
+    "name": "Point 1",
+    "pointCount": 0,
+    "reex": null,
+    "refs": [
+     1,
+     2,
+     3
+    ],
+    "src": [
+     0,
+     0
+    ],
+    "type": "Punkt"
+   }
+  ],
+  "labelOffsets": [
+   [
+    "f4",
+    [
+     5,
+     6
+    ]
+   ]
+  ],
+  "nextCtrl": 20,
+  "nextId": 13,
+  "reports": [],
+  "typeCount": {
+   "Ebene": 3,
+   "Kegel": 1,
+   "Kreis": 2,
+   "Kugel": 1,
+   "Langloch": 1,
+   "Punkt": 1,
+   "Torus": 1,
+   "Zylinder": 2
+  }
+ }
+}

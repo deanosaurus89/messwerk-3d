@@ -2,7 +2,7 @@
 // builds a representative project on the demo part (planes A|B|C as datums, hole, boss, circle/slot with aux plane, cone,
 // sphere, torus, Auto circle, a constructed point, 19 controls incl. Position A|B|C, a 3-2-1 coordinate system, label offsets)
 // and records a canonical snapshot of every result (fit values, point counts + index checksums, control results, CS
-// and label offsets). Checks: (1) snapshot == committed baseline (e2e/baseline/model-lock.json, recorded with 0.27),
+// and label offsets). Checks: (1) snapshot == committed baseline (e2e/baseline/model-lock.json; 0.27 for the refactoring, re-recorded with 0.30 = raw fit),
 // (2) save/load roundtrip gives the identical snapshot, (3) an OLD project file (written by 0.27,
 // e2e/baseline/model-lock-0.27.mw3d) loads to the identical snapshot (migration).
 // Aufruf: node e2e/model-lock.mjs [URL|-] [--baseline]
@@ -15,7 +15,8 @@ const args = process.argv.slice(2), BASELINE = args.includes('--baseline'), pos 
 let BASE = pos[0] && pos[0] !== '-' ? pos[0] : null, srv = null;
 if (!BASE) { BASE = 'http://localhost:8772/'; srv = spawn('npx', ['serve', '-l', '8772', 'dist'], { stdio: 'ignore' }); await sleep(2500); }
 const STL = fileURLToPath(new URL('../public/samples/beispielteil.stl', import.meta.url));
-const SNAP = fileURLToPath(new URL('./baseline/model-lock.json', import.meta.url));
+const SNAP = fileURLToPath(new URL('./baseline/model-lock.json', import.meta.url)); // current behaviour (re-recorded at 0.30: raw fit at Create)
+const SNAP27 = fileURLToPath(new URL('./baseline/model-lock-0.27.json', import.meta.url)); // what the 0.27 file must load to
 const OLD = fileURLToPath(new URL('./baseline/model-lock-0.27.mw3d', import.meta.url));
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
@@ -78,10 +79,10 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   }
   console.log(v.name, `${s0.features.length} features, ${s0.controls.length} controls, ${s0.csys.length} CS – roundtrip ${d01.length ? '✗' : 'identical'}`);
   if (v.name === 'desktop') {
-    if (BASELINE) { const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__app.saveProject())]); await dl.saveAs(OLD); console.log('old-format project written', OLD); }
-    else if (existsSync(OLD)) {
+    if (BASELINE && process.env.WRITE_OLD) { const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__app.saveProject())]); await dl.saveAs(OLD); console.log('old-format project written', OLD); }
+    if (existsSync(OLD)) {
       await page.setInputFiles('#file-project', OLD); await sleep(6000);
-      const s2 = await page.evaluate(SNAPSHOT); const base = JSON.parse(readFileSync(SNAP, 'utf8')).desktop;
+      const s2 = await page.evaluate(SNAPSHOT); const base = JSON.parse(readFileSync(SNAP27, 'utf8')).desktop;
       const d = diff(base, s2); if (d.length) fail(`old 0.27 project: loaded results differ: ${d.join(' | ')}`); else console.log('old 0.27 project file: loaded identically');
     } else console.log('(old project fixture missing – migration check skipped)');
   }
@@ -89,6 +90,6 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   await ctx.close();
 }
 if (BASELINE) { writeFileSync(SNAP, JSON.stringify(results, null, 1)); console.log('baseline written', SNAP); }
-else { const base = JSON.parse(readFileSync(SNAP, 'utf8')); for (const k of Object.keys(results)) { const d = diff(base[k], results[k]); if (d.length) fail(`${k}: results differ from the 0.27 baseline: ${d.join(' | ')}`); else console.log(k, 'identical to the 0.27 baseline'); } }
+else { const base = JSON.parse(readFileSync(SNAP, 'utf8')); for (const k of Object.keys(results)) { const d = diff(base[k], results[k]); if (d.length) fail(`${k}: results differ from the baseline: ${d.join(' | ')}`); else console.log(k, 'identical to the baseline'); } }
 await browser.close(); srv?.kill();
 console.log(process.exitCode ? 'model-lock: FEHLER' : 'model-lock: OK');

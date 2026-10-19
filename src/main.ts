@@ -109,7 +109,8 @@ const state = {
   preview: null as Preview | null,
   opts: { genTol: { ...GENTOL_DEFAULT } as GenTol, maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
-    ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: true, outlierK: 3, zoneSrc: 'points' as 'points' | 'geom' } },
+    ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: false, outlierK: 3, // Phase 1 step 3: Create = raw fit of the selection; filters optional
+       zoneSrc: 'points' as 'points' | 'geom' } },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -615,9 +616,11 @@ function sizeRows(f: FitResult): [string, string][] {
 /** compact statistics of the current preview */
 function previewStats(p: Preview): string {
   if (p.method === 'Konstruiert') return '';
-  const rows = p.aux ? [[tt('Points'), String(p.indices.length)], [tt('RMS'), fmt(p.fit.rms)], [formName(p.fit.type), fmt(p.fit.form)], ...sizeRows(p.fit), [tt('Aux. plane'), p.aux.refId ? nameOf(p.aux.refId) : `${p.aux.indices.length} ${tt('pts')}`]]
-    : [[tt('Points'), String(p.indices.length)], ...fitRows(p.fit, p.indices.length, false)];
-  return `<span class="cp-type">${ICON[p.fit.type] ?? ''} ${typeName(p.fit.type)}</span>` + rows.map(([k, v]) => `<span class="cp-kv"><small>${k}</small><b>${v}</b></span>`).join('');
+  // Phase 1 step 2: feedback is exactly point count, form deviation and standard deviation (sizes etc. after ✓ in the tree/dialog)
+  const m = p.fit, std = m.nurbs ? m.nurbs.std : m.rms;
+  const pts = p.aux ? `${p.indices.length} <small class="cp-aux-n" title="${tt('Points on the auxiliary plane')}">+ ${p.aux.refId ? nameOf(p.aux.refId) : p.aux.indices.length + ' ' + tt('aux.')}</small>` : String(p.indices.length);
+  const rows: [string, string, string][] = [[tt('Points'), pts, 'pts'], [m.nurbs ? tt('Surface profile') : formName(m.type), fmt(m.form), 'form'], [tt('Std. dev.'), fmt(std), 'std']];
+  return `<span class="cp-type">${ICON[m.type] ?? ''} ${typeName(m.type)}</span>` + rows.map(([k, v, c]) => `<span class="cp-kv" data-kv="${c}"><small>${k}</small><b>${v}</b></span>`).join('');
 }
 function renderModeBar() {
   const spec = ctxSpec(); setCtx('mesh', spec); setCtx('tool', analysisSpec());
@@ -780,7 +783,7 @@ function setContour(on: boolean) {
   state.opts.fill.on = on;
   if (on && state.opts.ex.outlierOn) { state.opts.ex.outlierOn = false; toast(tt('Outer contour: outlier removal switched off so that bumps and spatter stay in (switch it on again under Parameters if wanted).')); }
 }
-const extractActive = () => state.opts.fill.on || state.opts.ex.inset !== 0 || state.opts.ex.zoneSrc === 'geom' || state.opts.ex.angleOn || !state.opts.ex.outlierOn || state.opts.ex.outlierK !== 3;
+const extractActive = () => state.opts.fill.on || state.opts.ex.inset !== 0 || state.opts.ex.zoneSrc === 'geom' || state.opts.ex.angleOn || state.opts.ex.outlierOn; // plain growing = raw fit (0.30)
 /** fit parameters (worker) from the unified extraction parameters */
 function extractParams(type: GeomType): import('./worker').FitParams {
   const x = state.opts.ex, plane = type === 'Ebene', fill = plane && state.opts.fill.on;
@@ -2632,7 +2635,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
-    if (st.opts) Object.assign(state.opts, st.opts); syncGenTolUI();
+    if (st.opts) { Object.assign(state.opts, st.opts); if (!st.opts.ex?.raw30) state.opts.ex.outlierOn = false; } (state.opts.ex as any).raw30 = 1; syncGenTolUI(); // ≤ 0.29 projects: outlier filter on by default → off (raw fit at creation)
     state.csys = st.csys ?? []; state.activeCs = st.activeCs ?? null; state.nextCs = st.nextCs ?? state.csys.length + 1; state.showCs = st.showCs ?? true; state.csSel = null; state.csEdit = null;
     curvesReset(); state.curves = st.curves ?? []; state.nextCurve = st.nextCurve ?? state.curves.length + 1; state.showLayout = !!st.showLayout;
     if (state.curves.length) updateLayout();

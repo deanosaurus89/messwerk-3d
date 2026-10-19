@@ -7,6 +7,10 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.30', date: '2026-10-19', items: [
+    'Feature creation, step 2 – feedback: the preview shows exactly point count, form deviation and standard deviation (sizes and further values after ✓ in the tree and dialog).',
+    'Feature creation, step 3 – Create uses the selection as-is: the created feature is a plain fit of ALL selected points (also the aux plane of circles/slots). Outlier removal is no longer applied silently; it is an optional filter under Parameters (off by default). Demo part: form deviations now include the scan noise tails (e.g. top plane 0.044 → 0.071 mm), sizes change by less than 0.001 mm. Existing features keep their values.',
+  ] },
   { version: '2026.0.29', date: '2026-10-19', items: [
     'Feature creation, step 1 – selection: the Creation Panel offers 👆 Click & grow | ＋ Add region | 🖌 Brush as the selection method. Add region: every click grows a further region (same intelligence), the union is fitted.',
     'Seed area feedback: the triangles inside the pick circle are highlighted where you click or tap – now also on iPhone (stays with the preview) and including the hole wall next to a plane.',
