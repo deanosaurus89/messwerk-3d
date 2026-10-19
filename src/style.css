@@ -457,38 +457,38 @@ details.dsec details.reex { margin-top: 2px; }
   .tab { padding:0 8px; font-size:12px; } .t-long { display:none; } .t-short { display:inline; }
   .rsec-nav { padding:2px 3px; gap:2px; } .rsec-nav button { font-size:9.5px; padding:1px 5px; max-width:70px; overflow:hidden; text-overflow:ellipsis; }
   /* Start sections wrap into rows instead of scrolling */
-  #app:has(.panel[data-tab="merkmale"]:not(.hidden)) { grid-template-rows: 30px auto minmax(0,1fr) 40px; }
-  .panel[data-tab="merkmale"] { flex-wrap:nowrap; height:auto; }
-  .panel[data-tab="merkmale"] > .group:not(.rs-off) { flex:1 1 auto; border-right:none; }
-  .panel[data-tab="merkmale"] .btns { flex-wrap:wrap; }
-  .panel[data-tab="merkmale"] .big { min-width:40px; height:40px; padding:1px 2px; font-size:9px; }
-  .panel[data-tab="merkmale"] .big .ico, .panel[data-tab="merkmale"] .big svg { height:18px; width:18px; font-size:15px; }
-  .panel[data-tab="merkmale"] .rsec-nav button { max-width:62px; }
+  #app { grid-template-rows: 30px auto minmax(0,1fr) 40px; }
+  #ribbon .panel { flex-wrap:nowrap; height:auto; }
+  #ribbon .panel > .group:not(.rs-off) { flex:1 1 auto; border-right:none; }
+  #ribbon .panel .btns { flex-wrap:wrap; }
+  #ribbon .panel .big { min-width:40px; height:40px; padding:1px 2px; font-size:9px; }
+  #ribbon .panel .big .ico, #ribbon .panel .big svg { height:18px; width:18px; font-size:15px; }
+  #ribbon .panel .rsec-nav button { max-width:62px; }
 }
 @media (max-width: 900px), (max-height: 560px) {
   /* phone: the method ▾ sits inside the button corner instead of taking its own column */
-  .panel[data-tab="merkmale"] .split { position:relative; }
-  .panel[data-tab="merkmale"] .split .split-dd { position:absolute; right:-1px; bottom:1px; padding:0 2px; font-size:9px; line-height:10px; z-index:1; }
-  .panel[data-tab="merkmale"] .big { min-width:44px; }
-  .panel[data-tab="merkmale"] .btns { gap:1px; row-gap:2px; }
+  #ribbon .panel .split { position:relative; }
+  #ribbon .panel .split .split-dd { position:absolute; right:-1px; bottom:1px; padding:0 2px; font-size:9px; line-height:10px; z-index:1; }
+  #ribbon .panel .big { min-width:44px; }
+  #ribbon .panel .btns { gap:1px; row-gap:2px; }
 }
 @media (max-width: 900px), (max-height: 560px) {
-  .panel[data-tab="merkmale"] .big { min-width:40px; max-width:41px; font-size:8.5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; letter-spacing:-.2px; }
-  .panel[data-tab="merkmale"] .rsec-nav button { max-width:54px; }
-  .panel[data-tab="merkmale"] > .group { padding:2px 1px 0; }
+  #ribbon .panel .big { min-width:40px; max-width:41px; font-size:8.5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; letter-spacing:-.2px; }
+  #ribbon .panel .rsec-nav button { max-width:54px; }
+  #ribbon .panel > .group { padding:2px 1px 0; }
 }
 @media (max-width: 900px), (max-height: 560px) {
   /* phone: section chips as one row on top, the buttons get the full width */
-  .panel[data-tab="merkmale"] { flex-wrap:wrap; }
-  .panel[data-tab="merkmale"] .rsec-nav { flex-direction:row; flex-basis:100%; border-right:none; border-bottom:1px solid var(--line); padding:2px 4px; justify-content:flex-start; }
-  .panel[data-tab="merkmale"] .rsec-nav button { max-width:none; font-size:10.5px; padding:2px 10px; }
+  #ribbon .panel { flex-wrap:wrap; }
+  #ribbon .panel .rsec-nav { flex-direction:row; flex-basis:100%; border-right:none; border-bottom:1px solid var(--line); padding:2px 4px; justify-content:flex-start; }
+  #ribbon .panel .rsec-nav button { max-width:none; font-size:10.5px; padding:2px 10px; }
 }
 @media (max-width: 900px), (max-height: 560px) {
-  .panel[data-tab="merkmale"] > .group:not(.rs-off), .panel[data-tab="merkmale"] > .group:not(.rs-off) > .btns { display:contents; }
-  .panel[data-tab="merkmale"] { align-content:flex-start; padding-bottom:2px; }
+  #ribbon .panel > .group:not(.rs-off), #ribbon .panel > .group:not(.rs-off) > .btns { display:contents; }
+  #ribbon .panel { align-content:flex-start; padding-bottom:2px; }
 }
 @media (max-width: 900px), (max-height: 560px) {
-  .panel[data-tab="merkmale"] .big { white-space:normal; line-height:9px; text-align:center; overflow:hidden; word-break:normal; overflow-wrap:normal; hyphens:manual; }
+  #ribbon .panel .big { white-space:normal; line-height:9px; text-align:center; overflow:hidden; word-break:normal; overflow-wrap:normal; hyphens:manual; }
 }
 @media (max-width: 900px), (max-height: 560px) { body.lasso-on #dialog-pane, body.lasso-on #table-pane, body.lasso-on #tree-pane { display:none !important; } }
 /* general tolerance (Controls ribbon) and tolerance source badge */
@@ -497,3 +497,25 @@ details.dsec details.reex { margin-top: 2px; }
 .tsrc { font-size:10px; padding:1px 5px; border-radius:8px; background:#e7eef8; color:#1f4f8f; white-space:nowrap; align-self:center; }
 .tsrc.man { background:#fdf0d8; color:#8a5a00; } .tsrc-rs { border:none; background:none; cursor:pointer; padding:0 0 0 3px; font-size:11px; color:inherit; }
 input.fitcode { width:3.6em; }
+
+/* desktop: chips only on the phone for .rs-phoneonly panels (View) */
+@media (min-width: 901px) and (min-height: 561px) {
+  .rs-phoneonly > .rsec-nav { display:none; }
+  .rs-phoneonly > .group.rs-off { display:flex !important; }
+}
+/* desktop: compact two-row group (set by fitRibbon when the panel would be wider than the window) */
+.group.compact .btns { display:grid; grid-auto-flow:column; grid-template-rows:repeat(2, auto); gap:1px 2px; align-content:center; }
+.group.compact .big { flex-direction:row; height:29px; min-width:0; justify-content:flex-start; padding:1px 6px 1px 4px; font-size:11px; gap:4px; white-space:nowrap; }
+.group.compact .big .ico { font-size:15px; height:18px; line-height:18px; } .group.compact .big svg { width:18px; height:18px; }
+.group.compact .split { display:flex; }
+@media (max-width: 900px), (max-height: 560px) {
+  #ribbon { overflow-x:hidden; max-height:46vh; overflow-y:auto; }
+  #ribbon .panel select { max-width:100%; font-size:12px; }
+  #ribbon .panel .wip-note { flex-basis:100%; }
+  #ribbon .panel .gentol label.gt { font-size:9.5px; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  #ribbon .panel .big { max-width:56px; }
+  #ribbon .panel label, #ribbon .panel select, #ribbon .panel .glabel-inline { font-size:11px; }
+  #ribbon .panel input[type="checkbox"] { width:14px; height:14px; }
+}

@@ -12,7 +12,7 @@ import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
 import { OverlayManager } from './ui/overlays';
-import { initRibbonSections } from './ui/ribbonsec';
+import { initRibbonSections, installFitRibbon } from './ui/ribbonsec';
 import { GENTOL_DEFAULT, GenTol, TolKind, generalTol, iso286 } from './core/tolerances';
 import { FIT_CRITS, FitCrit, critSupported } from './core/chebyshev';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
@@ -191,7 +191,7 @@ async function busy<T>(p: Promise<T>, label = tt('Computing …')): Promise<T> {
 }
 
 // ------------------------------------------------------------------ Ribbon
-initRibbonSections();
+initRibbonSections(); installFitRibbon();
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll<HTMLElement>('.panel').forEach((p) => p.classList.toggle('hidden', p.dataset.tab !== b.dataset.tab));
@@ -216,6 +216,7 @@ for (const t of TYPES) {
   b.className = 'big'; b.dataset.ftype = t;
   b.innerHTML = `<span class="ico">${ICON[t]}</span>${t === 'Freiformfläche' ? tr('Freeform') : typeName(t)}`;
   if (t === 'Freiformfläche') b.title = tr('Freeform surface (B-spline/NURBS) – click or brush');
+  else b.title = t === 'auto' ? tr('Auto: click a surface – the feature type is detected automatically') : tt('Create {0}: click on the polygon model (▾ = other methods: construction, anchor)', typeName(t));
   b.onclick = () => startFitMode(t);
   if (t !== 'auto' && t !== 'Freiformfläche') {
     // split button: main part = From polygon model, ▾ = method menu (Construction, Anchor, CAD later)

@@ -6,6 +6,9 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.25', date: '2026-10-19', items: [
+    'No horizontal scrolling in ANY ribbon: on desktop a group that does not fit switches to a compact two-row layout (checked at 1280 and 1400 px – View and Start no longer overflow); on the iPhone every tab wraps into at most two button rows, View gets section chips Views | Display | Panels. All buttons keep their tooltips (feature type buttons got new ones).',
+  ] },
   { version: '2026.0.24', date: '2026-10-19', items: [
     'General tolerances (project setting, Controls ribbon): ISO 2768-1 class f/m/c/v for sizes, distances, radii and angles and ISO 2768-2 class H/K/L for flatness/straightness, roundness, perpendicularity, symmetry, parallelism and run-out. Default mK; new controls are filled automatically from the nominal (or actual) size and the feature length.',
     'ISO 286 fits per size control: type e.g. H7 (hole) or g6 (shaft) in the Fit field – Tol+/Tol− follow from the nominal size (IT4–IT12, D…P / d…p, JS/js, up to 500 mm).',
