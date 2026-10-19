@@ -75,8 +75,16 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('R2k', 'Tooltips im Start-Band', 'Desktop: über jede Schaltfläche (auch ▾, ⋯, ↶ ↷) fahren.', 'Jede Schaltfläche hat einen erklärenden Tooltip.', ''),
  ]),
  ('0.35', 'Re-Extract mit eingefrorener Berandung exakt', [
-  ('F20', 'Re-Extract (Ausschlussabstand 0) = genau die Punkte der Erzeugung', 'Demo-Teil: Oberseite per Click & grow › ✓ › Eigenschaften › 🔁 Extraction › „Apply extraction“ zweimal; Projekt speichern/laden, nochmals.', 'Punktzahl exakt gleich wie beim Erzeugen (z. B. 35 435), auch nach Speichern/Laden; keine Randpunkte der Rundung dazu.', ''),
+  ('F20', 'Re-Extract (Ausschlussabstand 0) = genau die Punkte der Erzeugung', 'Demo-Teil: Oberseite per Click & grow › ✓ › Eigenschaften › 🔁 Extraction › „Apply extraction“ zweimal; Projekt speichern/laden, nochmals.', 'Punktzahl exakt gleich wie beim Erzeugen (ab 0.36 neues Demo-Netz: ca. 19 000), auch nach Speichern/Laden; keine Randpunkte der Rundung dazu.', ''),
   ('F20b', 'Re-Extract mit Ausschlussabstand > 0 = Teilmenge', 'Wie F20, dann Boundary exclusion distance 1 mm › Apply.', 'Weniger Punkte, nur Punkte der Erzeugung, alle mindestens 1 mm innerhalb der Berandung (auch um Inseln).', ''),
+ ]),
+ ('0.36', 'Robuste Normalen, keine Löcher/Splitter in Ebenen, neues Demo-Netz', [
+  ('F21', 'Ebene ohne Löcher in der Mitte', 'Demo-Teil: Oberseite per Click & grow › ✓ › Rechtsklick im Baum › Show used points; Fläche absuchen (auch nahe den langen Kanten).', 'Die ganze Oberseite ist ausgewählt; keine einzelnen nicht gewählten Punkte oder Streifen mitten in der Fläche – nur an den echten Kanten (Rand, Bohrungen, Langloch, Bolzen, Kegel, Kugel, Torus).', ''),
+  ('F21b', 'Wachsen stoppt weiterhin an echten Kanten', 'Demo-Teil: Click & grow auf die Oberseite nahe der Bohrung Ø12 und nahe dem Bolzen; danach auf die Bohrungswand und die Bolzenwand.', 'Ebene läuft nicht in Wände/Rundungen; Zylinder läuft nicht auf die Ebene. Normalenwinkel (Advanced) wirkt wie bisher.', ''),
+  ('F21c', 'Eingefrorene Berandung = Außenkontur + echte Inseln', 'Wie F21, dann Eigenschaften › 🔁 Extraction › Boundary exclusion distance 1 mm › Apply.', 'Punkte fehlen nur in einem 1-mm-Band am Außenrand und um Bohrungen/Inseln – keine schmalen Lücken mitten in der Fläche.', ''),
+  ('F21d', 'Neues Netz des Demo-Teils', 'Training/Beispiel laden › View › Wireframe; Oberseite heranzoomen.', 'Gleichmäßige, fast gleichseitige Dreiecke (~0,5 mm) statt langer Nadeldreiecke; Ladezeit normal (Desktop und iPhone).', ''),
+  ('F21e', 'Sollwerte des Demo-Teils unverändert', 'Bohrung Ø12, Bolzen Ø16, Langloch 30×10, Kugel R7, Torus r2 per Click & grow erzeugen.', 'Bohrung ≈ 12,08, Bolzen ≈ 16,00 (X +0,05), Langloch ≈ 30 × 10, Kugel ≈ R7, Torus ≈ r2 – innerhalb der Toleranzen.', ''),
+  ('F21f', 'Tooltip/Doku Normalenwinkel', 'Creation Panel › Advanced › über „Normal angle“ fahren; Doku-Abschnitt „Normal angle“ öffnen.', 'Erklärt die robuste Normale (Ebenen-Fit über 1,3 × Kantenlänge bei Nadeldreiecken), Bedeutung des Winkels unverändert.', ''),
  ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
