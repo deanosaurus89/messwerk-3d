@@ -278,6 +278,8 @@ body.resizing, body.resizing * { cursor:inherit; user-select:none; }
 #ctx-panel .cp-t { font-weight:700; white-space:nowrap; } #ctx-panel .cp-t svg, #ctx-panel .cp-type svg { width:16px; height:16px; vertical-align:-3px; }
 #ctx-panel .cp-c { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
 #ctx-panel .cp-c button, #ctx-panel .cp-seg button { border:1px solid #9fb2c8; background:#fff; border-radius:5px; padding:3px 8px; font:inherit; min-height:28px; cursor:pointer; }
+/* 0.37 (t106u): primary buttons inside the Creation/Analyze panel (e.g. 🔗 Derive › ＋ Add to tree) kept white text on the white background of the generic panel-button rule above (ID specificity beat .btn.primary) – button looked empty */
+#ctx-panel .cp-c button.primary, #ctx-panel .cp-seg button.primary, #ctx-panel .btn.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
 #ctx-panel .cp-c button.on, #ctx-panel .cp-seg button.on { background:#1d64c8; color:#fff; border-color:#1d64c8; }
 #ctx-panel .cp-c button:disabled { opacity:.45; cursor:default; }
 #ctx-panel .cp-seg { display:inline-flex; } #ctx-panel .cp-seg button { border-radius:0; margin-left:-1px; } #ctx-panel .cp-seg button:first-child { border-radius:5px 0 0 5px; } #ctx-panel .cp-seg button:last-child { border-radius:0 5px 5px 0; }
