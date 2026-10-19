@@ -6,6 +6,14 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.23', date: '2026-10-19', items: [
+    'Global coordinate system in the tree: eye button shows/hides the WCS triad (remembered), right-click › Center on origin; every CS offers triad on/off and Center on origin.',
+    'Fix: the extraction zone of a click-grown plane at boundary exclusion 0 now contains exactly the grown points (before it also collected not-grown neighbours on scan meshes – ~27k instead of 14.7k points). All inside boundary (gap filling) is unchanged.',
+    'Feature dialog restructured into collapsible sections: Datum on top → ① Point selection → ② Extraction & filters (outlier removal only once) → ③ Fit last.',
+    'New fit criteria for all regular features: Minimum zone (Chebyshev), Tangential circumscribed (minimum circumscribed) and Tangential inscribed (maximum inscribed); plane: outer/inner tangent plane. Form per criterion (e.g. roundness LSC/MZC/MCC/MIC) shown in the dialog and Properties; controls, CS, DRF and report follow automatically.',
+    'Start ribbon without horizontal scrolling: section chips Features | Coordinate Systems | Mesh editing (remembered); on the iPhone the chips sit on top and the buttons wrap into two rows; short tab label “RE”.',
+    'iPhone lasso: the bottom sheets hide while you tap the lasso corners and come back after ✓.',
+  ] },
   { version: '2026.0.22', date: '2026-10-19', items: [
     'Central overlay rule: temporary displays belong to the tool/dialog that made them and disappear when you leave it – creation preview, hover sets and pick circle (tool), extraction zone and re-extraction points (feature dialog), colour map/arrows/zones/derive preview (Analyze), DRF triad (selected control). Permanent display only via the View ribbon. Help › “What is shown when”.',
     'Trim zone: in the feature dialog (Extraction) draw a lasso in the 3D view – “Remove inside” or “Keep inside”; trims are stored with the feature and apply on every re-extraction; ↶ undo, 🗑 clear.',

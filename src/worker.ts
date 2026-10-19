@@ -4,6 +4,7 @@ import { reextract, ReexParams } from './core/reextract';
 import { parseByName } from './core/io';
 import { MeshData, bounds } from './core/mesh';
 import { MeshTopology, brushSelect, gather } from './core/region';
+import { FitCrit, applyCrit, critSupported, formByCrit } from './core/chebyshev';
 import { autoFit, fitType, FitResult, GeomType, modelNormal, normalFilter, NormalFilter, signedDistance } from './core/fit';
 import type { Vec3 } from './core/linalg';
 import { autoExtract, extractLine, extractWithAuxPlane } from './core/aux';
@@ -78,7 +79,7 @@ export type Req =
   | { op: 'grow'; tri: number; point: Vec3; maxAngleDeg: number; radius: number; type: GeomType | 'auto'; seedR?: number }
   | { op: 'brush'; center: Vec3; radius: number; facing: Vec3 }
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
-  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams }
+  | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams; crit?: FitCrit; formBy?: boolean }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null; seedR?: number }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
   | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[] }
@@ -223,6 +224,16 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       result = { ...r, fit: { ...r.fit, residuals: undefined } };
     } else if (req.op === 'fit') {
       result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
+    }
+    // fit criterion (minimum zone / tangential circumscribed / inscribed) on the final points; form under every criterion
+    const crit = (req as any).crit as FitCrit | undefined;
+    if (crit && result?.fit && result?.indices?.length && ['fit', 'aux', 'auxLine', 'reex', 'grow'].includes(req.op)) {
+      const base = result.fit as FitResult; let { p } = gather(mesh!, result.indices, 200000);
+      // the robust Gauss fit ignored its outliers (they stay in the indices): evaluate every criterion on the same inliers
+      if (base.outliers && base.outliers < p.length - 10) { const nOut = Math.round(base.outliers * p.length / Math.max(1, result.indices.length)), r = p.map((q) => Math.abs(signedDistance(base, q)));
+        const thr = [...r].sort((a, b) => b - a)[Math.max(0, nOut - 1)] ?? Infinity; if (nOut > 0) p = p.filter((_, i) => r[i] < thr); }
+      if (crit !== 'lsq' && critSupported(base.type, crit)) { const c = applyCrit(base, p, crit); result.fit = { ...c, n: base.n, outliers: base.outliers, nfRemoved: base.nfRemoved, crit }; }
+      if ((req as any).formBy) result.fit.formBy = formByCrit(base, p);
     }
     result.ms = performance.now() - t0;
     (self as any).postMessage({ id, result }, transfer);

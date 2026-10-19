@@ -12,6 +12,8 @@ import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
 import { OverlayManager } from './ui/overlays';
+import { initRibbonSections } from './ui/ribbonsec';
+import { FIT_CRITS, FitCrit, critSupported } from './core/chebyshev';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
 const curveCache = new Map<number, { key: string; seg: Float32Array | null }>();
@@ -66,7 +68,7 @@ type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm:
 type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
-interface FitParamsUI { fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
+interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
@@ -188,6 +190,7 @@ async function busy<T>(p: Promise<T>, label = tt('Computing …')): Promise<T> {
 }
 
 // ------------------------------------------------------------------ Ribbon
+initRibbonSections();
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll<HTMLElement>('.panel').forEach((p) => p.classList.toggle('hidden', p.dataset.tab !== b.dataset.tab));
@@ -682,10 +685,10 @@ function auxPlaneSel(ao: unknown): string {
   const pls = state.features.filter((f) => f.type === 'Ebene' && f.measured);
   return `<label class="cp-auxpl" title="${tt('Aux plane: “Auto-detect” finds the adjacent planar face itself. “Existing plane”: the circle/slot/line lies in a plane you already measured (pick it in the list, or 🎯 then click the plane in the 3D view / tree) – you then only click the hole wall; its points are projected onto that plane and the circle is fitted in 2D.')}">${tt('Aux plane')} <select id="cp-auxpl"><option value="auto" ${typeof ao === 'number' ? '' : 'selected'}>${tt('Auto-detect')}</option>${pls.map((f) => `<option value="${f.id}" ${ao === f.id ? 'selected' : ''}>${tt('Existing')}: ${f.name.replace(/[<>&"]/g, "")}${f.datum ? ` [${f.datum}]` : ''}</option>`).join('')}</select>${pls.length ? `<button type="button" data-auxpick class="${auxPickArm ? 'on' : ''}" title="${tt('Pick the aux plane: click a measured plane in the 3D view or in the tree')}">🎯</button>` : ''}</label>`;
 }
-function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView, ring?: { gap: number; width: number }, fill?: { band: number; excludeRaised: boolean } | null) {
+function auxCall(tri: number, point: Vec3, maxAngleDeg: number, type: GeomType, ref?: FeatureView, ring?: { gap: number; width: number }, fill?: { band: number; excludeRaised: boolean } | null, extra: object = {}) {
   return type === 'Linie'
-    ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured, ring, fill })
-    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring, fill, seedR: state.opts.pick });
+    ? engine.call<any>({ op: 'auxLine', tri, point, maxAngleDeg, side: state.opts.lineSide ?? 0, plane: ref?.measured, ring, fill, ...extra } as any)
+    : engine.call<any>({ op: 'aux', tri, point, maxAngleDeg, type: type as 'Kreis' | 'Langloch', plane: ref?.measured, ring, fill, seedR: state.opts.pick, ...extra } as any);
 }
 async function previewWithAux(h: Hit, type: 'Kreis' | 'Langloch' | 'Linie') {
   const ref = typeof state.opts.aux === 'number' ? state.features.find((f) => f.id === state.opts.aux) : undefined;
@@ -895,7 +898,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       if (inPlane) {
         const ref = typeof fp.aux === 'number' ? state.features.find((g) => g.id === fp.aux) : undefined;
         auxR = await busy(auxCall(f.hit.tri, f.hit.point, fp.maxAngleDeg, type, ref, fp.aux === 'ring' ? (fp.ring ??= { ...state.opts.ring }) : undefined,
-          fp.aux === 'auto' && fp.fill?.on ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised } : null));
+          fp.aux === 'auto' && fp.fill?.on ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised } : null, { crit: fp.crit ?? 'lsq', formBy: true }));
         auxR.source = ref ? ref.name : fp.aux === 'ring' ? tt('local ring (gap {0} mm, width {1} mm)', fp.ring!.gap, fp.ring!.width) : tt('automatic (adjacent face)') + (fp.fill?.on ? ' · ' + tt('all inside boundary') : ''); auxR.refId = ref?.id;
       } else idx = (await busy(engine.call<any>({ op: 'grow', tri: f.hit.tri, point: f.hit.point, maxAngleDeg: fp.maxAngleDeg, radius: fp.radius, type }))).indices;
     }
@@ -903,7 +906,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       f.measured = auxR.fit; f.indices = auxR.indices; f.src = auxR.indices;
       f.aux = { plane: auxR.aux.plane, pointCount: auxR.aux.indices.length, source: auxR.source, refId: auxR.refId } as AuxPlane; f.auxIndices = auxR.aux.indices;
     } else {
-      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised, islands: fp.fill.islands !== false, inset: fp.inset ?? 0 } : null, inset: type === 'Ebene' && !fp.fill?.on ? fp.inset ?? 0 : 0 } }));
+      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, crit: fp.crit ?? 'lsq', formBy: true, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised, islands: fp.fill.islands !== false, inset: fp.inset ?? 0 } : null, inset: type === 'Ebene' && !fp.fill?.on ? fp.inset ?? 0 : 0 } }));
       f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined; f.dev = undefined;
     }
     f.type = f.measured!.type; f.pointCount = f.indices.length; ptsCache.delete(f.id);
@@ -1766,6 +1769,8 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
   if (full) rows.push([tt('Points'), String(pointCount)]);
   rows.push([tt('Std. dev. (RMS)'), fmt(m.rms)], [FORM_NAME[m.type], fmt(m.form)], ['Max. +', sgn(m.maxPos)], ['Max. −', sgn(m.maxNeg)]);
   if (m.outliers) rows.push([tt('Outliers removed'), String(m.outliers)]);
+  if (m.crit && m.crit !== 'lsq') rows.push([tt('Fit criterion'), tt(CRIT_NAME[m.crit])]);
+  if (full && m.formBy) for (const c of FIT_CRITS) if (m.formBy[c] != null) rows.push([`${FORM_NAME[m.type]} (${tt(CRIT_SHORT[c])})`, fmt(m.formBy[c]!)]);
   if (m.type === 'Torus') rows.push([tt('Center circle Ø 2R'), fmt(m.diameter)], [tt('Center circle R'), fmt(m.radius)], [tt('Tube Ø 2r'), fmt(2 * Math.abs(m.minorRadius ?? 0))], [tt('Tube r'), fmt(Math.abs(m.minorRadius ?? 0))]);
   else if (m.diameter != null && m.type !== 'Langloch') rows.push([tt('Diameter'), fmt(m.diameter)]);
   if (m.type === 'Langloch') rows.push([tt('Length'), fmt(m.length)], [tt('Width'), fmt(m.width)]);
@@ -1868,16 +1873,16 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label></div>
-    ${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${reexHTML(f)}
-    <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Actual – read-only info…')}</button></p>
-    ${f.type !== 'Abstand' && !f.cons ? fitParamsHTML(f) : ''}
-    ${dk ? `<h4><span class="dflag sm">${f.datum ?? '?'}</span> ${tt('Datum (ISO 5459)')}</h4>
-      <div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
+    ${dk ? dsec('datum', `<span class="dflag sm">${f.datum ?? '?'}</span> ${tt('Datum (ISO 5459)')}`, `<div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
         return `<option value="${l}" ${(f.datum ?? nextFreeLetter()) === l ? 'selected' : ''}>${l}${o ? ` (${tt('swap with {0}', o.name)})` : ''}</option>`; }).join('')}</select>
         <button class="btn primary" id="dt-apply">${f.datum ? tt('Rename') : tt('Assign datum')}</button></div>
       ${f.datum ? `<div class="row"><button class="btn" id="dt-remove">${tt('Remove datum {0}', f.datum)}</button><span class="note">${tt('{0} control(s) use {1}', dependents(f.id).length, f.datum)}</span></div>` : ''}
       <p class="note">${dk === 'plane' ? tt('Plane as datum: defines a direction (normal) and location.') : dk === 'axis' ? tt('Axis as datum (hole/shaft): defines axis direction and location.') : tt('Center point as datum.')}
-        <button class="linkbtn" id="dt-training">🎓 ${tt('Training mode: datums')}</button></p>` : ''}
+        <button class="linkbtn" id="dt-training">🎓 ${tt('Training mode: datums')}</button></p>`, true) : ''}
+    ${dsec('sel', '① ' + tt('Point selection'), `${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${selectionParamsHTML(f)}`, true)}
+    ${reexHTML(f) ? dsec('flt', '② ' + tt('Extraction & filters'), reexHTML(f), true) : dsec('flt', '② ' + tt('Filters'), filterParamsHTML(f), true)}
+    ${f.type !== 'Abstand' && !f.cons ? dsec('fit', '③ ' + tt('Fit'), fitParamsHTML(f), true) : ''}
+    <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Actual – read-only info…')}</button></p>
     <div><button class="btn" id="d-center">⌖ ${tt('Center')}</button><button class="btn" id="d-addctrl">＋ ${tt('Control …')}</button><button class="btn" id="d-an">◐ ${tt('Analyze deviation')}</button><button class="btn" id="d-del">${tt('Delete feature')}</button></div>`;
   d.querySelector('#dt-apply')?.addEventListener('click', () => setDatum(f, ($('#dt-letter') as HTMLSelectElement).value));
   d.querySelector('#dt-remove')?.addEventListener('click', () => setDatum(f, null));
@@ -1892,7 +1897,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   ($('#d-del') as HTMLButtonElement).onclick = () => { state.selControl = null; deleteSelected(); };
   ($('#d-addctrl') as HTMLButtonElement).onclick = () => { state.addFeat = f.id; state.ctab = 'katalog'; renderTable(); togglePanel('table', true); };
   if (f.cons) bindConDefinition(d, f); else bindFitParams(d, f);
-  bindReex(d, f);
+  bindReex(d, f); bindDsec(d);
 }
 const auxSourceText = (a: AuxPlane) => (a.refId ? nameOf(a.refId) : tt('automatic (adjacent face)'));
 
@@ -1928,35 +1933,58 @@ function bindNurbsParams(d: HTMLElement, f: FeatureView) {
   q('#nb-stp')?.addEventListener('click', () => download(nm + '.stp', toSTEP(fit(), nm), 'model/step'));
   q('#nb-json')?.addEventListener('click', () => download(nm + '.json', JSON.stringify(toJSON(fit()), null, 1), 'application/json'));
 }
-function fitParamsHTML(f: FeatureView) {
-  if (f.measured?.nurbs) return nurbsParamsHTML(f);
-  if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
+/** collapsible dialog section; open state remembered per section (localStorage) */
+const dsecOpen: Record<string, boolean> = (() => { try { return JSON.parse(localStorage.getItem('mw3d-dsec') || '{}'); } catch { return {}; } })();
+const dsec = (id: string, title: string, body: string, def = true) => body.trim() ? `<details class="dsec" data-dsec="${id}" ${dsecOpen[id] ?? def ? 'open' : ''}><summary>${title}</summary><div class="dsec-b">${body}</div></details>` : '';
+function bindDsec(d: HTMLElement) { d.querySelectorAll<HTMLDetailsElement>('details.dsec').forEach((x) => x.addEventListener('toggle', () => { dsecOpen[x.dataset.dsec!] = x.open; try { localStorage.setItem('mw3d-dsec', JSON.stringify(dsecOpen)); } catch { /* private mode */ } })); }
+const CRIT_NAME: Record<FitCrit, string> = { lsq: 'Gauss (least squares)', mz: 'Minimum zone (Chebyshev)', mcc: 'Tangential circumscribed (minimum circumscribed)', mic: 'Tangential inscribed (maximum inscribed)' };
+const CRIT_SHORT: Record<FitCrit, string> = { lsq: 'Gauss', mz: 'Min. zone', mcc: 'Circumscribed', mic: 'Inscribed' };
+/** Point selection part of the feature dialog: how the points were found (region growing, aux plane, brush, file) */
+function selectionParamsHTML(f: FeatureView) {
+  if (f.measured?.nurbs || f.derived || f.cons || f.type === 'Abstand') return '';
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
-  const m = f.measured!;
-  return `<h4>⚙ ${tt('Fit parameters')} <span class="note">(${tt('change ⇒ automatic refit')})</span></h4><div id="fp-box">
-    <div class="row"><label>${tt('Geometry type')}</label><select id="d-retype">${FIT_TYPES.map((t) => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${typeName(t)}</option>`).join('')}</select></div>
-    <div class="row"><label>${tt('Method')}</label><select id="fp-method"><option value="lsq" ${fp.k ? '' : 'selected'}>${tt('Gauss (least squares)')}</option><option value="rob" ${fp.k ? 'selected' : ''}>${tt('Gauss robust (remove outliers)')}</option></select></div>
-    ${fp.k ? `<div class="row"><label title="${tt('Outlier removal: points whose deviation from the fitted geometry is larger than n × the RMS (standard deviation) are removed – the points with the largest deviation. 0 = off, keep all points.')}">${tt('Exclude outliers beyond [n × RMS]')}</label><input id="fp-k" data-num="abs" value="${fp.k}" inputmode="decimal"></div>` : ''}
+  return `<div id="fp-sel">
     ${grow ? `<div class="row"><label>${tt('Region growing: max. angle [°]')}</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
       <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection – no region growing.') : tt('Points from project file – no region growing.')}</p>`}
+    ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option><option value="ring" ${fp.aux === 'ring' ? 'selected' : ''}>${tt('Local ring')}</option>
+      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
+      ${fp.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" data-num="abs" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" data-num="abs" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
+  </div>`;
+}
+/** Filters – shown ONCE: in the Extraction section when it exists (re-extraction parameters), else here */
+function filterParamsHTML(f: FeatureView) {
+  if (f.measured?.nurbs || f.derived || f.cons || f.type === 'Abstand' || reexHTML(f)) return '';
+  const fp = (f.fp ??= defaultFp()); const m = f.measured!;
+  return `<div id="fp-flt">
+    <div class="row" title="${tt('Outlier removal: points whose deviation from the fitted geometry is larger than n × the RMS (standard deviation) are removed – the points with the largest deviation. Unchecked = keep all points.')}"><label><input type="checkbox" id="fp-rob" ${fp.k ? 'checked' : ''}> ${tt('Exclude outliers beyond [n × RMS]')}</label><input id="fp-k" data-num="abs" value="${fp.k || 3}" inputmode="decimal" ${fp.k ? '' : 'disabled'}></div>
     ${f.type === 'Ebene' || (f.aux && fp.aux === 'auto' && f.hit) ? `<div class="row chk"><label title="${tt('Region growing only finds the outer contour; all points inside it within the band are used (bumps, spatter, burrs, craters). Real openings and walls stay out.')}"><input type="checkbox" id="fp-fill" ${fp.fill?.on ? 'checked' : ''}> ${tt('Capture all points inside outer boundary')}</label></div>
     ${fp.fill?.on ? `<div class="row"><label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane (same parameter as in Re-extraction)')}">${tt('Search distance ± [mm]')}</label><input id="fp-fband" data-num="abs" value="${fp.fill.band || ''}" placeholder="${tt('auto (3 × RMS)')}" inputmode="decimal"></div><div class="row chk"><label title="${raisedTip()}"><input type="checkbox" id="fp-fraised" ${fp.fill.exRaised ? 'checked' : ''}> ${tt('Exclude raised features')}</label>${raisedHelp()}</div>` : ''}` : ''}
     <div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> ${tt('Normal direction filter')}</label></div>
     ${fp.nf.on ? `<div class="row"><label>${tt('max. normal deviation [°]')}</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
       <div class="row"><label>${tt('discard at most [%]')}</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
     <p class="note">${tt('Normal filter: points whose measured surface normal deviates from the fitted element by more than the angle (edges, chamfers, adjacent faces) are discarded – worst first, at most the percentage.')}${m.nfRemoved ? ` <b>${tt('Currently {0} points discarded.', m.nfRemoved)}</b>` : ''}</p>
-    ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option><option value="ring" ${fp.aux === 'ring' ? 'selected' : ''}>${tt('Local ring')}</option>
-      ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
-      ${fp.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" data-num="abs" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" data-num="abs" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
-    </div>`;
+  </div>`;
+}
+/** Fit – the LAST step: geometry type and fit criterion; form deviation under every criterion */
+function fitParamsHTML(f: FeatureView) {
+  if (f.measured?.nurbs) return nurbsParamsHTML(f);
+  if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
+  const fp = (f.fp ??= defaultFp()); const m = f.measured!; const crit = fp.crit ?? 'lsq';
+  const fb = m.formBy; const ok = (c: FitCrit) => critSupported(f.type, c);
+  return `<div id="fp-box">
+    <div class="row"><label>${tt('Geometry type')}</label><select id="d-retype">${FIT_TYPES.map((t) => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${typeName(t)}</option>`).join('')}</select></div>
+    <div class="row" title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation of two boundaries (Chebyshev); Tangential circumscribed = smallest element containing all points (shaft); Tangential inscribed = largest element inside all points (hole). Plane: outer / inner tangent plane.')}"><label>${tt('Fit criterion')}</label><select id="fp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === crit ? 'selected' : ''} ${ok(c) ? '' : 'disabled'}>${tt(CRIT_NAME[c])}</option>`).join('')}</select><button type="button" class="help-q" data-doc-sec="fitcrit" title="${tt('Fit criteria – documentation')}">?</button></div>
+    ${fb ? `<div class="crit-tab" title="${tt('Form deviation of the same points evaluated with every fit criterion (roundness per fit). The selected criterion is bold.')}"><div class="note">${formName(f.type)} ${tt('per fit')} [mm]</div>${FIT_CRITS.filter((c) => fb[c] != null).map((c) => `<span class="${c === crit ? 'on' : ''}">${tt(CRIT_SHORT[c])} <b>${fmt(fb[c]!, 4)}</b></span>`).join('')}</div>` : `<p class="note">${tt('Form per fit criterion is computed on the next refit.')}</p>`}
+  </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
   if (f.measured?.nurbs) { bindNurbsParams(d, f); return; }
   const fp = f.fp!; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
   const num = (id: string, set: (x: number) => void, min = 0) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && x >= min) { set(x); refitFeature(f); } else el.value = ''; }; };
   q<HTMLSelectElement>('#d-retype')?.addEventListener('change', (e) => refitFeature(f, (e.target as HTMLSelectElement).value as GeomType));
-  q<HTMLSelectElement>('#fp-method')?.addEventListener('change', (e) => { fp.k = (e.target as HTMLSelectElement).value === 'rob' ? 3 : 0; refitFeature(f); });
+  q<HTMLInputElement>('#fp-rob')?.addEventListener('change', (e) => { fp.k = (e.target as HTMLInputElement).checked ? Math.max(1, Number(q<HTMLInputElement>('#fp-k')?.value.replace(',', '.')) || 3) : 0; refitFeature(f); });
+  q<HTMLSelectElement>('#fp-crit')?.addEventListener('change', (e) => { fp.crit = (e.target as HTMLSelectElement).value as FitCrit; refitFeature(f); });
   num('#fp-k', (x) => (fp.k = Math.max(1, x)));
   num('#fp-ang', (x) => (fp.maxAngleDeg = x)); num('#fp-rad', (x) => (fp.radius = x));
   q<HTMLInputElement>('#fp-fill')?.addEventListener('change', (e) => { const on = (e.target as HTMLInputElement).checked; fp.fill = { on, band: fp.fill?.band ?? state.opts.fill.band ?? 0, exRaised: fp.fill?.exRaised }; if (on && f.type === 'Ebene') { fp.k = 0; fp.nf.on = false; } refitFeature(f); });
@@ -2098,11 +2126,13 @@ function lassoPick(): Promise<{ m: number[]; poly: [number, number][] } | null> 
     const svg = document.createElementNS(NS, 'svg'); svg.id = 'lasso'; svg.setAttribute('width', String(R.width)); svg.setAttribute('height', String(R.height));
     svg.style.cssText = 'position:absolute;left:0;top:0;z-index:30;cursor:crosshair;touch-action:none';
     const pl = document.createElementNS(NS, 'polygon'); pl.setAttribute('style', 'fill:rgba(216,27,96,.12);stroke:#d81b60;stroke-width:2;stroke-dasharray:6 4'); svg.appendChild(pl);
-    const tip = document.createElement('div'); tip.id = 'lasso-tip'; tip.innerHTML = `${tt('Lasso: click the corners · double-click or Enter = finish · Esc = cancel')} <button type="button" data-l="ok">✓</button> <button type="button" data-l="x">✕</button>`; host.append(svg, tip);
+    const tip = document.createElement('div'); tip.id = 'lasso-tip'; tip.innerHTML = `${matchMedia('(pointer: coarse)').matches ? tt('Lasso: tap the corners · ✓ = finish · ✕ = cancel') : tt('Lasso: click the corners · double-click or Enter = finish · Esc = cancel')} <button type="button" data-l="ok">✓</button> <button type="button" data-l="x">✕</button>`; host.append(svg, tip);
     tip.querySelector<HTMLButtonElement>('[data-l="ok"]')!.onclick = () => end(true); tip.querySelector<HTMLButtonElement>('[data-l="x"]')!.onclick = () => end(false);
+    // phone: the bottom sheets would cover most of the 3D view – hide them while drawing (state unchanged)
+    document.body.classList.add('lasso-on');
     const pts: [number, number][] = []; viewer.controls.enabled = false;
     const draw = () => pl.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
-    const end = (ok: boolean) => { svg.remove(); tip.remove(); document.removeEventListener('keydown', key, true); viewer.controls.enabled = true;
+    const end = (ok: boolean) => { svg.remove(); tip.remove(); document.body.classList.remove('lasso-on'); document.removeEventListener('keydown', key, true); viewer.controls.enabled = true;
       if (!ok || pts.length < 3) { res(null); return; }
       const cam = viewer.camera; cam.updateMatrixWorld(); const M = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
       res({ m: Array.from(M.elements), poly: pts.map(([x, y]) => [(x / R.width) * 2 - 1, 1 - (y / R.height) * 2] as [number, number]) }); };
@@ -3625,4 +3655,4 @@ function bindConDefinition(d: HTMLElement, f: FeatureView) {
     b.onclick = () => startConstruct(o.out, o.key); typeBtns.appendChild(b);
   }
 }
-Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS });
+Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS, openFeatureProps });

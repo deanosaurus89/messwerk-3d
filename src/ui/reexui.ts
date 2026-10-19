@@ -10,7 +10,7 @@ import type { Vec3 } from '../core/linalg';
 import { parseNum } from './numfield';
 
 type RxFeature = Feature & { indices: Uint32Array; src?: Uint32Array; dev?: Float32Array; hit?: unknown; anchor?: { pts: Vec3[] };
-  fp?: { k: number; nf: { on: boolean; angleDeg: number }; inset?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean } } };
+  fp?: { crit?: 'lsq' | 'mz' | 'mcc' | 'mic'; k: number; nf: { on: boolean; angleDeg: number }; inset?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean } } };
 interface ReexOut { fit: FitResult; indices: Uint32Array; removedSigma: number; candidates: number; iterations: number; region: SearchRegion }
 interface Host { call(req: unknown): Promise<ReexOut>; renderAll(): void; renderScene(): void; showZone(): boolean; setShowZone(on: boolean): void; lasso(): Promise<{ m: number[]; poly: [number, number][] } | null>; toast(t: string): void; invalidate(id: number): void; recompute(): void; autosave(): void; flash(sel: string, pending?: boolean): void; fmt(v: number, d?: number): string }
 let H: Host;
@@ -67,9 +67,9 @@ const keyOf = (p: ReexParams) => JSON.stringify(p);
 function live(f: RxFeature, d: HTMLElement) {
   window.clearTimeout(liveT); H.flash('#dialog-pane', true);
   liveT = window.setTimeout(async () => {
-    const seq = ++liveSeq, p = { ...cur }, key = keyOf(p);
+    const seq = ++liveSeq, p = { ...cur }, key = keyOf(p) + (f.fp?.crit ?? '');
     try {
-      const out = await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: p, seedPts: f.anchor?.pts ?? [] });
+      const out = await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: p, seedPts: f.anchor?.pts ?? [], crit: f.fp?.crit ?? 'lsq' });
       if (seq !== liveSeq) return;
       reexPrev = { id: f.id, R: out.region, idx: out.indices, out, key };
       const el = d.querySelector('#rx-live');
@@ -80,6 +80,8 @@ function live(f: RxFeature, d: HTMLElement) {
 }
 export function bindReex(d: HTMLElement, f: RxFeature) {
   cur = paramsFor(f); drafts.set(f.id, cur);
+  // ONE outlier filter: the n × RMS outlier removal here is the feature's filter (also used by a refit)
+  const sync = () => { if (f.fp) f.fp.k = cur.sigmaOn !== false && cur.sigma > 0 ? cur.sigma : 0; };
   d.querySelector<HTMLDetailsElement>('details.rx-adv')?.addEventListener('toggle', (e) => { advOpen = (e.target as HTMLDetailsElement).open; });
   const det = d.querySelector<HTMLDetailsElement>('details.reex');
   if (det) det.addEventListener('toggle', () => { if (det.open) live(f, d); else { reexPrev = null; drafts.delete(f.id); H.renderScene(); } });
@@ -88,12 +90,12 @@ export function bindReex(d: HTMLElement, f: RxFeature) {
     const k = i.dataset.rx!, v = parseNum(i.value);
     if ((k === 'margin' || k === 'inset') && v == null) { (cur as any)[k] = 0; (reexP as any)[k] = 0; i.value = '0'; }
     else if (v != null && isFinite(v) && (v >= 0 || k === 'inset')) { (cur as any)[k] = v; (reexP as any)[k] = v; } else { i.value = String((cur as any)[k] ?? ''); return; }
-    live(f, d);
+    sync(); live(f, d);
   }));
   // Enter = update the preview at once (zone + points); the extraction itself only runs with “Apply extraction”
   d.querySelectorAll<HTMLInputElement>('[data-rx]').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); i.onchange?.(new Event('change')); }));
   d.querySelectorAll<HTMLInputElement>('[data-rxc]').forEach((i) => (i.onchange = () => {
-    const k = i.dataset.rxc!; (cur as any)[k] = i.checked; (reexP as any)[k] = i.checked;
+    const k = i.dataset.rxc!; (cur as any)[k] = i.checked; (reexP as any)[k] = i.checked; sync();
     if (k === 'angleOn' || k === 'sigmaOn') { const n = d.querySelector<HTMLInputElement>(`[data-rx="${k === 'angleOn' ? 'maxAngleDeg' : 'sigma'}"]`); if (n) n.disabled = !i.checked; }
     if (k === 'fill') {
       if (i.checked && cur.sigmaOn !== false) { cur.sigmaOn = reexP.sigmaOn = false; const s = d.querySelector<HTMLInputElement>('[data-rxc="sigmaOn"]'); if (s) s.checked = false; const n = d.querySelector<HTMLInputElement>('[data-rx="sigma"]'); if (n) n.disabled = true; }
@@ -115,8 +117,8 @@ export function bindReex(d: HTMLElement, f: RxFeature) {
 async function runReextract(f: RxFeature) {
   if (!f.measured) return;
   try {
-    const before = f.indices.length, p = { ...cur }, key = keyOf(p);
-    const r = reexPrev && reexPrev.id === f.id && reexPrev.key === key ? reexPrev.out : await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: p, seedPts: f.anchor?.pts ?? [] });
+    const before = f.indices.length, p = { ...cur }, key = keyOf(p) + (f.fp?.crit ?? '');
+    const r = reexPrev && reexPrev.id === f.id && reexPrev.key === key ? reexPrev.out : await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: p, seedPts: f.anchor?.pts ?? [], crit: f.fp?.crit ?? 'lsq', formBy: true });
     f.measured = { ...r.fit, type: f.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length; f.dev = undefined; f.hit = undefined; H.invalidate(f.id);
     const { fillBand: _fb, ...cp } = p; void _fb; f.reex = { ...cp, points: r.indices.length, removed: r.removedSigma, before }; reexPrev = null; drafts.delete(f.id);
     H.recompute(); H.renderAll(); H.autosave();

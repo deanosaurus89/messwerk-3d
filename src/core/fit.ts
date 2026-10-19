@@ -26,6 +26,9 @@ export interface FitResult {
   n: number;             // Anzahl verwendeter Punkte
   outliers?: number;     // vom robusten Fit verworfene Punkte
   nfRemoved?: number;    // vom Normalenrichtungsfilter verworfene Punkte
+  /** fit criterion used (undefined = Gauss least squares) and the form under every criterion (roundness per fit) */
+  crit?: 'lsq' | 'mz' | 'mcc' | 'mic';
+  formBy?: Partial<Record<'lsq' | 'mz' | 'mcc' | 'mic', number>>;
   // nur Abstand
   distance?: number;
   delta?: Vec3;          // p2 - p1

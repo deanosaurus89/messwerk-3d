@@ -439,3 +439,55 @@ body.nav-pause #scene canvas { cursor:grab; }
 .cp-pick input { width:64px; } .cp-pick button { min-width:26px; padding:2px 4px; }
 #lasso-tip { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:31; background:#d81b60; color:#fff; padding:3px 10px; border-radius:12px; font-size:12px; } #lasso-tip button { padding:0 6px; }
 .rx-trim { flex-wrap:wrap; gap:4px; }
+/* feature dialog: collapsible sections (datum → point selection → extraction & filters → fit) */
+details.dsec { border: 1px solid var(--line, #2a3646); border-radius: 6px; margin: 6px 0; padding: 0 6px; }
+details.dsec > summary { cursor: pointer; font-weight: 600; padding: 5px 0; list-style-position: inside; }
+details.dsec > .dsec-b { padding-bottom: 6px; }
+details.dsec details.reex { margin-top: 2px; }
+.crit-tab { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0; font-size: 12px; }
+.crit-tab .note { flex-basis: 100%; }
+.crit-tab span { opacity: .75; } .crit-tab span.on { opacity: 1; text-decoration: underline; }
+/* ribbon sections (Start: Features | Coordinate Systems | Mesh editing) – one at a time, no horizontal scrolling */
+.rsec-nav { display:flex; flex-direction:column; justify-content:center; gap:3px; padding:4px 6px; border-right:1px solid var(--line); flex:none; }
+.rsec-nav button { font-size:11px; padding:3px 8px; border:1px solid #b8cde8; background:#eef3fa; color:#1f4f8f; border-radius:10px; cursor:pointer; white-space:nowrap; text-align:left; touch-action:manipulation; }
+.rsec-nav button.on { background:#1f6fd1; color:#fff; border-color:#1f6fd1; }
+.rs-off { display:none !important; }
+.t-short { display:none; }
+@media (max-width: 900px), (max-height: 560px) {
+  .tab { padding:0 8px; font-size:12px; } .t-long { display:none; } .t-short { display:inline; }
+  .rsec-nav { padding:2px 3px; gap:2px; } .rsec-nav button { font-size:9.5px; padding:1px 5px; max-width:70px; overflow:hidden; text-overflow:ellipsis; }
+  /* Start sections wrap into rows instead of scrolling */
+  #app:has(.panel[data-tab="merkmale"]:not(.hidden)) { grid-template-rows: 30px auto minmax(0,1fr) 40px; }
+  .panel[data-tab="merkmale"] { flex-wrap:nowrap; height:auto; }
+  .panel[data-tab="merkmale"] > .group:not(.rs-off) { flex:1 1 auto; border-right:none; }
+  .panel[data-tab="merkmale"] .btns { flex-wrap:wrap; }
+  .panel[data-tab="merkmale"] .big { min-width:40px; height:40px; padding:1px 2px; font-size:9px; }
+  .panel[data-tab="merkmale"] .big .ico, .panel[data-tab="merkmale"] .big svg { height:18px; width:18px; font-size:15px; }
+  .panel[data-tab="merkmale"] .rsec-nav button { max-width:62px; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  /* phone: the method ▾ sits inside the button corner instead of taking its own column */
+  .panel[data-tab="merkmale"] .split { position:relative; }
+  .panel[data-tab="merkmale"] .split .split-dd { position:absolute; right:-1px; bottom:1px; padding:0 2px; font-size:9px; line-height:10px; z-index:1; }
+  .panel[data-tab="merkmale"] .big { min-width:44px; }
+  .panel[data-tab="merkmale"] .btns { gap:1px; row-gap:2px; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  .panel[data-tab="merkmale"] .big { min-width:40px; max-width:41px; font-size:8.5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; letter-spacing:-.2px; }
+  .panel[data-tab="merkmale"] .rsec-nav button { max-width:54px; }
+  .panel[data-tab="merkmale"] > .group { padding:2px 1px 0; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  /* phone: section chips as one row on top, the buttons get the full width */
+  .panel[data-tab="merkmale"] { flex-wrap:wrap; }
+  .panel[data-tab="merkmale"] .rsec-nav { flex-direction:row; flex-basis:100%; border-right:none; border-bottom:1px solid var(--line); padding:2px 4px; justify-content:flex-start; }
+  .panel[data-tab="merkmale"] .rsec-nav button { max-width:none; font-size:10.5px; padding:2px 10px; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  .panel[data-tab="merkmale"] > .group:not(.rs-off), .panel[data-tab="merkmale"] > .group:not(.rs-off) > .btns { display:contents; }
+  .panel[data-tab="merkmale"] { align-content:flex-start; padding-bottom:2px; }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  .panel[data-tab="merkmale"] .big { white-space:normal; line-height:9px; text-align:center; overflow:hidden; word-break:normal; overflow-wrap:normal; hyphens:manual; }
+}
+@media (max-width: 900px), (max-height: 560px) { body.lasso-on #dialog-pane, body.lasso-on #table-pane, body.lasso-on #tree-pane { display:none !important; } }

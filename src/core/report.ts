@@ -33,7 +33,7 @@ export function buildReport(id: number, features: Feature[], controls: Control[]
     const isD = f.type === 'Abstand';
     const fr = ctx.frame, C = fr ? toLocal(fr, m.center) : m.center, N = fr ? dirLocal(fr, m.normal) : m.normal;
     return { name: f.name + (f.datum ? ` [${f.datum}]` : ''), type: TYPE_EN[f.type] ?? f.type, x: C[0], y: C[1], z: C[2], i: N[0], j: N[1], k: N[2],
-      size: sizeText(f), form: isD ? null : m.form, formName: isD ? '' : FORM_NAME[f.type], rms: isD ? null : m.rms, points: f.pointCount,
+      size: sizeText(f), form: isD ? null : m.form, formName: isD ? '' : FORM_NAME[f.type] + (m.crit && m.crit !== 'lsq' ? ` (${({ mz: 'min. zone', mcc: 'circumscribed', mic: 'inscribed' } as Record<string, string>)[m.crit]})` : ''), rms: isD ? null : m.rms, points: f.pointCount,
       aux: f.aux ? `Aux. plane (${f.aux.source}, flatness ${f4(f.aux.plane.form)})` : '' };
   });
   let io = 0, nio = 0;
