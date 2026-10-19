@@ -9,6 +9,8 @@ import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
 import { sideView } from './ui/axisview';
 import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
 import { TRIM_TYPES, trimmedSurface, analyticShell, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
+import { smoothedBoundary, loopSegments } from './core/boundary';
+import type { Island, IslandChoice } from './core/fillplane';
 import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
 import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
@@ -34,12 +36,32 @@ function shellFor(f: FeatureView) {
   const e = { key, ...r }; shellCache.set(f.id, e); return e;
 }
 function trimFor(f: FeatureView) {
-  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length + '|' + smoothTol;
   const c = trimCache.get(f.id); if (c && c.key === key) return c;
   const g = viewer.model!.geometry; if (!g.index) return null;
-  const r = trimmedSurface(f.measured!, g.getAttribute('position').array as Float32Array, g.index.array as ArrayLike<number>, f.indices);
-  const e = { key, ...r }; trimCache.set(f.id, e); return e;
+  const pos = g.getAttribute('position').array as Float32Array, tris = g.index.array as ArrayLike<number>;
+  const r = trimmedSurface(f.measured!, pos, tris, f.indices);
+  // 0.31: boundary = smoothed contour of the selection on the fitted surface (no triangle zigzag)
+  const e = { key, tri: r.tri, edges: loopSegments(boundaryLoops(f.measured!, pos, tris, f.indices)) }; trimCache.set(f.id, e); return e;
 }
+/** Boundary smoothing tolerance [mm] (display only): null = automatic (0.7 × mesh edge, ≤ 0.5 mm), 0 = off */
+let smoothTol: number | null = (() => { const v = localStorage.getItem('mw3d-smooth'); return v == null || v === '' ? null : Number(v); })();
+function setSmoothTol(v: number | null) { smoothTol = v; if (v == null) localStorage.removeItem('mw3d-smooth'); else localStorage.setItem('mw3d-smooth', String(v)); trimCache.clear(); pvLoops = null; }
+/** smoothed boundary loops of a selection (tiny loops of isolated points dropped) */
+function boundaryLoops(f: FitResult | null, pos: ArrayLike<number>, tris: ArrayLike<number>, verts: ArrayLike<number>) {
+  return smoothedBoundary(f, pos, tris, verts, smoothTol).filter((L) => L.length >= 8);
+}
+/** preview boundary (cached per index set) */
+let pvLoops: { ind: Uint32Array; key: string; loops: number[][][] } | null = null;
+function previewLoops(p: { fit: FitResult; indices: Uint32Array }) {
+  const g = viewer.model?.geometry; if (!g?.index) return [];
+  const key = p.fit.center.join(',') + '|' + smoothTol;
+  if (pvLoops && pvLoops.ind === p.indices && pvLoops.key === key) return pvLoops.loops;
+  const loops = boundaryLoops(p.fit, g.getAttribute('position').array as Float32Array, g.index.array as ArrayLike<number>, p.indices);
+  pvLoops = { ind: p.indices, key, loops }; return loops;
+}
+/** selected island in the Creation Panel (index into preview.islands), −1 = none */
+let islSel = -1;
 import { t as tt, typeName, kindName, methodName } from './i18n';
 import { bindSwipeClose, bindEscClose, scrollWithin, pinLayout } from './ui/overlay';
 import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
@@ -79,12 +101,12 @@ type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm:
 type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
-interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
+interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean; /** 0.31: per-island choices (not an island / refine) */ isl?: IslandChoice[] }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
-  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** zone from the fitted geometry (Boundary from: Fitted geometry) */ zone?: import("./core/reextract").SearchRegion; /** raw region-growing result (before extraction parameters) */ grown?: Uint32Array; /** All inside boundary: search distance used (auto = 3 × RMS) */ bandUsed?: number; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; /** All inside boundary: raised-feature points and the outer contour loops */ raised?: Uint32Array; contour?: number[][][]; /** aux plane captured with All inside boundary */ auxFill?: boolean; }
+  aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** zone from the fitted geometry (Boundary from: Fitted geometry) */ zone?: import("./core/reextract").SearchRegion; /** raw region-growing result (before extraction parameters) */ grown?: Uint32Array; /** All inside boundary: search distance used (auto = 3 × RMS) */ bandUsed?: number; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; /** All inside boundary: raised-feature points and the outer contour loops */ raised?: Uint32Array; contour?: number[][][]; /** All inside boundary: detected islands (0.31) */ islands?: Island[]; /** aux plane captured with All inside boundary */ auxFill?: boolean; }
 type V3 = [number, number, number];
 interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
 
@@ -107,7 +129,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { genTol: { ...GENTOL_DEFAULT } as GenTol, maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
+  opts: { genTol: { ...GENTOL_DEFAULT } as GenTol, maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false, isl: [] as IslandChoice[] },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: false, outlierK: 3, // Phase 1 step 3: Create = raw fit of the selection; filters optional
        zoneSrc: 'points' as 'points' | 'geom' } },
@@ -541,6 +563,7 @@ window.addEventListener('pointerup', async (e) => {
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && auxPickArm) { const F = viewer.model!.geometry.index?.array, vs = F ? [F[3 * h.tri], F[3 * h.tri + 1], F[3 * h.tri + 2]] : [3 * h.tri];
     const pl = state.features.find((f) => f.type === 'Ebene' && f.measured && vs.some((v) => f.indices.includes(v)));
     if (pl) setAuxPlane(pl.id); else status(tt('No measured plane at this point – click a plane feature (or choose it in the list).')); }
+  else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && !e.shiftKey && !state.opts.multi && islandAt(h) >= 0) { islSel = islandAt(h); viewer.showCursor(null, 1); renderAll(); }
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { clearAuxHover(); await previewByClick(h, e.shiftKey); }
   else if (state.mode?.kind === 'anchor') anchorPick(h);
   else if (state.mode?.kind === 'dist') pickFeatureForDistance(h);
@@ -667,7 +690,8 @@ function ctxSpec(): CtxSpec | null {
   const fullPars = !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (!!p || m.method === 'Klick');
   const pars = !fullPars && !glim ? '' : `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Extraction parameters – the same set as in Re-extraction (Dialog). Changes update the preview live.')}">⚙ ${tt('Parameters')}</summary><div class="cp-pg">${glim}${fullPars ? `
     ${isPl ? `<label title="${tt('Use outer contour (All inside boundary): region growing only defines the outer contour; every point inside it within ± search distance is taken')}"><input type="checkbox" data-ex="contour" ${state.opts.fill.on ? 'checked' : ''}> ${tt('Use outer contour')}</label>` : ''}
-    ${isPl && state.opts.fill.on ? `<label title="${tt('Include detected islands: interior regions inside the outer contour that region growing did not reach (bump patches, spatter rings). Off = only the grown region.')}"><input type="checkbox" data-ex="islands" ${x.islands ? 'checked' : ''}> ${tt('Islands')}</label>` : ''}
+    ${isPl && state.opts.fill.on && !p?.islands ? `<label title="${tt('Include detected islands: interior regions inside the outer contour that region growing did not reach (bump patches, spatter rings). Off = only the grown region.')}"><input type="checkbox" data-ex="islands" ${x.islands ? 'checked' : ''}> ${tt('Islands')}</label>` : ''}
+    ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth') : ''}
     ${GEOM_ZONE.includes(ptype) || ptype === 'auto' ? `<label title="${tt('Boundary from: “Point selection” = the grown region(s) as clicked; “Fitted geometry” = a zone around the fitted shape (e.g. cylinder radius ± search distance over the axial extent of the points, cone, sphere cap) – collects all points of that surface, also where growing stopped. Exclusion distance ± then shrinks (+) or extends (−) the zone at its ends. Live preview; the zone is drawn transparent.')}">${tt('Boundary from')} <select data-exs="zoneSrc"><option value="points" ${x.zoneSrc !== 'geom' ? 'selected' : ''}>${tt('Point selection')}</option><option value="geom" ${x.zoneSrc === 'geom' ? 'selected' : ''}>${tt('Fitted geometry')}</option></select></label>` : ''}
     ${isPl || (GEOM_ZONE.includes(ptype) && x.zoneSrc === 'geom') ? `<label title="${exclTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}"> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     <label title="${tt('Normal angle criterion: points whose surface normal deviates from the fitted geometry by more than this angle are removed (edges, chamfers, adjacent faces)')}"><input type="checkbox" data-ex="angleOn" ${x.angleOn ? 'checked' : ''}> ${tt('Normal angle ≤')} <input data-exn="angleDeg" data-num="abs" value="${x.angleDeg}" inputmode="decimal" ${x.angleOn ? '' : 'disabled'}>°</label>
@@ -675,7 +699,7 @@ function ctxSpec(): CtxSpec | null {
   ` : ''}</div></details>`;
   return {
     title: p ? `${tt('Creation Panel')} · ${tt('Preview')}` : m.method === 'Klick' ? (m.type === 'auto' ? tt('Auto detection') : typeName(m.type)) : tt('Brush'), cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl + dsel + pars, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
+    controls: ctl + dsel + (isPl && state.opts.fill.on && p?.islands ? islandsHTML(p.islands) : '') + pars, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'click' || a === 'addreg') { const was = state.opts.multi; state.opts.multi = a === 'addreg'; if (m.method !== 'Klick') setMethod('Klick'); else if (was !== state.opts.multi) { renderModeBar(); renderHint(); } } else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'fill') { setContour(!state.opts.fill.on); applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
@@ -691,6 +715,7 @@ function ctxSpec(): CtxSpec | null {
       for (const [id, k] of [['#cp-rg', 'gap'], ['#cp-rw', 'width']] as const) { const ie = el.querySelector<HTMLInputElement>(id); if (ie) ie.onchange = () => { const x = Number(ie.value.replace(',', '.')); if (isFinite(x) && x >= 0) { state.opts.ring[k] = k === 'width' ? Math.max(0.2, x) : x; auxRefresh(); } }; }
       const fb = el.querySelector<HTMLInputElement>('#cp-fband'); if (fb) fb.onchange = () => { const x = parseNum(fb.value); if (x == null || x === 0) { state.opts.fill.band = null; extractLive(); } else if (isFinite(x) && x > 0) { state.opts.fill.band = x; extractLive(); } };
       const dz = el.querySelector<HTMLSelectElement>('#cp-datum'); if (dz) dz.onchange = () => { state.opts.newDatum = dz.value; };
+      bindIslands(el); bindSmooth(el, '#cp-smooth');
       const pd = el.querySelector<HTMLDetailsElement>('details.cp-params'); if (pd) pd.ontoggle = () => { cpParamsOpen = pd.open; };
       el.querySelectorAll<HTMLInputElement>('[data-ex]').forEach((c) => (c.onchange = () => { const k = c.dataset.ex!;
         if (k === 'contour') setContour(c.checked);
@@ -708,6 +733,50 @@ function ctxSpec(): CtxSpec | null {
   };
 }
 
+/** Boundary smoothing input (Advanced): empty = auto, 0 = off */
+function smoothCtl(id: string) {
+  return `<label title="${tt('Boundary smoothing [mm] (display only): the boundary of the selection is drawn as a smooth contour on the fitted surface instead of the triangle zigzag; every point moves at most this far. Empty = automatic (0.7 × mesh edge length, max. 0.5 mm), 0 = off. Applies to the preview and all features.')}">${tt('Boundary smoothing')} <input id="${id}" class="smooth-in" data-num="abs" value="${smoothTol ?? ''}" placeholder="${tt('auto')}" inputmode="decimal"> mm</label>`;
+}
+function bindSmooth(el: ParentNode, id: string) {
+  const i = el.querySelector<HTMLInputElement>(id); if (!i) return;
+  i.onchange = () => { const t = i.value.trim(); const v = t === '' ? null : parseNum(t); if (v === null || (isFinite(v) && v >= 0)) { setSmoothTol(v); renderAll(); } else i.value = String(smoothTol ?? ''); };
+}
+const islIcon = (I: Island) => (I.kind === 'raised' ? '▮' : I.kind === 'bump' ? '▲' : I.rim ? '◎' : '◯');
+const islKind = (I: Island) => (I.kind === 'raised' ? tt('raised feature') : I.kind === 'bump' ? tt('local bump') : I.rim ? tt('hole + raised rim') : tt('hole / opening'));
+const islCanInc = (I: Island) => I.kind !== 'hole' || !!I.rim;
+/** Plane · All inside boundary: detected islands (auto) – tap one (here or in 3D) → “Not an island” / refine its extent */
+function islandsHTML(list: Island[]) {
+  const ex = list.filter((I) => !I.inc).length, S = list[islSel];
+  const chips = list.map((I, i) => `<button type="button" class="isl-chip${I.inc ? ' inc' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${islKind(I)} · ${I.n} ${tt('pts')}${I.inc ? ' · ' + tt('not an island (points included)') : ''}">${islIcon(I)}${I.id}</button>`).join('');
+  const det = S ? `<div class="isl-det"><b>${tt('Island')} ${S.id}</b> ${islKind(S)} · Ø≈${fmt(2 * S.r, 1)} · h ${fmt(S.h, 2)} mm · ${S.n} ${tt('pts')}
+    <span class="cp-seg"><button type="button" data-islinc="0" class="${S.inc ? '' : 'on'}" title="${tt('Island: its points are excluded from the plane')}">${tt('Island')}</button><button type="button" data-islinc="1" class="${S.inc ? 'on' : ''}" ${islCanInc(S) ? '' : 'disabled'} title="${islCanInc(S) ? tt('Not an island: its points belong to the plane again') : tt('An opening has no surface – nothing to include')}">${tt('Not an island')}</button></span>
+    <label title="${tt('Refine the island: grow (+) or shrink (−) its excluded zone by this distance [mm]')}">${tt('Refine')} ± <input id="cp-islm" data-num="signed" value="${S.m}" inputmode="text"> mm</label></div>` : '';
+  return `<div class="cp-isl"><span class="cp-isl-h" title="${tt('Islands inside the outer contour, detected automatically: ◯ hole/opening, ◎ hole with raised rim, ▲ local bump, ▮ raised feature. Excluded from the plane unless marked “Not an island”. Tap an island (here or in the 3D view) to change it.')}">🏝 ${tt('Islands')} ${list.length}${ex !== list.length ? ` (${tt('{0} excluded', ex)})` : ''}</span>${chips}${det}</div>`;
+}
+function islandChoice(I: Island): IslandChoice {
+  const L = state.opts.fill.isl; let o = L.find((q) => Math.hypot(q.c[0] - I.c[0], q.c[1] - I.c[1], q.c[2] - I.c[2]) < Math.max(1, 0.5 * I.r));
+  if (!o) { o = { c: [...I.c] }; L.push(o); } return o;
+}
+function bindIslands(el: ParentNode) {
+  const list = state.preview?.islands; if (!list) return;
+  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = () => { const i = Number(b.dataset.isl); islSel = islSel === i ? -1 : i; renderAll(); }));
+  el.querySelectorAll<HTMLButtonElement>('[data-islinc]').forEach((b) => (b.onclick = () => { const I = list[islSel]; if (!I) return; islandChoice(I).inc = b.dataset.islinc === '1'; extractLive(); }));
+  const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; extractLive(); };
+}
+/** island under a tap in the 3D view (ray from the camera through the hit, intersected with the preview plane) */
+function islandAt(h: Hit): number {
+  const p = state.preview; if (!p?.islands?.length || p.fit.type !== 'Ebene') return -1;
+  const n = p.fit.normal, c = p.fit.center, cam = viewer.camera.position, d = [h.point[0] - cam.x, h.point[1] - cam.y, h.point[2] - cam.z];
+  const den = d[0] * n[0] + d[1] * n[1] + d[2] * n[2]; if (Math.abs(den) < 1e-9) return -1;
+  const t = ((c[0] - cam.x) * n[0] + (c[1] - cam.y) * n[1] + (c[2] - cam.z) * n[2]) / den, q = [cam.x + t * d[0], cam.y + t * d[1], cam.z + t * d[2]];
+  const [u, v] = basis(unit(n as Vec3)), P = (a: number[]) => [(a[0] - c[0]) * u[0] + (a[1] - c[1]) * u[1] + (a[2] - c[2]) * u[2], (a[0] - c[0]) * v[0] + (a[1] - c[1]) * v[1] + (a[2] - c[2]) * v[2]];
+  const [qx, qy] = P(q);
+  const inside = (L: number[][]) => { let w = false; for (let i = 0, j = L.length - 1; i < L.length; j = i++) { const [xi, yi] = P(L[i]), [xj, yj] = P(L[j]); if ((yi > qy) !== (yj > qy) && qx < ((xj - xi) * (qy - yi)) / (yj - yi) + xi) w = !w; } return w; };
+  let best = -1, ba = Infinity;
+  p.islands.forEach((I, i) => { let w = false; for (const L of I.loops) if (inside(L)) w = !w; if (w && I.area < ba) { ba = I.area; best = i; } });
+  if (best < 0) p.islands.forEach((I, i) => { const d = Math.hypot(q[0] - I.c[0], q[1] - I.c[1], q[2] - I.c[2]) - I.r; if (d < 0.5 && d < ba) { ba = d; best = i; } }); // just outside its edge
+  return best;
+}
 // ------------------------------------------------------------------ Vorschau
 const usesAux = (t: GeomType | 'auto') => (t === 'Kreis' || t === 'Langloch' || t === 'Linie') && state.opts.aux !== 'none';
 const usesAuxType = usesAux;
@@ -748,6 +817,7 @@ async function previewByClick(h: Hit, add = false) {
   const m = state.mode as FitMode;
   const pv = state.preview;
   if ((add || state.opts.multi) && pv && MULTI_TYPES.includes(pv.fit.type) && !pv.aux && (m.type === pv.fit.type || m.type === 'auto')) { await addPlaneRegion(h); return; }
+  resetIslands(); // a new selection: island choices start from the automatic detection
   if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
   if (usesAux(m.type)) {
     try { await previewWithAux(h, m.type as 'Kreis' | 'Langloch'); }
@@ -788,7 +858,7 @@ const extractActive = () => state.opts.fill.on || state.opts.ex.inset !== 0 || s
 function extractParams(type: GeomType): import('./worker').FitParams {
   const x = state.opts.ex, plane = type === 'Ebene', fill = plane && state.opts.fill.on;
   return { k: x.outlierOn ? x.outlierK : 0, nf: x.angleOn ? { angleDeg: x.angleDeg, maxPct: 100 } : null,
-    fill: fill ? { band: state.opts.fill.band ?? 0, excludeRaised: state.opts.fill.exRaised, islands: x.islands, inset: x.inset } : null, inset: plane && !fill ? x.inset : 0 };
+    fill: fill ? { band: state.opts.fill.band ?? 0, excludeRaised: state.opts.fill.exRaised, islands: x.islands, inset: x.inset, isl: state.opts.fill.isl } : null, inset: plane && !fill ? x.inset : 0 };
 }
 /** Preview: apply the extraction parameters (outer contour, islands, exclusion distance, normal angle, outliers) to the grown region(s). */
 async function applyExtract() {
@@ -805,7 +875,8 @@ async function applyExtract() {
     if (geom) { // boundary from the fitted geometry: zone around the fitted shape, all points of that surface inside it
       const g = await geomZoneExtract(r.fit, r.indices, pv.hit?.point, state.opts.fill.band ?? undefined, { k: x0.outlierOn ? x0.outlierK : 0, angleOn: x0.angleOn, angleDeg: x0.angleDeg, inset: x0.inset });
       r.fit = g.fit; r.indices = g.indices; r.band = g.band; zone = g.zone; }
-    state.preview = { ...pv, fit: r.fit, indices: r.indices, grown, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, zone };
+    state.preview = { ...pv, fit: r.fit, indices: r.indices, grown, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, islands: fill ? r.islands : undefined, zone };
+    if (islSel >= (state.preview.islands?.length ?? 0)) islSel = -1;
     const x = state.opts.ex, extra = [x.inset > 0 ? tt('exclusion distance {0} mm', x.inset) : '', x.angleOn ? tt('normal angle ≤ {0}°{1}', x.angleDeg, r.fit.nfRemoved ? ` (−${r.fit.nfRemoved})` : '') : '', x.outlierOn ? tt('outliers > {0} × RMS removed', x.outlierK) : tt('no outlier removal')].filter(Boolean).join(' · ');
     if (fill) status(tt('Inside outer boundary: {0} points (+{1} on bumps/rims), flatness {2} mm.', r.indices.length, r.filled ?? 0, fmt(r.fit.form, 4)) + ' ' + extra + (r.raised?.length ? ' · ' + (state.opts.fill.exRaised ? tt('Raised features excluded: {0} points (magenta).', r.raised.length) : tt('Raised features (magenta) included: {0} points – “Exclude raised” drops them.', r.raised.length)) : ''));
     else status(tt('{0} points', r.indices.length) + ' · ' + extra);
@@ -903,7 +974,7 @@ function commitPreview() {
   if (p.auxFill) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised };
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = x.outlierOn ? x.outlierK : 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
     if (p.zone && GEOM_ZONE.includes(t)) { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
-    if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands }; } }
+    if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
@@ -913,7 +984,7 @@ function commitPreview() {
   state.features.push(asNode(f)); // node + Ist (core/featuremodel.ts)
   if (state.opts.newDatum && !state.features.some((g) => g.datum === state.opts.newDatum)) setDatum(f, state.opts.newDatum);
   state.opts.newDatum = '';
-  state.preview = null; clearBrush();
+  state.preview = null; clearBrush(); resetIslands();
   state.sel = [f.id]; state.selControl = null; state.addFeat = f.id;
   if (state.mode?.kind === 'dist') { const comp = state.mode.comp; f.dim = { comp }; const off = state.labelOffsets.get(-1); if (off) state.labelOffsets.set(f.id, off); state.labelOffsets.delete(-1);
     addControl(('Abstand ' + comp) as ControlKind, f.id); state.mode = { kind: 'dist', a: null, b: null, slot: 0, comp }; }
@@ -956,7 +1027,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
       f.measured = auxR.fit; f.indices = auxR.indices; f.src = auxR.indices;
       f.aux = { plane: auxR.aux.plane, pointCount: auxR.aux.indices.length, source: auxR.source, refId: auxR.refId } as AuxPlane; f.auxIndices = auxR.aux.indices;
     } else {
-      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, crit: fp.crit ?? 'lsq', formBy: true, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised, islands: fp.fill.islands !== false, inset: fp.inset ?? 0 } : null, inset: type === 'Ebene' && !fp.fill?.on ? fp.inset ?? 0 : 0 } }));
+      const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, crit: fp.crit ?? 'lsq', formBy: true, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised, islands: fp.fill.islands !== false, inset: fp.inset ?? 0, isl: fp.fill.isl } : null, inset: type === 'Ebene' && !fp.fill?.on ? fp.inset ?? 0 : 0 } }));
       f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined; f.dev = undefined;
       if (fp.zoneSrc === 'geom' && GEOM_ZONE.includes(type)) { // keep the boundary from the fitted geometry (not the grown triangles)
         const g = await geomZoneExtract(r.fit, r.indices, f.hit?.point, fp.zoneBand, { k: fp.k, angleOn: !!fp.nf?.on, angleDeg: fp.nf?.angleDeg ?? 30, inset: fp.inset ?? 0 }, fp.crit ?? 'lsq');
@@ -970,7 +1041,8 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
   } catch (e: any) { status(tt('Fit failed: {0}', e.message)); toast(tt('Fit failed: {0}', e.message)); }
   renderAll(); scheduleAutosave();
 }
-function discardPreview() { state.preview = null; clearBrush(); status(tt('Preview discarded.')); renderAll(); }
+function resetIslands() { state.opts.fill.isl = []; islSel = -1; }
+function discardPreview() { state.preview = null; clearBrush(); resetIslands(); status(tt('Preview discarded.')); renderAll(); }
 
 // ------------------------------------------------------------------ Abstand
 function pickFeatureForDistance(h: Hit) {
@@ -1989,10 +2061,11 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     ${dsec('sel', '① ' + tt('Point selection'), `${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${selectionParamsHTML(f)}`, true)}
     ${reexHTML(f) ? '' : dsec('flt', '② ' + tt('Filters'), filterParamsHTML(f), true)}
     ${f.type !== 'Abstand' && !f.cons ? dsec('fit', (reexHTML(f) ? '② ' : '③ ') + tt('Fit'), fitParamsHTML(f), true) : ''}
-    ${reexHTML(f) ? dsec('adv', '⚙ ' + tt('Advanced · Re-extraction'), `<p class="note">${tt('Rarely needed: re-extract the points of this actual feature with other parameters.')}</p>${reexHTML(f)}`, false) : ''}
+    ${reexHTML(f) || TRIM_TYPES.includes(f.type) ? dsec('adv', '⚙ ' + (reexHTML(f) ? tt('Advanced · Re-extraction') : tt('Advanced')), `${TRIM_TYPES.includes(f.type) ? `<div class="row">${smoothCtl('fp-smooth')}</div>` : ''}${reexHTML(f) ? `<p class="note">${tt('Rarely needed: re-extract the points of this actual feature with other parameters.')}</p>${reexHTML(f)}` : ''}`, false) : ''}
     <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Actual – read-only info…')}</button></p>
     <div><button class="btn" id="d-center">⌖ ${tt('Center')}</button><button class="btn" id="d-addctrl">＋ ${tt('Control …')}</button><button class="btn" id="d-an">◐ ${tt('Analyze deviation')}</button><button class="btn" id="d-del">${tt('Delete feature')}</button></div>`;
   d.querySelector('#dt-apply')?.addEventListener('click', () => setDatum(f, ($('#dt-letter') as HTMLSelectElement).value));
+  bindSmooth(d, '#fp-smooth');
   d.querySelector('#dt-remove')?.addEventListener('click', () => setDatum(f, null));
   d.querySelector('#dt-training')?.addEventListener('click', () => startTraining());
   d.querySelector('#d-center')?.addEventListener('click', () => centerOn(f.id));
@@ -2333,7 +2406,10 @@ function renderScene() {
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
-    for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
+    // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands
+    if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of previewLoops(p)) viewer.addContour(L, 0x1565c0);
+    else for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
+    (p.islands ?? []).forEach((I, i) => { for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.inc ? 0x2e7d32 : !islCanInc(I) ? 0x78909c : 0xff8c1a); });
   }
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();
@@ -2868,7 +2944,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 

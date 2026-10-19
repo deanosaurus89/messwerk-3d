@@ -100,11 +100,11 @@ export interface FitParams { k: number; nf?: NormalFilter | null; /** planes: ca
 function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
   let { p, n } = gather(mesh!, idx);
   if (p.length < 3) throw new Error('Too few points selected');
-  let band: number | undefined; let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0, raised: Uint32Array | undefined, contour: number[][][] | undefined;
+  let band: number | undefined; let fit = fitType(type, p, n, prm.k), use = idx, removed = 0, filled = 0, raised: Uint32Array | undefined, contour: number[][][] | undefined, islands: import('./core/fillplane').Island[] | undefined;
   if (prm.fill && type === 'Ebene') {
     band = prm.fill.band > 0 ? prm.fill.band : autoBand(fit.rms);
     const r = fillOuterBoundary(mesh!.positions, mesh!.vertexNormals ?? null, idx, fit, { ...prm.fill, band }, mesh!.indices);
-    use = idx = r.indices; filled = r.added; raised = r.raised; contour = r.contour; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
+    use = idx = r.indices; filled = r.added; raised = r.raised; contour = r.contour; islands = r.islands; ({ p, n } = gather(mesh!, idx)); fit = fitType(type, p, n, prm.k);
   } else if (type === 'Ebene' && (prm.inset ?? 0) > 0) {
     use = idx = insetPlane(mesh!.positions, idx, fit, prm.inset!, mesh!.indices); ({ p, n } = gather(mesh!, idx)); if (p.length < 3) throw new Error('Boundary exclusion distance removes all points'); fit = fitType(type, p, n, prm.k);
   }
@@ -117,7 +117,7 @@ function fitWithParams(idx: Uint32Array, type: GeomType, prm: FitParams) {
     } else removed = 0;
   }
   delete fit.residuals; fit.n = use.length; fit.nfRemoved = removed;
-  return { indices: use, fit, candidates: [], filled, raised, contour, band };
+  return { indices: use, fit, candidates: [], filled, raised, contour, islands, band };
 }
 /** Refit the final selection without outlier rejection (only if the robust fit had dropped points – otherwise identical). */
 function rawFinal(result: any) {

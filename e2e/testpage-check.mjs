@@ -9,7 +9,7 @@ const browser = await chromium.launch({ channel: 'chrome' });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
 for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { name: 'iphone', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }]) {
   const ctx = await browser.newContext(v), page = await ctx.newPage(), errors = []; page.on('pageerror', (e) => errors.push(String(e)));
-  await page.route('**/version.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: '2026.0.30', rev: 'test' }) }));
+  await page.route('**/version.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: '2026.0.31', rev: 'test' }) }));
   await page.goto(BASE + 'test.html'); await sleep(800);
   const r = await page.evaluate(async () => { const w = (ms) => new Promise((r) => setTimeout(r, ms)); localStorage.clear();
     const p1 = [...document.querySelectorAll('.it[data-grp="p1"]')], av = p1.filter((e) => !e.classList.contains('unavail')).map((e) => e.dataset.id);
@@ -22,13 +22,13 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     return { n: p1.length, av, closed, out1, out: document.querySelector('#out').value, steps: !!f3.querySelector('.steps') && !!f3.querySelector('.exp') }; });
   console.log(v.name, JSON.stringify(r));
   if (r.n !== 9 || !r.steps) fail(`${v.name}: Phase-1 items ${r.n}`);
-  if (r.av.join() !== 'R1,F1,F2,F3,F4,F5') fail(`${v.name}: available at 0.30: ${r.av}`);
+  if (r.av.join() !== 'R1,F1,F2,F3,F4,F5,F6,F7') fail(`${v.name}: available at 0.31: ${r.av}`);
   if (!r.closed) fail(`${v.name}: archive/tolerance sections not collapsed`);
   if (r.out1) fail(`${v.name}: bug without severity was accepted`);
   const L = r.out.split('\n');
-  if (!/2026\.0\.30/.test(L[0])) fail(`${v.name}: version line ${L[0]}`);
+  if (!/2026\.0\.31/.test(L[0])) fail(`${v.name}: version line ${L[0]}`);
   if (!L.some((l) => l.startsWith('F3 ❌ – kein Kreis 🐞 [Major]'))) fail(`${v.name}: F3 bug line missing`);
-  if (L.some((l) => /^F[6-8] /.test(l))) fail(`${v.name}: unavailable items in the result`);
+  if (L.some((l) => /^F8 /.test(l))) fail(`${v.name}: unavailable items in the result`);
   if (!L.includes('BB ✅') || L.some((l) => /^(AS|C|AX) /.test(l))) fail(`${v.name}: archive: only changed items expected`);
   if (errors.length) fail(`${v.name}: ${errors.join(' | ')}`);
   await ctx.close();

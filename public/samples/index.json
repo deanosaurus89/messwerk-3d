@@ -21,6 +21,16 @@
   "thumb": "thumb-flansch.jpg"
  },
  {
+  "key": "inseldemo",
+  "name": "Islands demo (bolt circle)",
+  "file": "inseldemo.stl.gz",
+  "kind": "Synthetic scan (plate with bolt circle)",
+  "description": "Plate 80 × 60 × 10: bolt circle 6 × Ø8 on PCD 40 – three holes with raised rims, one with a spatter ring – centre bore Ø14, a local bump, a flat swell and a scan gap. For plane “All inside boundary”: islands and smoothed boundary.",
+  "triangles": 168102,
+  "bytes": 4236740,
+  "thumb": "thumb-inseldemo.jpg"
+ },
+ {
   "key": "cadsample",
   "name": "CAD surface model (IGES)",
   "file": "cad-sample.igs.gz",

@@ -7,10 +7,11 @@ import fs from 'node:fs';
 const srv = spawn('npx', ['serve', '-l', '8771', 'dist'], { stdio: 'ignore' }); await sleep(2500);
 const b = await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const p = await b.newPage({ viewport: { width: 1600, height: 950 } });
-await p.goto('http://localhost:8771/');
+await p.goto('http://localhost:8771/'); await sleep(1500); await p.reload(); // second load: no “What's new” dialog
 const list = JSON.parse(fs.readFileSync('public/samples/index.json', 'utf8'));
 const close = { pruefplatte: [[70, 45, 16], [1, -1.4, 1.2], 9, [100, 45, 16]], flansch: [[0, -25, 40], [0.3, -1, 0.35], 9, [0, -22.5, 38]], freiform: [[40, 40, 26], [0.6, -1, 0.9], 10, [35, 40, 29]] };
-for (const s of list) {
+const only = process.argv[2]; // optional: only this sample key
+for (const s of list.filter((x) => !only || x.key === only)) {
   await p.click('#btn-sample'); await p.click(`.sample-card[data-key="${s.key}"]`);
   await p.waitForFunction((k) => window.__app.state.data?.name.startsWith(k), s.key, { timeout: 120000 });
   await p.evaluate(() => { const { viewer } = window.__app; viewer.viewDir([1, -1.3, 1.1]); viewer.view('fit'); viewer.viewDir([1, -1.3, 1.1]); });

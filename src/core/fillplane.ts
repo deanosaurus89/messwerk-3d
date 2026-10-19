@@ -31,13 +31,22 @@ export interface FillParams {
   /** boundary exclusion distance [mm]: points closer than this to the outer contour, to openings (holes) and – with
    *  islands excluded – to island edges are dropped (fixed inset; default 0) */
   inset?: number;
+  /** per-island choice (0.31, creation): when present, every detected island – an enclosed area inside the outer contour
+   *  that is not plain face (opening, bump/raised rim/spatter the region growing did not reach, raised feature) – is
+   *  EXCLUDED unless listed with inc = true (“not an island”); m refines its extent (mm: + grows, − shrinks the excluded
+   *  zone). Supersedes `islands`. Choices are matched to islands by centre (≤ max(1 mm, ½ island radius)). */
+  isl?: IslandChoice[];
 }
+export interface IslandChoice { c: number[]; inc?: boolean; m?: number }
+export interface Island { id: number; kind: 'hole' | 'bump' | 'raised'; /** hole with a raised rim/spatter around it */ rim?: boolean;
+  c: number[]; /** equivalent radius (mm) */ r: number; area: number; /** max height above the plane (mm) */ h: number; /** mesh points in it */ n: number;
+  inc: boolean; m: number; loops: number[][][] }
 export const FILL_DEFAULT: FillParams = { band: 2, maxWallDeg: 75, closeMm: 2, excludeRaised: false, islands: true, inset: 0 };
 export interface FillResult { indices: Uint32Array; added: number; cell: number; insideCells: number;
   /** points belonging to raised features (in the result unless excludeRaised, else the excluded ones) */
   raised: Uint32Array; raisedCount: number;
   /** outer contour as closed 3D loops (in the plane) */
-  contour: number[][][]; islandCells?: number; insetDropped?: number }
+  contour: number[][][]; islandCells?: number; insetDropped?: number; islands?: Island[] }
 
 /** box dilation by rr cells (separable running max, O(cells)) */
 function dilateBox(a: Uint8Array, W: number, H: number, rr: number): Uint8Array {
@@ -128,6 +137,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
   const hc: number[] = [], hd: number[] = [], hdn: number[] = [], hcell: number[] = [];
   const bandV = tris ? new Uint8Array(N) : new Uint8Array(0);
   const has = new Uint8Array(W * H), deep = new Uint8Array(W * H), high = new Uint8Array(W * H);
+  const dabs = p.isl ? new Float32Array(W * H) : new Float32Array(0), hpos = p.isl ? new Float32Array(W * H) : dabs, pc = p.isl ? new Uint32Array(W * H) : new Uint32Array(0), dbs: number[] = []; // |distance| per cell (islands: local bumps/dents)
   for (let k = 0; k < seed.length; k++) has[cy(ys[k]) * W + cx(xs[k])] = 1;
   for (let i = 0; i < N; i++) {
     const dx = pos[3 * i] - c[0], dy = pos[3 * i + 1] - c[1], dz = pos[3 * i + 2] - c[2];
@@ -136,8 +146,8 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
     if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue; const cell = jj * W + ii; if (!inside[cell]) continue;
     const dn = nrm ? nrm[3 * i] * n[0] + nrm[3 * i + 1] * n[1] + nrm[3 * i + 2] * n[2] : 1;
     if (d < -band) { if (Math.abs(dn) < 0.5) deep[cell] = 1; continue; }   // wall continuing below the band: real bore/step
-    if (d > band) { if (dn > -0.2 && d < 50) { high[cell] = 1; hc.push(i); hd.push(d); hdn.push(dn); hcell.push(cell); } continue; } // above the band: bump tip or raised feature
-    has[cell] = 1; if (tris) bandV[i] = 1; if (sel[i]) continue; cand.push(i); cd.push(d); cdn.push(dn); ccell.push(cell);
+    if (d > band) { if (dn > -0.2 && d < 50) { high[cell] = 1; if (p.isl) { pc[cell]++; if (d > hpos[cell]) hpos[cell] = d; } hc.push(i); hd.push(d); hdn.push(dn); hcell.push(cell); } continue; } // above the band: bump tip or raised feature
+    has[cell] = 1; if (tris) bandV[i] = 1; if (p.isl) { pc[cell]++; if (dn > 0.87) { const a = Math.abs(d); if (a > dabs[cell]) dabs[cell] = a; if (d > hpos[cell]) hpos[cell] = d; if (dbs.length < 200000 && (i & 3) === 0) dbs.push(a); } } if (sel[i]) continue; cand.push(i); cd.push(d); cdn.push(dn); ccell.push(cell);
   }
   if (tris) { for (let k = 0; k < seed.length; k++) bandV[seed[k]] = 1; const hasT = new Uint8Array(W * H); rasterTris(pos, tris, bandV, c, u, v, x0, y0, h, M, W, H, hasT); for (let k = 0; k < W * H; k++) if (hasT[k] && inside[k]) has[k] = 1; }
   // real openings: inside cells without any surface in the band (and the outside); their edge zone
@@ -160,6 +170,42 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
   // islands: cells inside the contour with surface that the (gap-closed) grown region does not cover
   const grownC = dil(occ, 1), island = new Uint8Array(W * H); let islandCells = 0;
   if (p.islands === false) for (let k = 0; k < W * H; k++) if (inside[k] && has[k] && !grownC[k] && !rcell[k]) { island[k] = 1; islandCells++; }
+  let islands: Island[] | undefined;
+  if (p.isl) { // 0.31: detected islands, excluded unless chosen “not an island”
+    const lift3 = (x: number, y: number) => [c[0] + u[0] * x + v[0] * y, c[1] + u[1] * x + v[1] * y, c[2] + u[2] * x + v[2] * y];
+    const cellXY = (k: number) => { const i = k % W, j = (k - i) / W; return [(i + 0.5 - M) * h + x0, (j + 0.5 - M) * h + y0]; };
+    // local bump / dent: surface further from the plane than 6 × the robust noise (MAD), at least 0.03 mm – also where the
+    // region growing ran over it (gentle flanks)
+    dbs.sort((a, b) => a - b); const sig = 1.4826 * (dbs[dbs.length >> 1] ?? 0), T = Math.max(0.03, 6 * sig);
+    const cand0 = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) if (inside[k] && (!has[k] || !grownC[k] || rcell[k] || dabs[k] > T || high[k])) cand0[k] = 1;
+    const comp = new Int32Array(W * H).fill(-1), comps: number[][] = [];
+    for (let k0 = 0; k0 < W * H; k0++) { if (!cand0[k0] || comp[k0] >= 0) continue; const id = comps.length, cells = [k0], q = [k0]; comp[k0] = id; let open = false;
+      while (q.length) { const k = q.pop()!, i = k % W, j = (k - i) / W;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= W || jj >= H) { open = true; continue; }
+          const kk = jj * W + ii; if (outD[kk] && !inside[kk]) open = true; if (!cand0[kk] || comp[kk] >= 0) continue; comp[kk] = id; cells.push(kk); q.push(kk); } }
+      comps.push(open || cells.length < 2 || cells.length > 0.25 * insideCells ? [] : cells); } // large areas = form deviation of the face, not an island
+    // per component: kind, centre, height, point count
+    islands = [];
+    const choices = p.isl;
+    for (let id = 0; id < comps.length; id++) { const cells = comps[id]; if (!cells.length) continue;
+      let sx = 0, sy = 0, nv = 0, nr = 0, nb = 0, npt = 0, hmx = 0; for (const k of cells) { const [x, y] = cellXY(k); sx += x; sy += y; if (!has[k] && !high[k]) nv++; if (rcell[k]) nr++; if (hpos[k] > T) nb++; npt += pc[k]; hmx = Math.max(hmx, hpos[k]); }
+      const cc = lift3(sx / cells.length, sy / cells.length), area = cells.length * h * h, r = Math.sqrt(area / Math.PI);
+      const kind: Island['kind'] = nr > 0 && hmx > 0.5 ? 'raised' : nv >= 2 ? 'hole' : 'bump'; // a flat swell of a few 0.1 mm is a bump, not a raised feature
+      let ch: IslandChoice | undefined, bd = Math.max(1, 0.5 * r);
+      for (const o of choices) { const d = Math.hypot(o.c[0] - cc[0], o.c[1] - cc[1], o.c[2] - cc[2]); if (d < bd) { bd = d; ch = o; } }
+      const rim = kind === 'hole' && nb >= 3, inc = !!ch?.inc && (kind !== 'hole' || rim), m = ch?.m ?? 0;
+      // excluded zone = component refined by the margin (dilate / erode inside its bounding box)
+      let i0 = W, i1 = 0, j0 = H, j1 = 0; for (const k of cells) { const i = k % W, j = (k - i) / W; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
+      const rr = Math.round(Math.abs(m) / h), pad = rr + 2, bi = Math.max(0, i0 - pad), bj = Math.max(0, j0 - pad), bw = Math.min(W - 1, i1 + pad) - bi + 1, bh = Math.min(H - 1, j1 + pad) - bj + 1;
+      const sub = new Uint8Array(bw * bh); for (const k of cells) { const i = k % W, j = (k - i) / W; sub[(j - bj) * bw + (i - bi)] = 1; }
+      let zone: Uint8Array = sub;
+      if (m > 0 && rr > 0) zone = dilateBox(sub, bw, bh, rr);
+      else if (m < 0 && rr > 0) { const inv = new Uint8Array(bw * bh); for (let k = 0; k < bw * bh; k++) inv[k] = sub[k] ? 0 : 1; const e = dilateBox(inv, bw, bh, rr); zone = new Uint8Array(bw * bh); for (let k = 0; k < bw * bh; k++) zone[k] = sub[k] && !e[k] ? 1 : 0; }
+      if (!inc) for (let jj = 0; jj < bh; jj++) for (let ii = 0; ii < bw; ii++) if (zone[jj * bw + ii]) { const k = (jj + bj) * W + ii + bi; if (inside[k] && !island[k]) { island[k] = 1; islandCells++; } }
+      const loops = maskLoops(zone, bw, bh).map((L) => L.map(([gi, gj]) => lift3((gi + bi - M) * h + x0, (gj + bj - M) * h + y0)));
+      islands.push({ id: islands.length + 1, kind, rim: rim || undefined, c: cc, r, area, h: hmx, n: npt, inc, m, loops });
+    }
+  }
   // boundary exclusion distance: inset from the outer contour, openings and (islands excluded) island edges
   let insetZone: Uint8Array | null = null;
   if ((p.inset ?? 0) > 0) { const rr = Math.max(1, Math.round(p.inset! / h)), b0 = new Uint8Array(W * H);
@@ -193,7 +239,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
   for (let k = 0; k < W * H; k++) if (selC[k]) selM[k] = 1;
   const contour = maskLoops(selM, W, H).map((L) => L.map(([gi, gj]) => { const x = (gi - M) * h + x0, y = (gj - M) * h + y0;
     return [c[0] + u[0] * x + v[0] * y + n[0] * lift, c[1] + u[1] * x + v[1] * y + n[1] * lift, c[2] + u[2] * x + v[2] * y + n[2] * lift]; }));
-  return { indices: Uint32Array.from(idx), added, cell: h, insideCells, raised: Uint32Array.from(raised), raisedCount: raised.length, contour, islandCells, insetDropped };
+  return { indices: Uint32Array.from(idx), added, cell: h, insideCells, raised: Uint32Array.from(raised), raisedCount: raised.length, contour, islandCells, insetDropped, islands };
 }
 
 /** Boundary exclusion distance for a plain region (no outer-contour fill): drop points closer than `inset` mm to the

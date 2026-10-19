@@ -51,3 +51,9 @@ Erzeugung: `python scripts/make_scan_parts.py public/samples`, danach `python sc
 - Bolzen Ø18 × 12 bei (100, 60).
 - Halbkugel Ø16 bei (120, 25, 20).
 - Kegel: Ø12 → Ø4 auf 10 mm Höhe bei (80, 64).
+
+## Islands demo (80 × 60 × 10) – `inseldemo.stl.gz`
+Synthetisch (generisch), erzeugt mit `python scripts/make_islanddemo.py public/samples` (numpy + scipy). Für Ebene › „All inside boundary“: Inseln und geglättete Berandung.
+- Oberseite z = 10, Unterseite z = 0; Netz 0,4 mm (Delaunay), Rauschen σ = 8 µm.
+- Teilkreis Ø40 um (40, 30): 6 × Ø8 durchgehend, Startwinkel 0°. Bohrungen bei 0°, 120°, 240° mit aufgeworfenem Rand (0,25 mm hoch, ~1 mm breit), bei 60° ein Spritzerkranz.
+- Mittelbohrung Ø14; lokale Erhebung 0,5 mm bei (12, 48); flache Beule 0,12 mm bei (68, 10); Scanlücke Ø1,6 bei (15, 12).

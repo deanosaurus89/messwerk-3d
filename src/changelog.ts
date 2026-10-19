@@ -7,6 +7,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.31', date: '2026-10-19', items: [
+    'Feature creation, step 4 – smoothed boundary: the boundary of a feature is drawn as a smooth contour on the fitted surface instead of the triangle zigzag – in the preview (blue) and on the created plane/cylinder/cone/sphere/torus. Display only; fit and results are unchanged. Tolerance: Feature dialog › ⚙ Advanced (or Creation Panel › Parameters) › Boundary smoothing – empty = automatic (0.7 × mesh edge length, max. 0.5 mm), 0 = off.',
+    'Plane › All inside boundary: islands are now detected automatically at creation – ◯ hole/opening, ◎ hole with raised rim or spatter, ▲ local bump, ▮ raised feature – and EXCLUDED from the plane (flatness of the plain face). The Creation Panel lists them (🏝 Islands); tap an island there or in the 3D view → “Not an island” takes its points back into the plane, “Refine ±” grows or shrinks its excluded zone. Replaces the old “Islands” checkbox (existing features keep their behaviour).',
+    'New demo part “Islands demo (bolt circle)” (Load sample): plate with a bolt circle, raised rims, spatter, a local bump and a scan gap – for trying islands and the smoothed boundary.',
+  ] },
   { version: '2026.0.30', date: '2026-10-19', items: [
     'Feature creation, step 2 – feedback: the preview shows exactly point count, form deviation and standard deviation (sizes and further values after ✓ in the tree and dialog).',
     'Feature creation, step 3 – Create uses the selection as-is: the created feature is a plain fit of ALL selected points (also the aux plane of circles/slots). Outlier removal is no longer applied silently; it is an optional filter under Parameters (off by default). Demo part: form deviations now include the scan noise tails (e.g. top plane 0.044 → 0.071 mm), sizes change by less than 0.001 mm. Existing features keep their values.',
