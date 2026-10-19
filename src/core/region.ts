@@ -14,6 +14,7 @@ export interface GrowOptions {
   /** Altes Verfahren (nur Nachbarwinkel/Krümmung) – für Vergleichstests. */
   /** seed patch radius around the click [mm] (pick circle); 0/undefined = automatic 6 × local edge length */
   seedR?: number;
+  /** 0.36: reine Nachbarschaft (ohne Krümmungs-/Ankerkriterium), z. B. Umgebungs-Scan am Rand */ noCurv?: boolean;
   legacy?: boolean; /** nur saubere Kantenwachstums-Regionen (Gütekontrolle), sonst leer */ strict?: boolean; legacyCap?: number;
 }
 /** Vorzeichenbehafteter Abstand eines Punkts zum Regelgeometrie-Modell. */
@@ -38,10 +39,26 @@ export interface GrowInfo { model: GeomType | 'Prisma' | 'keins'; h: number; sig
 
 export class MeshTopology {
   vt: { offsets: Uint32Array; tris: Uint32Array };
-  smooth: Float32Array; // geglättete Dreiecksnormalen (flächengewichtet über 1-Ring)
+  smooth: Float32Array; // 0.36: robuste Dreiecksnormalen (Mittel der Nachbarschafts-Ebenen-Normalen ihrer Knoten)
+  /** 0.36: robuste Knotennormale – Ebenen-Fit (PCA) über alle Punkte im Radius 1,3 × lokale mittlere Kantenlänge
+   *  (mind. ROBUST_MIN Punkte, sonst Radius ×1,5, max. 3×). Unempfindlich gegen Nadeldreiecke + Rauschen. */
+  robustVN: Float32Array;
+  /** Rechenzeit der robusten Normalen [ms] (Bericht/Tests) */
+  robustMs = 0;
+  /** Nadeldreiecke (1 = robuste Normale) */
+  needle: Uint8Array; needleCount = 0;
   constructor(public mesh: MeshData) {
     this.vt = vertexTriangles(mesh);
-    this.smooth = mesh.faceNormals!;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    // Nadel-/Splitterdreiecke (Formqualität q < NEEDLE_Q): eigene Normale ist vom Rauschen dominiert -> robuste Nachbarschafts-Normale.
+    // Gut geformte Dreiecke behalten ihre Normale (dort stimmen Dreiecks- und Nachbarschaftsnormale überein, gemessen: p95 < 3°),
+    // damit scharfe Kanten zwischen Regelgeometrien scharf bleiben (die Nachbarschaftsnormale verschmiert sie über ±R).
+    this.needle = needleTris(mesh);
+    this.robustVN = robustVertexNormals(mesh, this.vt, ROBUST_K, ROBUST_MIN, verticesOf(mesh, this.needle));
+    const rt = triFromVertex(mesh, this.robustVN), fn0 = mesh.faceNormals!; this.smooth = new Float32Array(fn0);
+    let nn = 0; for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) { nn++; for (let k = 0; k < 3; k++) this.smooth[3 * t + k] = rt[3 * t + k]; }
+    this.needleCount = nn;
+    this.robustMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
     this.sliver = this.findSlivers();
     this.anchorDist = Math.max(1.0, 1.2 * this.medianEdge());
     this.isotropic = this.checkIsotropic();
@@ -83,7 +100,7 @@ export class MeshTopology {
   }
   /** Bezugsabstand für die Krümmungsprüfung beim Wachsen (≈ 1 mm bzw. 1,2 × mittlere Kantenlänge). */
   anchorDist: number;
-  private medianEdge(): number {
+  medianEdge(): number {
     const p = this.mesh.positions, f = this.mesh.indices, nt = f.length / 3, L: number[] = [];
     const step = Math.max(1, Math.floor(nt / 5000));
     for (let t = 0; t < nt; t += step) { const a = 3 * f[3 * t], b = 3 * f[3 * t + 1]; L.push(Math.hypot(p[a] - p[b], p[a + 1] - p[b + 1], p[a + 2] - p[b + 2])); }
@@ -129,7 +146,12 @@ export class MeshTopology {
 
   /** Glatte Dreiecksnormalen (Knotennormalen gemittelt) – einmalig berechnet. */
   private _sn: Float32Array | null = null;
-  get smoothN(): Float32Array { return (this._sn ??= this.smoothNormals()); }
+  get smoothN(): Float32Array {
+    if (this._sn) return this._sn; const o = this.smoothNormals();
+    for (let t = 0; t < this.needle.length; t++) if (this.needle[t]) for (let k = 0; k < 3; k++) o[3 * t + k] = this.smooth[3 * t + k];
+    return (this._sn = o); }
+  /** alte 1-Ring-Glättung (nur Vergleich) */
+  get oneRingN(): Float32Array { return this.smoothNormals(); }
   private _area = -1;
   get totalArea(): number { if (this._area < 0) { let s = 0; for (const a of this.mesh.faceAreas!) s += a; this._area = s; } return this._area; }
   lastGrow: GrowInfo | null = null;
@@ -154,9 +176,45 @@ export class MeshTopology {
       const h = this.localEdge(seedTri);
       let a = 0; const fa = this.mesh.faceAreas!; for (const t of L) a += fa[t];
       const r = a < 0.01 * this.totalArea ? 0 : this.regionRms(L, 0.3 * h, fitInfo?.model === 'Ebene');
-      if (r !== null && r < 0.3 * h) { this.lastGrow = { model: 'keins', h, sigma: r, tol: 0.3 * h, angDeg: o.maxAngleDeg, seedTris: 0, refits: 0, capped: false, legacy: true }; return L; }
+      if (r !== null && r < 0.3 * h) { this.lastGrow = { model: 'keins', h, sigma: r, tol: 0.3 * h, angDeg: o.maxAngleDeg, seedTris: 0, refits: 0, capped: false, legacy: true }; return this.closeHoles(L); }
     }
-    this.lastGrow = fitInfo; return o.strict ? new Uint32Array(0) : F;
+    this.lastGrow = fitInfo; return o.strict ? new Uint32Array(0) : this.closeHoles(F);
+  }
+  /** 0.36 Sicherheitsnetz (morphologisches Schließen): kleine, vollständig von der Region umschlossene Flecken
+   *  nicht gewählter Dreiecke (≤ maxTris, Ausdehnung ≤ 3 × Kantenlänge, nicht am Netzrand) werden aufgenommen –
+   *  so entstehen keine Splitter-Schleifen um einzelne Punkte. Echte Inseln (größer) bleiben. */
+  closeHoles(R: Uint32Array, maxTris = 24): Uint32Array {
+    if (R.length < 3) return R;
+    const nt = this.mesh.indices.length / 3, f = this.mesh.indices, p = this.mesh.positions; const inR = new Uint8Array(nt); for (const t of R) inR[t] = 1;
+    const seen = new Uint8Array(nt); const add: number[] = []; const h = this.medianEdge(), lim2 = (3 * h) ** 2;
+    const bnd = this.boundaryVerts();
+    for (const t of R) for (const u0 of this.neighbors(t)) {
+      if (inR[u0] || seen[u0]) continue;
+      const comp = [u0]; seen[u0] = 1; let ok = true;
+      for (let i = 0; i < comp.length && ok; i++) { const u = comp[i];
+        for (let k = 0; k < 3; k++) if (bnd[f[3 * u + k]]) { ok = false; break; }
+        for (const w of this.neighbors(u)) { if (inR[w] || seen[w]) continue; seen[w] = 1; comp.push(w); if (comp.length > maxTris) { ok = false; break; } } }
+      if (!ok) continue;
+      // Ausdehnung prüfen
+      const a = 3 * f[3 * comp[0]]; let mx = 0;
+      for (const u of comp) for (let k = 0; k < 3; k++) { const b = 3 * f[3 * u + k]; mx = Math.max(mx, (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2); }
+      if (mx <= lim2) add.push(...comp);
+    }
+    if (!add.length) return R;
+    for (const t of add) inR[t] = 1; const out: number[] = []; for (let t = 0; t < nt; t++) if (inR[t]) out.push(t);
+    this.lastClosed = add.length; return new Uint32Array(out);
+  }
+  lastClosed = 0;
+  private _bv: Uint8Array | null = null;
+  /** Knoten am offenen Netzrand (Kante nur in einem Dreieck) */
+  boundaryVerts(): Uint8Array {
+    if (this._bv) return this._bv;
+    const f = this.mesh.indices, nv = this.mesh.positions.length / 3, { offsets, tris } = this.vt; const out = new Uint8Array(nv);
+    for (let v = 0; v < nv; v++) { // Kante v–w offen, wenn genau ein gemeinsames Dreieck
+      const cnt = new Map<number, number>();
+      for (let j = offsets[v]; j < offsets[v + 1]; j++) { const t = tris[j]; for (let k = 0; k < 3; k++) { const w = f[3 * t + k]; if (w !== v) cnt.set(w, (cnt.get(w) ?? 0) + 1); } }
+      for (const c of cnt.values()) if (c === 1) { out[v] = 1; break; } }
+    return (this._bv = out);
   }
   localEdge(seedTri: number): number {
     const f = this.mesh.indices, p = this.mesh.positions; const near: number[] = []; const seen = new Set([seedTri]), q = [seedTri];
@@ -225,14 +283,16 @@ export class MeshTopology {
     if (prism && !pax) { const N = ptsOf(seed).N; const a = axisFromNormals(N); // ebener Saat-Fleck: Achse unbestimmt -> Ebene wachsen
       let spread = 0; for (const q of N) spread = Math.max(spread, 1 - Math.abs(q[0] * N[0][0] + q[1] * N[0][1] + q[2] * N[0][2]));
       if (spread > 0.004) pax = a.axis; else { prism = false; model = fitOf(seed, 'Ebene'); } }
-    let sigma = model ? resid(model, seed) : 0; let tol0 = Math.min(Math.max(4 * sigma, 0.05 * h), 0.5 * h); let tol = tol0;
+    let sigma = model ? resid(model, seed) : 0; let tol0 = Math.min(Math.max(3 * sigma, 0.05 * h), 0.5 * h); let tol = tol0; // 0.36: 3σ (vorher 4σ), geprüft am Dreiecksschwerpunkt
     let angTol = model ? Math.min(Math.max(2.5 * angOf(model, seed), (10 * Math.PI) / 180), (30 * Math.PI) / 180) : (25 * Math.PI) / 180;
     if (prism) angTol = (12 * Math.PI) / 180;
     const info: GrowInfo = { model: prism ? 'Prisma' : model ? model.type : 'keins', h, sigma, tol, angDeg: (angTol * 180) / Math.PI, seedTris: seed.length, refits: 0, capped: false };
     const accept = (u: number): boolean => {
       if (prism && pax) { const d = Math.abs(sn[3 * u] * pax[0] + sn[3 * u + 1] * pax[1] + sn[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
       if (!model) return true;
-      for (let k = 0; k < 3; k++) if (Math.abs(modelDist(model, vpos(f[3 * u + k]))) > tol) return false;
+      // 0.36: Abstand zum mitwachsenden Fit < 3σ am Schwerpunkt (Rauschen /√3), jeder Knoten < 1,5 × Toleranz
+      for (let k = 0; k < 3; k++) if (Math.abs(modelDist(model, vpos(f[3 * u + k]))) > 1.5 * tol) return false;
+      if (Math.abs(modelDist(model, this.cen(u))) > tol) return false;
       const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * sn[3 * u] + mn[1] * sn[3 * u + 1] + mn[2] * sn[3 * u + 2]) > Math.cos(angTol);
     };
     const inR = new Uint8Array(nt); const out: number[] = [seedTri]; inR[seedTri] = 1; let area = fa[seedTri];
@@ -272,7 +332,7 @@ export class MeshTopology {
     const r2 = o.radius > 0 ? o.radius * o.radius : Infinity;
     const sn = [fn[3 * seedTri], fn[3 * seedTri + 1], fn[3 * seedTri + 2]];
     // Bezugskrümmung: Median der Krümmung in der Saat-Umgebung (kleines Vorwachsen nur mit Winkelkriterium)
-    const kap = this.kappa, iso = this.isotropic; let kLo = -1, kHi = Infinity;
+    const kap = this.kappa, iso = this.isotropic && !o.noCurv; let kLo = -1, kHi = Infinity;
     if (iso) {
       const seen = new Set<number>([seedTri]), q = [seedTri], ks: number[] = [];
       while (q.length && ks.length < 80) {
@@ -312,7 +372,7 @@ export class MeshTopology {
         if (iso && fn[3 * an] * fn[3 * u] + fn[3 * an + 1] * fn[3 * u + 1] + fn[3 * an + 2] * fn[3 * u + 2] < cosK) continue;
         anchor[u] = an; anchor2[u] = an2;
         inR[u] = 1; if (++cnt > maxTris) return null;
-        if (this.sliver[u]) continue; // Splitter: aufnehmen, aber nicht weiterwachsen
+        if (this.sliver[u] && !this.needle[u]) continue; // Splitter: aufnehmen, aber nicht weiterwachsen (0.36: mit robuster Normale schon)
         stack.push(u);
       }
     }
@@ -335,6 +395,57 @@ export class MeshTopology {
   }
 }
 
+export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
+export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
+  const p = m.positions, f = m.indices, fa = m.faceAreas!, nt = f.length / 3, out = new Uint8Array(nt);
+  const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
+  for (let t = 0; t < nt; t++) { const a = 3 * f[3 * t], b = 3 * f[3 * t + 1], c = 3 * f[3 * t + 2]; const s = d2(a, b) + d2(b, c) + d2(c, a); out[t] = s > 0 && (4 * Math.sqrt(3) * fa[t]) / s < qmin ? 1 : 0; }
+  return out;
+}
+function verticesOf(m: MeshData, mark: Uint8Array): Uint8Array { const f = m.indices, out = new Uint8Array(m.positions.length / 3); for (let t = 0; t < mark.length; t++) if (mark[t]) { out[f[3 * t]] = out[f[3 * t + 1]] = out[f[3 * t + 2]] = 1; } return out; }
+/** 0.36: robuste Knotennormalen (siehe MeshTopology.robustVN). Nachbarschaft über das Netz (nicht durch dünne Wände),
+ *  Radius R = 1,3 × Median der anliegenden Kantenlängen; kleinster Eigenvektor der Kovarianz per inverser Potenziteration-Variante. */
+export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tris: Uint32Array }, k = ROBUST_K, minPts = ROBUST_MIN, only?: Uint8Array): Float32Array {
+  const p = m.positions, f = m.indices, vn = m.vertexNormals!, nv = p.length / 3, { offsets, tris } = vt;
+  const out = new Float32Array(3 * nv); const stamp = new Int32Array(nv).fill(-1); const q = new Int32Array(nv); const el: number[] = [];
+  for (let v = 0; v < nv; v++) {
+    const o0 = offsets[v], o1 = offsets[v + 1]; if (o1 === o0) continue;
+    if (only && !only[v]) { out[3 * v] = vn[3 * v]; out[3 * v + 1] = vn[3 * v + 1]; out[3 * v + 2] = vn[3 * v + 2]; continue; }
+    el.length = 0;
+    for (let j = o0; j < o1; j++) { const t = tris[j]; for (let e = 0; e < 3; e++) { const a = f[3 * t + e], b = f[3 * t + (e + 1) % 3]; el.push(Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2])); } }
+    el.sort((x, y) => x - y); let R = k * (el[el.length >> 1] || 1);
+    const px = p[3 * v], py = p[3 * v + 1], pz = p[3 * v + 2];
+    let n = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+    for (let tries = 0; tries < 4; tries++) {
+      const R2 = R * R, tag = v * 4 + tries; let head = 0, tail = 0; q[tail++] = v; stamp[v] = tag;
+      n = 0; sx = sy = sz = xx = xy = xz = yy = yz = zz = 0;
+      while (head < tail) { const w = q[head++]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz;
+        n++; sx += dx; sy += dy; sz += dz; xx += dx * dx; xy += dx * dy; xz += dx * dz; yy += dy * dy; yz += dy * dz; zz += dz * dz;
+        for (let j = offsets[w]; j < offsets[w + 1]; j++) { const t = tris[j]; for (let e = 0; e < 3; e++) { const u = f[3 * t + e]; if (stamp[u] === tag) continue; stamp[u] = tag;
+          const ex = p[3 * u] - px, ey = p[3 * u + 1] - py, ez = p[3 * u + 2] - pz; if (ex * ex + ey * ey + ez * ez <= R2) q[tail++] = u; } } }
+      if (n >= minPts || tries === 3) break; R *= 1.5;
+    }
+    let nx = vn[3 * v], ny = vn[3 * v + 1], nz = vn[3 * v + 2];
+    if (n >= 4) {
+      const cx = sx / n, cy = sy / n, cz = sz / n;
+      const a = xx / n - cx * cx, b = xy / n - cx * cy, c = xz / n - cx * cz, d = yy / n - cy * cy, e = yz / n - cy * cz, g = zz / n - cz * cz;
+      // kleinster Eigenvektor: Potenziteration auf (tr·I − C), Start = Flächennormale
+      const tr = a + d + g; let x = nx, y = ny, z = nz;
+      for (let it = 0; it < 12; it++) { const X = tr * x - (a * x + b * y + c * z), Y = tr * y - (b * x + d * y + e * z), Z = tr * z - (c * x + e * y + g * z); const l = Math.hypot(X, Y, Z) || 1; x = X / l; y = Y / l; z = Z / l; }
+      if (x * nx + y * ny + z * nz < 0) { x = -x; y = -y; z = -z; }
+      if (Number.isFinite(x)) { nx = x; ny = y; nz = z; }
+    }
+    out[3 * v] = nx; out[3 * v + 1] = ny; out[3 * v + 2] = nz;
+  }
+  return out;
+}
+export function triFromVertex(m: MeshData, VN: Float32Array): Float32Array {
+  const f = m.indices, fn = m.faceNormals!, nt = f.length / 3, out = new Float32Array(3 * nt);
+  for (let t = 0; t < nt; t++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * f[3 * t + k]; x += VN[v]; y += VN[v + 1]; z += VN[v + 2]; }
+    let l = Math.hypot(x, y, z); if (l < 1e-9) { x = fn[3 * t]; y = fn[3 * t + 1]; z = fn[3 * t + 2]; l = 1; }
+    out[3 * t] = x / l; out[3 * t + 1] = y / l; out[3 * t + 2] = z / l; }
+  return out;
+}
 /** Pinsel: Knoten innerhalb radius um einen Punkt, deren Normale zur Blickseite zeigt. */
 export function brushSelect(m: MeshData, center: Vec3, radius: number, facing?: Vec3): Uint32Array {
   const p = m.positions, n = m.vertexNormals, r2 = radius * radius, out: number[] = [];

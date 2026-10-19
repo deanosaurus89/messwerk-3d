@@ -44,27 +44,28 @@ def mesh(s,defl):
             T.append(t)
         off+=p.NbNodes(); e.Next()
     return np.array(V),np.array(T)
-def subdivide(V,T,maxlen):
-    tris=V[T]; out=[]
-    stack=list(tris)
-    while stack:
-        t=stack.pop(); L=[np.linalg.norm(t[1]-t[0]),np.linalg.norm(t[2]-t[1]),np.linalg.norm(t[0]-t[2])]
-        k=int(np.argmax(L))
-        if L[k]<=maxlen: out.append(t); continue
-        a,b,c=t[k],t[(k+1)%3],t[(k+2)%3]; m=(a+b)/2
-        stack.append(np.array([a,m,c])); stack.append(np.array([m,b,c]))
-    return np.array(out)
+def scanify(V,T,L,seed):
+    """Wie ein professioneller Mesher: annähernd gleichseitige Dreiecke (isotropes Remeshing, Kantenlänge L),
+    Messrauschen σ 8 µm entlang der Normalen, räumlich geglättet (1-Ring), kein Rauschen quer zur Fläche."""
+    import pymeshlab
+    rng=np.random.default_rng(seed)
+    ms=pymeshlab.MeshSet(); ms.add_mesh(pymeshlab.Mesh(V,T))
+    ms.meshing_merge_close_vertices(threshold=pymeshlab.PureValue(1e-4)); ms.meshing_remove_duplicate_faces(); ms.meshing_remove_null_faces()
+    ms.meshing_surface_subdivision_midpoint(iterations=12,threshold=pymeshlab.PureValue(2*L))
+    ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PureValue(L),iterations=15,featuredeg=15,adaptive=False)
+    m=ms.current_mesh(); V=m.vertex_matrix().copy(); T=m.face_matrix().copy(); N=m.vertex_normal_matrix().copy()
+    N/=np.maximum(np.linalg.norm(N,axis=1,keepdims=True),1e-12)
+    e=rng.normal(0,1,len(V)); E=np.concatenate([T[:,[0,1]],T[:,[1,2]],T[:,[2,0]]])
+    s=np.zeros(len(V)); c=np.zeros(len(V)); np.add.at(s,E[:,0],e[E[:,1]]); np.add.at(c,E[:,0],1); np.add.at(s,E[:,1],e[E[:,0]]); np.add.at(c,E[:,1],1)
+    e=0.5*e+0.5*s/np.maximum(c,1); e*=0.008/e.std()
+    return V+N*e[:,None],T
 def write_stl(path,tris):
     n=np.cross(tris[:,1]-tris[:,0],tris[:,2]-tris[:,0]); n/=np.maximum(np.linalg.norm(n,axis=1,keepdims=True),1e-12)
     dt=np.dtype([("n","<f4",3),("v","<f4",(3,3)),("a","<u2")]); a=np.zeros(len(tris),dt); a["n"]=n; a["v"]=tris
     with open(path,"wb") as f: f.write(b"metrology sample".ljust(80,b" ")); f.write(struct.pack("<I",len(tris))); f.write(a.tobytes())
 out=sys.argv[1] if len(sys.argv)>1 else "public/samples"
-# Messteil: Bohrung D12.08 (Soll 12), Bolzen +0.05 in X
-V,T=mesh(part(12.08,0.05),0.005)
-tris=subdivide(V,T,1.8)
-rng=np.random.default_rng(1)
-P=tris.reshape(-1,3); key=np.round(P*1e5).astype(np.int64)
-u,inv=np.unique(key,axis=0,return_inverse=True); noise=rng.normal(0,0.008,(len(u),3))
-P=P+noise[inv.ravel()]
-write_stl(f"{out}/beispielteil.stl",P.reshape(-1,3,3))
-print("ok",len(tris))
+# Messteil: Bohrung D12.08 (Soll 12), Bolzen +0.05 in X. 0.36: isotropes Netz ~0,5 mm statt CAD-Splitter (Nadeldreiecke).
+V,T=mesh(part(12.08,0.05),0.003)
+V,T=scanify(V,T,0.5,1)
+write_stl(f"{out}/beispielteil.stl",V[T].astype(np.float32))
+print("ok",len(T))

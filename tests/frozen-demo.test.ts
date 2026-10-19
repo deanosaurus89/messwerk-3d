@@ -6,6 +6,7 @@ import { MeshTopology, gather } from '../src/core/region';
 import { fitType } from '../src/core/fit';
 import { fillOuterBoundary } from '../src/core/fillplane';
 import { freezeBoundary } from '../src/core/frozen';
+import { selectionLoops } from '../src/core/boundary';
 import { reextract } from '../src/core/reextract';
 import type { Vec3 } from '../src/core/linalg';
 // 0.35 (Martin 19.10. 18:32): re-extraction with the frozen boundary of the demo top plane must give EXACTLY the
@@ -27,16 +28,36 @@ describe('frozen point set on the demo top plane', () => {
   const cg = gather(mesh, created); const fit = { ...fitType('Ebene', cg.p, cg.n), type: 'Ebene' as const };
   const F = freezeBoundary(fit, pos, tris, created)!; F.band = 0.1;
   const P = { maxDist: 0.1, sigma: 3, sigmaOn: false, maxAngleDeg: 30, angleOn: false, margin: 0, frozen: F } as any;
-  it('creation set is the filled top plane (contour fill, many rim loops)', () => {
-    expect(created.length).toBeGreaterThan(30000); expect(F.loops.length).toBeGreaterThan(50);
+  // 0.36 (Martin 19.10. 20:15): robust neighbourhood normals + closing + isotropic demo mesh -> no sliver loops.
+  // Before (0.35, CAD-tessellated needle mesh): 352 frozen loops (339 slivers < 1 mm²), 1913 unselected points > 1 mm from a real edge.
+  const rawLoops = selectionLoops(tris, created, pos.length / 3);
+  const cadEdge = (x: number, y: number) => { const r = (cx: number, cy: number) => Math.hypot(x - cx, y - cy);
+    return Math.min(x, 100 - x, y, 60 - y, Math.abs(r(20, 20) - 6.04), Math.abs(r(85, 10) - 3), Math.abs(r(55.05, 30) - 8), Math.abs(r(82, 38) - 10), Math.abs(r(60, 8) - Math.sqrt(40)),
+      Math.abs(r(40, 10) - 4.167), Math.abs(r(40, 10) - 7.833), Math.abs(Math.hypot(x - Math.min(30, Math.max(10, x)), y - 45) - 5)); };
+  const onFace = (x: number, y: number) => { const r = (cx: number, cy: number) => Math.hypot(x - cx, y - cy);
+    return x > 0 && x < 100 && y > 0 && y < 60 && r(20, 20) > 6.04 && r(85, 10) > 3 && r(55.05, 30) > 8 && r(82, 38) > 10 && r(60, 8) > Math.sqrt(40) && r(40, 10) > 7.833 && Math.hypot(x - Math.min(30, Math.max(10, x)), y - 45) > 5; };
+  it('creation set is the filled top plane; few loops (outer + real islands), no slivers', () => {
+    expect(created.length).toBeGreaterThan(18000);
+    console.log('[0.36] created', created.length, 'raw loops', rawLoops.length, 'frozen loops', F.loops.length);
+    expect(rawLoops.length).toBeLessThanOrEqual(12); expect(F.loops.length).toBeLessThanOrEqual(12);
+    for (const l of F.loops) { let a = 0, per = 0; for (let i = 0; i < l.length; i += 2) { const j = (i + 2) % l.length; a += l[i] * l[j + 1] - l[j] * l[i + 1]; per += Math.hypot(l[j] - l[i], l[j + 1] - l[i + 1]); }
+      expect(Math.abs(a) / 2).toBeGreaterThan(1); expect(Math.abs(a) / per).toBeGreaterThan(0.25); }
+  });
+  it('no unselected points in the middle of the plane (> 1 mm from any real edge)', () => {
+    const s = new Set(created); let n = 0, tot = 0;
+    for (let v = 0; v < pos.length / 3; v++) { const x = pos[3 * v], y = pos[3 * v + 1], z = pos[3 * v + 2];
+      if (Math.abs(z - 20) > 0.05 || !onFace(x, y) || cadEdge(x, y) <= 1) continue; tot++; if (!s.has(v)) n++; }
+    console.log('[0.36] mid-plane points', tot, 'unselected', n);
+    expect(tot).toBeGreaterThan(15000); expect(n).toBeLessThanOrEqual(5);
   });
   it('exclusion 0: re-extraction returns exactly the creation set – repeatedly', () => {
     let cur: Uint32Array = created;
     for (let k = 0; k < 2; k++) { const r = reextract(fit, pos, nrm, cur, { ...P, frozenIdx: created }, [], tris); expect(r.indices.length).toBe(created.length); expect(r.indices.every((v, i) => v === created[i])).toBe(true); cur = r.indices; }
   });
-  it('without the frozen point set (polygon only) the set differs – documents the former +1.3 %', () => {
+  it('polygon only (without the frozen point set) now nearly matches too (0.35: +1.3 %)', () => {
     const r = reextract(fit, pos, nrm, created, P, [], tris); const s = new Set(created); const extra = Array.from(r.indices).filter((v) => !s.has(v)).length;
-    expect(extra).toBeGreaterThan(0);
+    console.log('[0.36] polygon-only reex', r.indices.length, 'extra', extra, 'of', created.length);
+    expect(Math.abs(r.indices.length - created.length) / created.length).toBeLessThan(0.005);
   });
   it('exclusion 1 mm: strict subset, every point ≥ 1 mm inside the frozen boundary', () => {
     const r = reextract(fit, pos, nrm, created, { ...P, inset: 1, frozenIdx: created }, [], tris); const s = new Set(created);

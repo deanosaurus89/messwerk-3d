@@ -15,15 +15,25 @@ export function freezeBoundary(fit: FitResult, pos: ArrayLike<number>, tris: Arr
   if (fit.type !== 'Ebene' || idx.length < 3) return null;
   const n = unit(fit.normal), o = fit.center, [u, v] = basis(n);
   const L = selectionLoops(tris, idx, pos.length / 3); if (!L.length) return null;
-  const loops: number[][] = [], edges: number[] = [];
+  let loops: number[][] = []; const edges: number[] = [];
   for (const lp of L) { const a: number[] = [];
     for (const k of lp) { const w = sub(P3(pos, k), o); a.push(r4(dot(w, u)), r4(dot(w, v))); }
     for (let i = 0; i < a.length; i += 2) { const j = (i + 2) % a.length; edges.push(Math.hypot(a[j] - a[i], a[j + 1] - a[i + 1])); }
     loops.push(a); }
-  edges.sort((x, y) => x - y);
-  return { o: [...o] as Vec3, n: [...n] as Vec3, u: [...u] as Vec3, v: [...v] as Vec3, loops, h: edges[edges.length >> 1] ?? 0.5 };
+  edges.sort((x, y) => x - y); const h = edges[edges.length >> 1] ?? 0.5;
+  loops = realLoops(loops, h);
+  return { o: [...o] as Vec3, n: [...n] as Vec3, u: [...u] as Vec3, v: [...v] as Vec3, loops, h };
 }
 
+const loopArea = (l: number[]) => { let a = 0; for (let i = 0; i < l.length; i += 2) { const j = (i + 2) % l.length; a += l[i] * l[j + 1] - l[j] * l[i + 1]; } return Math.abs(a) / 2; };
+const loopLen = (l: number[]) => { let s = 0; for (let i = 0; i < l.length; i += 2) { const j = (i + 2) % l.length; s += Math.hypot(l[j] - l[i], l[j + 1] - l[i + 1]); } return s; };
+/** 0.36 (Martin 19.10.): eingefroren werden nur die Außenkontur und echte Inseln – Schleife mit Fläche ≥ max(0,25 mm², 4·h²)
+ *  und mittlerer Breite (2·Fläche/Umfang) ≥ 0,5·h. Dünne Splitter (z. B. um einzelne nicht gewählte Punkte) gehören nicht dazu. */
+export function realLoops(loops: number[][], h: number): number[][] {
+  if (loops.length <= 1) return loops;
+  const A = loops.map(loopArea); let outer = 0; for (let i = 1; i < A.length; i++) if (A[i] > A[outer]) outer = i;
+  return loops.filter((l, i) => i === outer || (A[i] >= Math.max(0.25, 4 * h * h) && (2 * A[i]) / Math.max(1e-9, loopLen(l)) >= 0.5 * h));
+}
 /** occupancy grid of the frozen boundary (even-odd fill of all loops), optionally offset by off [mm] (< 0 shrinks) */
 export function frozenCells(F: FrozenBoundary, off = 0) {
   let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;

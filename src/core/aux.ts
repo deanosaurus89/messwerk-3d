@@ -91,12 +91,18 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     for (const t of r.tris) for (const u of topo.neighbors(t)) if (!visited[u] && !topo.sliver[u] && !cand.has(u)) cand.set(u, triDist(u));
     const order = [...cand.entries()].sort((a, b) => a[1] - b[1]);
     let tried = 0; let budget = 0.6; let backup: Region | undefined; let work = 0; const NT = mesh.indices.length / 3;
-    for (const [u, du] of order) {
-      if (du > maxD) break;
+    for (let oi = 0; oi < order.length; oi++) { const [u, du] = order[oi];
+      if (du > maxD) continue; // (Liste wächst hinten nach – nicht abbrechen)
       if (visited[u]) continue;
       let gt = topo.growRegion(u, seedPoint, { ...o, radius: 0, legacy: true, legacyCap: budget, ...go });
       // ausgelaufen (Scan mit Verrundungen): lokales fit-geführtes Wachstum statt des Kantenwachstums
       let viaFit = false; if (!gt.length) { budget = Math.max(0.02, budget / 3); gt = topo.growFit(u, seedPoint, { ...o, radius: 0, ...go }); viaFit = true; }
+      // 0.36: Kandidat am Rand der Ausgangsregion wächst nur wieder in dieselbe Fläche (isotropes Netz: Randband mit hoher
+      // Krümmung gehört nicht zur Region) -> markieren, Budget nicht belasten
+      let seenBefore = 0; for (const t of gt) if (visited[t]) seenBefore++;
+      if (gt.length && seenBefore > 0.8 * gt.length) { for (const t of gt) visited[t] = 1; visited[u] = 1;
+        for (const w of topo.neighbors(u)) if (!visited[w] && !topo.sliver[w] && !cand.has(w)) { const dw = triDist(w); cand.set(w, dw); order.push([w, dw]); }
+        continue; }
       work += gt.length + 0.01 * NT; if (work > 3 * NT) break; // Rechenbudget (deterministisch, nach Dreiecken)
       if (!gt.length) { visited[u] = 1; if (++tried > 400) break; continue; }
       const g = mk(gt);
@@ -208,7 +214,7 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
  *  aux-plane extraction from the nearest triangle whose normal is parallel to N. */
 export function segmentedRim(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions, T: number): AuxResult | null {
   const R = Math.max(3 * topo.localEdge(seedTri), T);
-  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true });
+  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true, noCurv: true });
   const fn = mesh.faceNormals!; if (!fn || tris.length < 10) return null;
   const N_: Vec3[] = Array.from(tris, (t) => [fn[3 * t], fn[3 * t + 1], fn[3 * t + 2]] as Vec3);
   // mode of the normal directions (most neighbors within ~10°), sampled
@@ -245,7 +251,7 @@ export function extractAtRim(mesh: MeshData, topo: MeshTopology, seedTri: number
   try { const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, go, type, undefined, Infinity, ring); if (ok(r)) return r; } catch (e) { err = e; }
   const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag));
   const R = Math.max(3 * topo.localEdge(seedTri), 1.5 * T); // a little beyond the pick circle: a tap at its edge still counts
-  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true });
+  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true, noCurv: true });
   const fn = mesh.faceNormals!, P = mesh.positions, F = mesh.indices;
   const sn: Vec3 = [fn[3 * seedTri], fn[3 * seedTri + 1], fn[3 * seedTri + 2]];
   const cand: [number, number][] = [];
