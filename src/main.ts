@@ -798,13 +798,14 @@ function bindSmooth(el: ParentNode, id: string) {
 }
 const islIcon = (I: Island) => (I.kind === 'raised' ? '▮' : I.kind === 'bump' ? '▲' : I.rim ? '◎' : '◯');
 const islKind = (I: Island) => (I.kind === 'raised' ? tt('raised feature') : I.kind === 'bump' ? tt('local bump') : I.rim ? tt('hole + raised rim') : tt('hole / opening'));
-const islCanInc = (I: Island) => I.kind !== 'hole' || !!I.rim;
+const islCanInc = (_I: Island) => true; // 0.38: every island removable (holes are then shown closed)
+const islHoleWarn = (I: Island) => I.kind === 'hole' && !I.rim;
 /** Plane · All inside boundary: detected islands (auto) – tap one (here or in 3D) → “Not an island” / refine its extent */
 function islandsHTML(list: Island[]) {
   const ex = list.filter((I) => !I.inc).length, S = list[islSel];
   const chips = list.map((I, i) => `<button type="button" class="isl-chip${I.inc ? ' inc' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${islKind(I)} · ${I.n} ${tt('pts')}${I.inc ? ' · ' + tt('not an island (points included)') : ''}">${islIcon(I)}${I.id}</button>`).join('');
   const det = S ? `<div class="isl-det"><b>${tt('Island')} ${S.id}</b> ${islKind(S)} · Ø≈${fmt(2 * S.r, 1)} · h ${fmt(S.h, 2)} mm · ${S.n} ${tt('pts')}
-    <span class="cp-seg"><button type="button" data-islinc="0" class="${S.inc ? '' : 'on'}" title="${tt('Island: its points are excluded from the plane')}">${tt('Island')}</button><button type="button" data-islinc="1" class="${S.inc ? 'on' : ''}" ${islCanInc(S) ? '' : 'disabled'} title="${islCanInc(S) ? tt('Not an island: its points belong to the plane again') : tt('An opening has no surface – nothing to include')}">${tt('Not an island')}</button></span>
+    <span class="cp-seg"><button type="button" data-islinc="0" class="${S.inc ? '' : 'on'}" title="${tt('Island: its points are excluded from the plane')}">${tt('Island')}</button><button type="button" data-islinc="1" class="${S.inc ? 'on' : ''}" title="${tt('Not an island: its points belong to the plane again (a hole is shown closed – the plane contour no longer has this opening)')}">${tt('Not an island')}</button></span>${islHoleWarn(S) ? `<span class="isl-warn" title="${tt('No surface points inside – this is probably a real hole/bore. Removing it closes the opening in the plane contour.')}">⚠ ${tt('probably a hole/bore')}</span>` : ''}
     <label title="${tt('Refine the island: grow (+) or shrink (−) its excluded zone by this distance [mm]')}">${tt('Refine')} ± <input id="cp-islm" data-num="signed" value="${S.m}" inputmode="text"> mm</label></div>` : '';
   const man = state.opts.fill.man.map((I, k) => `<button type="button" class="isl-chip man" data-islman="${k}" title="${tt('Island added by tap, Ø {0} mm – click to remove it', fmt(2 * I.r, 1))}">✚${k + 1} ✕</button>`).join('');
   const addB = `<button type="button" class="isl-chip add${state.opts.addIsl ? ' on' : ''}" data-isladd="1" title="${tt('Add an island: tap the plane where detection was too generous – a disc of the brush diameter (Ø {0} mm) is excluded', fmt(2 * state.opts.brush, 1))}">＋ ${tt('Island')}</button>`;
@@ -2528,7 +2529,7 @@ function renderScene() {
     // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands
     if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of previewLoops(p)) viewer.addContour(L, 0x1565c0);
     else for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
-    (p.islands ?? []).forEach((I, i) => { for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.inc ? 0x2e7d32 : !islCanInc(I) ? 0x78909c : 0xff8c1a); });
+    (p.islands ?? []).forEach((I, i) => { if (I.inc && I.kind === 'hole' && i !== islSel) return; /* 0.38: removed hole = shown closed */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.inc ? 0x2e7d32 : !islCanInc(I) ? 0x78909c : 0xff8c1a); });
   }
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();

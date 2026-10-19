@@ -193,7 +193,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
       const kind: Island['kind'] = nr > 0 && hmx > 0.5 ? 'raised' : nv >= 2 ? 'hole' : 'bump'; // a flat swell of a few 0.1 mm is a bump, not a raised feature
       let ch: IslandChoice | undefined, bd = Math.max(1, 0.5 * r);
       for (const o of choices) { const d = Math.hypot(o.c[0] - cc[0], o.c[1] - cc[1], o.c[2] - cc[2]); if (d < bd) { bd = d; ch = o; } }
-      const rim = kind === 'hole' && nb >= 3, inc = !!ch?.inc && (kind !== 'hole' || rim), m = ch?.m ?? 0;
+      const rim = kind === 'hole' && nb >= 3, inc = !!ch?.inc, m = ch?.m ?? 0;
       // excluded zone = component refined by the margin (dilate / erode inside its bounding box)
       let i0 = W, i1 = 0, j0 = H, j1 = 0; for (const k of cells) { const i = k % W, j = (k - i) / W; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
       const rr = Math.round(Math.abs(m) / h), pad = rr + 2, bi = Math.max(0, i0 - pad), bj = Math.max(0, j0 - pad), bw = Math.min(W - 1, i1 + pad) - bi + 1, bh = Math.min(H - 1, j1 + pad) - bj + 1;
