@@ -406,7 +406,9 @@ export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
  *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
-export let ROBUST_S = 0.1; export function setRobustS(x: number) { ROBUST_S = x; }
+export let ROBUST_VSTART = !!(globalThis as any).process?.env?.RVS, ROBUST_IT = +((globalThis as any).process?.env?.RIT ?? 3);
+export let ROBUST_NW = +((globalThis as any).process?.env?.RNW ?? 0);
+export let ROBUST_S = +((globalThis as any).process?.env?.RS ?? 0.1); export function setRobustS(x: number) { ROBUST_S = x; }
 export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
   const p = m.positions, f = m.indices, fa = m.faceAreas!, nt = f.length / 3, out = new Uint8Array(nt);
   const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
@@ -454,11 +456,13 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
         let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
         const rms0 = Math.sqrt(rr / nb);
         // alle Nachbarn liegen schon eng an der Ebene (rms < 0,2·s): Gewichte ≈ 1, Ergebnis = ungewichteter Fit -> Iteration sparen
-        if (rms0 > 0.5 * sc) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
-        for (let iter = 0; iter < (rms0 < 0.2 * sc ? 0 : 3); iter++) {
+        if (rms0 > 0.5 * sc || ROBUST_VSTART) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
+        for (let iter = 0; iter < (rms0 < 0.2 * sc ? 0 : ROBUST_IT); iter++) {
           let sw = 0, mx = 0, my = 0, mz = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz; const d = (dx - cxw) * x + (dy - cyw) * y + (dz - czw) * z;
-            const wt = 1 / (1 + (d * d) / s2); W[i] = wt; sw += wt; mx += wt * dx; my += wt * dy; mz += wt * dz; }
+            let wt = 1 / (1 + (d * d) / s2);
+            if (ROBUST_NW > 0) { const c = Math.max(0, vn[3 * w] * x + vn[3 * w + 1] * y + vn[3 * w + 2] * z); wt *= c ** ROBUST_NW; }
+            W[i] = wt; sw += wt; mx += wt * dx; my += wt * dy; mz += wt * dz; }
           mx /= sw; my /= sw; mz /= sw; let A = 0, B = 0, Cc = 0, D = 0, E = 0, G = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px - mx, dy = p[3 * w + 1] - py - my, dz = p[3 * w + 2] - pz - mz, wt = W[i];
             A += wt * dx * dx; B += wt * dx * dy; Cc += wt * dx * dz; D += wt * dy * dy; E += wt * dy * dz; G += wt * dz * dz; }

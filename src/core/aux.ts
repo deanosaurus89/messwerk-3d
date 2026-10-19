@@ -100,8 +100,9 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       // 0.36: Kandidat am Rand der Ausgangsregion wächst nur wieder in dieselbe Fläche (isotropes Netz: Randband mit hoher
       // Krümmung gehört nicht zur Region) -> markieren, Budget nicht belasten
       let seenBefore = 0; for (const t of gt) if (visited[t]) seenBefore++;
-      if (gt.length && seenBefore > 0.8 * gt.length) { for (const t of gt) visited[t] = 1; visited[u] = 1;
-        for (const w of topo.neighbors(u)) if (!visited[w] && !topo.sliver[w] && !cand.has(w)) { const dw = triDist(w); cand.set(w, dw); order.push([w, dw]); }
+      if (gt.length && seenBefore > 0.8 * gt.length) { const fresh: number[] = [u]; for (const t of gt) if (!visited[t]) { visited[t] = 1; fresh.push(t); } visited[u] = 1;
+        // Frontier über den neu belegten Randstreifen hinaus fortsetzen (nicht nur um u): dahinter liegt die Nachbarfläche
+        for (const t of fresh) for (const w of topo.neighbors(t)) if (!visited[w] && !topo.sliver[w] && !cand.has(w)) { const dw = triDist(w); cand.set(w, dw); order.push([w, dw]); }
         continue; }
       work += gt.length + 0.01 * NT; if (work > 3 * NT) break; // Rechenbudget (deterministisch, nach Dreiecken)
       if (!gt.length) { visited[u] = 1; if (++tried > 400) break; continue; }
