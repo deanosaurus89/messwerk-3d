@@ -32,6 +32,7 @@ function trimFor(f: FeatureView) {
   const e = { key, ...r }; trimCache.set(f.id, e); return e;
 }
 import { t as tt, typeName, kindName, methodName } from './i18n';
+import { bindSwipeClose, bindEscClose, scrollWithin, pinLayout } from './ui/overlay';
 import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
 import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
 import { Engine, PolyEngine } from './engine';
@@ -297,11 +298,13 @@ async function openSamples() {
   if (!samples) { try { samples = await (await fetch('./samples/index.json')).json(); } catch { samples = []; } }
   const std = samples!.find((s) => s.key === 'beispielteil');
   if (tour && std) { loadSample(std); return; } // Trainingsmodus: immer das Standard-Beispielteil direkt laden
-  d.innerHTML = `<div class="rv-head"><b>${tt('Load sample part')}</b><span class="note">${tt('Demo measurement data (scan/CT-like) – nominal geometry in samples/*.json')}</span><span style="flex:1"></span><button class="btn" id="sd-close">✕</button></div>
+  d.innerHTML = `<div class="rv-head"><b>${tt('Load sample part')}</b><span class="note">${tt('Demo measurement data (scan/CT-like) – nominal geometry in samples/*.json')}</span><span style="flex:1"></span><button class="btn" id="sd-close" title="${tt('Close')}">✕</button></div>
     <div class="sd-grid">${samples!.filter((s) => !s.hidden).map((s) => `<button class="sample-card" data-key="${s.key}"><img src="./samples/${s.thumb}" alt="" loading="lazy"><span class="sc-t">${s.name}</span>
       <span class="sc-d">${s.description}</span><span class="sc-m">${s.kind} · ${(s.triangles / 1000).toFixed(0)} k ${tt('triangles')} · ${(s.bytes / 1048576).toFixed(1)} MB</span></button>`).join('')}</div>`;
   d.classList.remove('hidden');
   ($('#sd-close') as HTMLButtonElement).onclick = () => d.classList.add('hidden');
+  if (!d.dataset.ovb) { d.dataset.ovb = '1'; const c = () => d.classList.add('hidden'); bindSwipeClose(d, c); bindEscClose(d, c);
+    document.addEventListener('pointerdown', (e) => { if (!d.classList.contains('hidden') && !d.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('#btn-sample')) c(); }, true); }
   d.querySelectorAll<HTMLButtonElement>('.sample-card').forEach((b) => (b.onclick = () => loadSample(samples!.find((s) => s.key === b.dataset.key)!)));
 }
 $('#btn-sample').onclick = () => openSamples();
@@ -312,7 +315,9 @@ $('#btn-report2').onclick = () => makeReport();
 { const hv = $('#help-view'), bd = $('#help-backdrop');
   new MutationObserver(() => bd.classList.toggle('hidden', hv.classList.contains('hidden'))).observe(hv, { attributes: true, attributeFilter: ['class'] });
   bd.addEventListener('click', () => hv.classList.add('hidden'));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hv.classList.contains('hidden')) { hv.classList.add('hidden'); e.stopPropagation(); } }, true); }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hv.classList.contains('hidden')) { hv.classList.add('hidden'); e.stopPropagation(); } }, true);
+  bindSwipeClose(hv, () => hv.classList.add('hidden'));
+  pinLayout('#app, #workspace, #scene, #viewport'); }
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
 $('#btn-delete-feat').onclick = () => deleteSelected();
@@ -2453,12 +2458,13 @@ function openFeatureProps(f: FeatureView) {
 function showProperties(f: FeatureView) {
   document.getElementById('props-dlg')?.remove();
   const el = document.createElement('div'); el.id = 'props-dlg'; el.className = 'modal-ov';
-  el.innerHTML = `<div class="wn-box" role="dialog"><button class="ov-x" data-x title="${tt('Close')}">✕</button><h3><span style="color:${hex(f.color)}">${f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type] ?? ''}</span> ${tt('Properties')}: ${f.name}</h3>
+  el.innerHTML = `<div class="wn-box" role="dialog"><div class="ov-top"><h3><span style="color:${hex(f.color)}">${f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type] ?? ''}</span> ${tt('Properties')}: ${f.name}</h3><button class="ov-x" data-x title="${tt('Close')}">✕</button></div>
     <p class="note">${tt('Read-only: result of the last extraction/fit. It updates automatically after every recompute. To change parameters open the feature’s Properties (double-click the feature).')}</p><div id="props-body">${propertiesHTML(f)}</div><div class="row"><button class="btn primary" data-x>${tt('Close')}</button></div></div>`;
   el.dataset.fid = String(f.id);
   const close = () => { el.remove(); document.removeEventListener('keydown', esc); }, esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
   el.querySelectorAll<HTMLElement>('[data-x]').forEach((b) => (b.onclick = close));
   el.addEventListener('pointerdown', (e) => { if (e.target === el) close(); }); document.addEventListener('keydown', esc);
+  bindSwipeClose(el.querySelector('.wn-box')!, close, el.querySelector('.wn-box'));
   document.body.appendChild(el);
 }
 function openContext(x: number, y: number, fid: number | null) {
@@ -2626,13 +2632,13 @@ function showDocs(sec?: string) {
   const el = $('#help-view'); el.classList.remove('hidden');
   el.innerHTML = `<div class="rv-head"><b>📖 ${tt('Documentation')}</b><span style="flex:1"></span><button class="btn" id="hv-close" title="${tt('Close')}">✕</button></div><div class="rv-body docs">${docsHtml()}</div>`;
   ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
-  el.querySelectorAll<HTMLAnchorElement>('[data-doc]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); el.querySelector('#doc-' + a.dataset.doc)?.scrollIntoView({ behavior: 'smooth' }); }));
-  if (sec) setTimeout(() => el.querySelector('#doc-' + sec)?.scrollIntoView(), 50);
+  el.querySelectorAll<HTMLAnchorElement>('[data-doc]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); scrollWithin(el.querySelector('.rv-body')!, el.querySelector('#doc-' + a.dataset.doc), true); }));
+  if (sec) setTimeout(() => scrollWithin(el.querySelector('.rv-body')!, el.querySelector('#doc-' + sec)), 50);
 }
 document.querySelectorAll<HTMLButtonElement>('#btn-docs, #btn-docs2').forEach((b) => (b.onclick = () => showDocs()));
 $('#btn-help').onclick = () => {
   const el = $('#help-view'); el.classList.remove('hidden');
-  el.innerHTML = `<div class="rv-head"><b>${tt('Help: datums and tolerances with datum')}</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 ${tt('Start training')}</button><button class="btn" id="hv-close">✕</button></div>
+  el.innerHTML = `<div class="rv-head"><b>${tt('Help: datums and tolerances with datum')}</b><span style="flex:1"></span><button class="btn" id="hv-train">🎓 ${tt('Start training')}</button><button class="btn" id="hv-close" title="${tt('Close')}">✕</button></div>
   <div class="rv-body">${HELP_HTML}</div>`;
   ($('#hv-close') as HTMLButtonElement).onclick = () => el.classList.add('hidden');
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
@@ -2787,7 +2793,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 

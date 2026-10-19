@@ -1,3 +1,4 @@
+import { bindEscClose, bindSwipeClose } from './ui/overlay';
 // Version (git revision + build date, injected by Vite) and the "What's new" dialog shown once after each deploy.
 import { t } from './i18n';
 declare const __BUILD__: { version: string; rev: string; date: string } | undefined;
@@ -6,6 +7,9 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.26', date: '2026-10-19', items: [
+    'Help/info overlays on the iPhone: the ✕ is always visible – the "?" help opened during feature creation no longer slides under the ribbon (a jump to a doc section used to scroll the whole layout). Documentation, help, datum info, sample dialog, What\'s new and Properties have a fixed header with a large ✕ and close by ✕, Esc, tapping outside or swiping down. On the phone the help opens as a bottom sheet, so the upper third of the 3D view stays visible.',
+  ] },
   { version: '2026.0.25', date: '2026-10-19', items: [
     'No horizontal scrolling in ANY ribbon: on desktop a group that does not fit switches to a compact two-row layout (checked at 1280 and 1400 px – View and Start no longer overflow); on the iPhone every tab wraps into at most two button rows, View gets section chips Views | Display | Panels. All buttons keep their tooltips (feature type buttons got new ones).',
   ] },
@@ -159,11 +163,13 @@ export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
 const KEY = 'mw-seen-rev';
 export function showWhatsNew() {
   const el = document.createElement('div'); el.id = 'whatsnew';
-  el.innerHTML = `<div class="wn-box"><h3>${t("What's new")}</h3><p class="note">${versionText()}</p>
+  el.innerHTML = `<div class="wn-box" role="dialog"><div class="ov-top"><h3>${t("What's new")}</h3><button class="ov-x" data-x title="${t('Close')}">✕</button></div><p class="note">${versionText()}</p>
     ${CHANGELOG.map((c) => `<h4>${c.version} <span class="sub">· ${c.date}</span></h4><ul>${c.items.map((i) => `<li>${t(i)}</li>`).join('')}</ul>`).join('')}
     <div class="row"><button class="btn primary" data-ok>${t('OK')}</button></div></div>`;
-  el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => el.remove();
-  el.addEventListener('pointerdown', (e) => { if (e.target === el) el.remove(); });
+  const close = () => el.remove();
+  el.querySelectorAll<HTMLButtonElement>('[data-ok], [data-x]').forEach((b) => (b.onclick = close));
+  el.addEventListener('pointerdown', (e) => { if (e.target === el) close(); });
+  bindEscClose(el, close); bindSwipeClose(el.querySelector('.wn-box')!, close, el.querySelector('.wn-box'));
   document.body.appendChild(el);
 }
 /** Show the changelog once per new revision (only for returning users). */

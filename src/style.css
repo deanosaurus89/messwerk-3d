@@ -519,3 +519,26 @@ input.fitcode { width:3.6em; }
   #ribbon .panel label, #ribbon .panel select, #ribbon .panel .glabel-inline { font-size:11px; }
   #ribbon .panel input[type="checkbox"] { width:14px; height:14px; }
 }
+
+/* ---- 0.26: help/info overlays – header with ✕ always visible (sticky, safe-area aware), never the whole 3D view ---- */
+#help-view .rv-head, #sample-dialog .rv-head { position:sticky; top:0; z-index:3; flex-shrink:0; flex-wrap:wrap; }
+#help-view .rv-body { flex:1 1 auto; min-height:0; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+#help-view #hv-close, #sample-dialog #sd-close { flex-shrink:0; margin-left:auto; }
+#sample-dialog #sd-close { min-width:44px; min-height:40px; font-size:20px; font-weight:700; }
+#help-view { left:auto; width:min(860px, calc(100% - 150px)); }
+.wn-box > .ov-top { position:sticky; top:-14px; z-index:3; display:flex; align-items:center; gap:6px; margin:-14px -18px 8px; padding:6px 6px 6px 18px; background:#fff; border-bottom:1px solid #e3e8ee; border-radius:8px 8px 0 0; }
+.wn-box > .ov-top h3 { flex:1; margin:0 !important; min-width:0; }
+.wn-box > .ov-top .ov-x { position:static !important; flex-shrink:0; width:44px; height:44px; border:0; background:none; font-size:22px; font-weight:700; cursor:pointer; color:#1e3a5c; }
+#whatsnew, #props-dlg { padding:calc(env(safe-area-inset-top) + 8px) 0 calc(env(safe-area-inset-bottom) + 8px); box-sizing:border-box; }
+#whatsnew .wn-box, #props-dlg .wn-box { max-height:min(84vh, 100%); overscroll-behavior:contain; }
+@media (max-width: 900px), (max-height: 560px) {
+  /* bottom sheet inside the 3D area: the upper part of the model stays visible (tap there = close) */
+  #help-view { left:6px; right:6px; width:auto; top:max(30%, 96px); bottom:calc(6px + env(safe-area-inset-bottom)); border-radius:12px 12px 6px 6px; }
+  #help-view .rv-head { border-radius:12px 12px 0 0; padding-top:10px; touch-action:pan-x; }
+  #help-view .rv-head::before { content:''; position:absolute; left:50%; top:3px; width:40px; height:4px; margin-left:-20px; border-radius:2px; background:#a9b6c4; }
+  #sample-dialog { max-height:calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); max-height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  #whatsnew .wn-box, #props-dlg .wn-box { max-height:min(72vh, 100%); max-height:min(72dvh, 100%); }
+}
+@media (max-width: 900px), (max-height: 560px) {
+  #sample-dialog { top:auto; bottom:calc(8px + env(safe-area-inset-bottom)); transform:translateX(-50%); max-height:62vh; max-height:62dvh; }
+}
