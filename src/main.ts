@@ -230,13 +230,16 @@ async function busy<T>(p: Promise<T>, label = tt('Computing …')): Promise<T> {
 
 // ------------------------------------------------------------------ Ribbon
 initRibbonSections(); installFitRibbon();
+{ // iPhone: ↶ ↷ (Quick Access Toolbar) at the right end of the Start section-chip row – no extra height
+  const nav = document.querySelector('#ribbon .panel[data-tab="merkmale"] .rsec-nav'); if (nav) { const q = document.createElement('span'); q.className = 'pqat';
+    q.innerHTML = `<button id="q-undo-p" disabled title="${tt('Undo (Ctrl+Z) – for now: the last mesh edit; later: every operation')}">↶</button><button id="q-redo-p" disabled title="${tt('Redo (Ctrl+Y) – comes with the global undo (later)')}">↷</button>`;
+    q.querySelector<HTMLButtonElement>('#q-undo-p')!.onclick = () => peUndo(); nav.appendChild(q); } }
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll<HTMLElement>('.panel').forEach((p) => p.classList.toggle('hidden', p.dataset.tab !== b.dataset.tab));
   renderDialog();
 }));
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view as any)));
-$('#ico-dist').innerHTML = ICON['Abstand 3D'];
 // general tolerance (project setting): ISO 2768-1 / -2 class for new controls; “Apply to all” refills every non-manual control
 function syncGenTolUI() { const g = state.opts.genTol ?? GENTOL_DEFAULT; ($('#gt-lin') as HTMLSelectElement).value = g.lin ?? ''; ($('#gt-geo') as HTMLSelectElement).value = g.geo ?? ''; }
 syncGenTolUI();
@@ -247,33 +250,56 @@ $('#gt-apply').onclick = () => { reapplyAllTol(); renderAll(); scheduleAutosave(
 
 const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Linie', 'Kegel', 'Kugel', 'Torus', 'Punkt', 'Freiformfläche'];
 const FIT_TYPES = TYPES.filter((t) => t !== 'auto') as GeomType[];
-const typeBtns = $('#feat-type-btns');
-for (const t of TYPES) {
-  const tr = (x: string) => tt(x);
-  const b = document.createElement('button');
-  b.className = 'big'; b.dataset.ftype = t;
-  b.innerHTML = `<span class="ico">${ICON[t]}</span>${t === 'Freiformfläche' ? tr('Freeform') : typeName(t)}`;
-  if (t === 'Freiformfläche') b.title = tr('Freeform surface (B-spline/NURBS) – click or brush');
-  else b.title = t === 'auto' ? tr('Auto: click a surface – the feature type is detected automatically') : tt('Create {0}: click on the polygon model (▾ = other methods: construction, anchor)', typeName(t));
-  b.onclick = () => startFitMode(t);
-  if (t !== 'auto' && t !== 'Freiformfläche') {
-    // split button: main part = From polygon model, ▾ = method menu (Construction, Anchor, CAD later)
-    const w = document.createElement('span'); w.className = 'split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾';
-    dd.title = tr('Choose the creation method'); dd.onclick = (e) => { e.stopPropagation(); splitMenu(dd, t as GeomType); };
-    w.append(b, dd); typeBtns.appendChild(w);
-  } else typeBtns.appendChild(b);
+const typeBtns = $('#feat-type-btns'), featMore = $('#feat-more-pop');
+// 0.34 Start ribbon: Auto large; the 8 standard types small in 3 rows (▾ = method); Distance/Angle and Properties/Delete
+// columns; Freeform, Polyline, Torus, Bolt circle under ⋯ More (desktop: all groups side by side; iPhone: section chips)
+const rbIco = (t: string) => `<span class="ico">${ICON[t] ?? t}</span>`;
+function rbSmall(icon: string, label: string, title: string, id?: string, cls = 'rb-s') {
+  const b = document.createElement('button'); b.className = cls; if (id) b.id = id; b.title = title;
+  b.innerHTML = `${rbIco(icon)}<span>${label}</span>`; return b;
 }
-{ // Polyline: no nominal on the polygon model → only From CAD reference (later) or Derived from Analyze
-  const b = document.createElement('button'); b.className = 'big'; b.id = 'btn-polyline'; b.innerHTML = `<span class="ico">${ICON['Linienzug']}</span>${typeName('Linienzug')}`;
-  b.title = tt('Polyline (connected line segments). Not from the polygon model (it has no nominal there): derive it in Analyze (e.g. the median line of a bore) – From CAD reference comes later');
-  b.onclick = (e) => { e.stopPropagation(); ctxMenu.className = 'ctx-menu'; const items: [string, (() => void) | null][] = [[tt('From CAD reference (later)'), null],
+function rbSplit(b: HTMLButtonElement, menu: (dd: HTMLElement) => void) {
+  const w = document.createElement('span'); w.className = 'split rb-split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾';
+  dd.title = tt('Choose the creation method'); dd.onclick = (e) => { e.stopPropagation(); closeRbPops(); menu(dd); }; w.append(b, dd); return w;
+}
+const rbCol = (items: HTMLElement[], sep = false) => { const c = document.createElement('div'); c.className = 'rb-col' + (sep ? ' sep' : ''); c.append(...items);
+  while (c.children.length < 3) { const g = document.createElement('div'); g.className = 'rb-ghost'; c.appendChild(g); } return c; };
+const typeTitle = (t: GeomType | 'auto') => t === 'auto' ? tt('Auto: click a surface – the feature type is detected automatically') : t === 'Freiformfläche' ? tt('Freeform surface (B-spline/NURBS) – click or brush') : tt('Create {0}: click on the polygon model (▾ = other methods: construction, anchor)', typeName(t));
+{ const b = document.createElement('button'); b.className = 'big rb-auto'; b.dataset.ftype = 'auto'; b.title = typeTitle('auto');
+  b.innerHTML = `${rbIco('auto')}<span>${typeName('auto')}</span>`; b.onclick = () => startFitMode('auto'); typeBtns.appendChild(b); }
+const typeSmall = (t: GeomType) => { const b = rbSmall(t, typeName(t), typeTitle(t)); b.dataset.ftype = t; b.onclick = () => startFitMode(t); return rbSplit(b, (dd) => splitMenu(dd, t)); };
+const featMoreBtn = rbSmall('⋯', tt('More'), tt('More feature types: Freeform, Polyline, Torus, Bolt circle'), 'btn-feat-more', 'rb-s more'); featMoreBtn.dataset.pop = 'feat-more-pop';
+const distBtn = rbSmall('Abstand 3D', tt('Distance'), tt('Distance between two features or two clicked points (▾ = method)'), 'btn-distance'); distBtn.dataset.ftype = 'Abstand';
+const angleSlot = document.createElement('span'); angleSlot.className = 'rb-angle-slot';
+typeBtns.append(rbCol([typeSmall('Ebene'), typeSmall('Kreis'), typeSmall('Zylinder')]), rbCol([typeSmall('Langloch'), typeSmall('Linie'), typeSmall('Kegel')]),
+  rbCol([typeSmall('Kugel'), typeSmall('Punkt'), featMoreBtn]), rbCol([rbSplit(distBtn, (dd) => splitMenu(dd, 'Abstand')), angleSlot], true),
+  rbCol([rbSmall('🛠', tt('Properties'), tt('Properties of the selection: a feature → its properties (also: double-click in the tree); a coordinate system → edit it'), 'btn-props'),
+    rbSmall('✕', tt('Delete'), tt('Delete the selection: feature, control or coordinate system'), 'btn-delete-feat')], true));
+{ // ⋯ More: Freeform, Polyline, Torus (+ methods), Bolt circle (added with the constructions below)
+  const mi = (icon: string, label: string, title: string, id?: string) => rbSmall(icon, label, title, id, 'rb-mi');
+  const ff = mi('Freiformfläche', tt('Freeform'), typeTitle('Freiformfläche')); ff.dataset.ftype = 'Freiformfläche'; ff.onclick = () => { closeRbPops(); startFitMode('Freiformfläche'); };
+  // Polyline: no nominal on the polygon model → only From CAD reference (later) or Derived from Analyze
+  const pl = mi('Linienzug', typeName('Linienzug'), tt('Polyline (connected line segments). Not from the polygon model (it has no nominal there): derive it in Analyze (e.g. the median line of a bore) – From CAD reference comes later'), 'btn-polyline');
+  pl.insertAdjacentHTML('beforeend', `<span class="hint">▸ ${tt('Analyze')}</span>`);
+  pl.onclick = (e) => { e.stopPropagation(); closeRbPops(); ctxMenu.className = 'ctx-menu'; const items: [string, (() => void) | null][] = [[tt('From CAD reference (later)'), null],
     [`🔗 ${tt('Derived from Analyze')}`, () => { (document.querySelector('.tab[data-tab="analyze"]') as HTMLButtonElement)?.click(); toast(tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).')); }]];
     ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
     ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
-    const r = b.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px'; };
-  typeBtns.appendChild(b); }
-{ const w = document.createElement('span'); w.className = 'split'; const dd = document.createElement('button'); dd.className = 'split-dd'; dd.textContent = '▾'; dd.title = tt('Choose the creation method');
-  dd.onclick = (e) => { e.stopPropagation(); splitMenu(dd, 'Abstand'); }; w.append($('#btn-distance'), dd); typeBtns.appendChild(w); }
+    const r = featMoreBtn.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px'; };
+  const to = mi('Torus', typeName('Torus'), typeTitle('Torus')); to.dataset.ftype = 'Torus'; to.onclick = () => { closeRbPops(); startFitMode('Torus'); };
+  const tw = rbSplit(to, () => splitMenu(featMoreBtn, 'Torus')); tw.classList.add('rb-mi-split');
+  featMore.append(ff, pl, tw);
+}
+/** ⋯ More popups of the Start ribbon (fixed position below the button, closed by a click elsewhere or Esc) */
+function closeRbPops() { document.querySelectorAll('.rb-pop').forEach((p) => p.classList.add('hidden')); document.querySelectorAll('[data-pop].on').forEach((b) => b.classList.remove('on')); }
+document.querySelectorAll<HTMLButtonElement>('[data-pop]').forEach((b) => (b.onclick = (e) => {
+  e.stopPropagation(); const pop = document.getElementById(b.dataset.pop!)!; const open = pop.classList.contains('hidden'); closeRbPops(); if (!open) return;
+  pop.classList.remove('hidden'); b.classList.add('on'); const r = b.getBoundingClientRect();
+  pop.style.left = Math.max(4, Math.min(r.left, innerWidth - pop.offsetWidth - 4)) + 'px'; pop.style.top = Math.min(r.bottom + 3, innerHeight - pop.offsetHeight - 4) + 'px';
+}));
+document.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest?.('.rb-pop')) closeRbPops(); });
+document.querySelectorAll('.rb-pop').forEach((p) => p.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button:not(.split-dd)')) setTimeout(closeRbPops, 0); }));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRbPops(); });
 function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand') {
   const items: [string, (() => void) | null][] = [
     [t === 'Abstand' ? tt('Between features') : tt('From polygon model'), () => (t === 'Abstand' ? startDistanceMode() : startFitMode(t))],
@@ -357,10 +383,22 @@ $('#btn-report2').onclick = () => makeReport();
   pinLayout('#app, #workspace, #scene, #viewport'); }
 $('#btn-toggle-labels').onclick = () => { state.showLabels = !state.showLabels; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-csv-feat').onclick = () => download('merkmale.csv', featureCSV(state.features, ctx));
-$('#btn-delete-feat').onclick = () => deleteSelected();
+$('#btn-delete-feat').onclick = () => deleteSelection();
 document.getElementById('btn-toggle-wcs')!.onclick = () => setWcsVisible(!wcsVisible); document.getElementById('btn-toggle-wcs')!.classList.toggle('on', localStorage.getItem('mw3d-wcs') === '1');
 document.getElementById('btn-center-wcs')!.onclick = () => centerOnWcs();
-$('#btn-props').onclick = () => { const f = state.features.find((x) => x.id === state.sel[0]); if (f && state.sel.length === 1) openFeatureProps(f); else toast(tt('Select one feature first (tree or 3D view).')); };
+$('#btn-props').onclick = () => propsSelection();
+/** 0.34: ONE Properties and ONE Delete in the Start ribbon – they act on the current selection: a coordinate system
+ *  (tree) or a feature/control. Global (WCS) can neither be edited nor deleted. */
+const csSelected = () => state.csSel != null && state.csSel !== 0 && state.csys.some((c) => c.id === state.csSel);
+function propsSelection() {
+  if (csSelected()) { csEditStart(state.csSel!); return; }
+  const f = state.features.find((x) => x.id === state.sel[0]); if (f && state.sel.length === 1) openFeatureProps(f); else toast(tt('Select one feature or coordinate system first (tree or 3D view).'));
+}
+function deleteSelection() {
+  if (csSelected()) { csDelete(state.csSel!); return; }
+  if (!state.sel.length && state.selControl == null) { toast(tt('Select a feature, control or coordinate system first.')); return; }
+  deleteSelected();
+}
 $('#btn-toggle-prims').onclick = () => { state.showPrims = !state.showPrims; renderScene(); renderRibbon(); syncViewToggles(); };
 $('#btn-toggle-wire').onclick = () => toggleWire();
 $('#btn-toggle-curves').onclick = () => toggleCurves();
@@ -1829,6 +1867,7 @@ window.addEventListener('keydown', (e) => {
   if (state.csEdit && (e.key === 'Escape' || e.key === 'Enter')) { e.key === 'Escape' ? csCancel() : csOk(); return; }
   if (e.key === 'Delete' && state.csSel) { csDelete(state.csSel); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !pe.tool && !state.mode && cv.undo.length) { e.preventDefault(); curveUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !state.mode && pe.undo.length && !pe.running) { e.preventDefault(); peUndo(); return; } // QAT ↶
   if (e.key === 'Escape' && state.curveSel != null) { if (cv.edit) { cv.edit = null; renderDialog(); } else curveSelect(null); return; }
   if (e.key === 'Delete' && state.curveSel != null && !pe.tool) { curveDelete(); return; }
   if (e.key === 'Escape') {
@@ -1861,9 +1900,10 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 // ------------------------------------------------------------------ Darstellung
 function refreshProps() { const el = document.getElementById('props-dlg'), b = el?.querySelector('#props-body'); if (!el || !b) return;
   const f = state.features.find((x) => x.id === +el.dataset.fid!); if (!f?.measured) { el.remove(); return; } const h = propertiesHTML(f); if (b.innerHTML !== h) b.innerHTML = h; }
-function renderAll() { refreshProps(); (document.getElementById('btn-props') as HTMLButtonElement | null)?.toggleAttribute('disabled', state.sel.length !== 1 || !state.features.some((x) => x.id === state.sel[0])); if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
+function renderAll() { refreshProps(); (document.getElementById('btn-props') as HTMLButtonElement | null)?.toggleAttribute('disabled', !csSelected() && (state.sel.length !== 1 || !state.features.some((x) => x.id === state.sel[0]))); (document.getElementById('btn-delete-feat') as HTMLButtonElement | null)?.toggleAttribute('disabled', !csSelected() && !state.sel.length && state.selControl == null); if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
+  renderPolyRibbon(); // mesh group: ↶ (QAT), Restore original, status in the group label
   document.querySelectorAll<HTMLButtonElement>('[data-ftype]').forEach((b) => b.classList.toggle('on',
     (state.mode?.kind === 'fit' && state.mode.type === b.dataset.ftype) || (state.mode?.kind === 'dist' && b.dataset.ftype === 'Abstand')));
   document.querySelectorAll<HTMLButtonElement>('[data-con]').forEach((b) => b.classList.toggle('on', state.mode?.kind === 'con' && (b.dataset.con === state.mode.out || b.dataset.con === state.mode.key) && !(b.dataset.con === 'Kreis' && state.mode.key === 'bc-pattern')));
@@ -3071,7 +3111,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => (b.oncl
   renderAll(); if (isPhone()) togglePanel('dialog', t !== 'erase'); // Radierer: Steuerung in der Modusleiste, 3D frei zum Tippen
 }));
 $('#btn-pe-cmp').onclick = () => peToggleCompare();
-$('#btn-pe-undo').onclick = () => peUndo();
+Object.assign((window as any).__app, { pe, peRun, peUndo });
+$('#q-undo').onclick = () => peUndo(); // Quick Access Toolbar ↶ (title bar; iPhone: end of the section-chip row) – mesh edits only until the global undo
 $('#btn-pe-reset').onclick = () => peResetOriginal();
 function peExit() { if (pe.running) polyEngine.cancel(); pe.tool = null; peClearSel(); curveDraft = []; viewer.showCursor(null, 1); if (isPhone()) togglePanel('dialog', false); renderAll(); }
 
@@ -3079,7 +3120,7 @@ function renderPolyRibbon() {
   document.querySelectorAll<HTMLButtonElement>('[data-pe]').forEach((b) => b.classList.toggle('on', pe.tool === b.dataset.pe));
   $('#btn-curve-draw').classList.toggle('on', pe.tool === 'curve'); $('#btn-curve-layout').classList.toggle('on', state.showLayout);
   $('#btn-pe-cmp').classList.toggle('on', pe.cmp);
-  ($('#btn-pe-undo') as HTMLButtonElement).disabled = !pe.undo.length;
+  document.querySelectorAll<HTMLButtonElement>('#q-undo, #q-undo-p').forEach((b) => (b.disabled = !pe.undo.length));
   ($('#btn-pe-reset') as HTMLButtonElement).disabled = !pe.undo.length;
   const i = $('#pe-info'); if (i) i.textContent = pe.edits.length ? `${pe.edits.length} ${tt('edit(s)')} · ${state.data?.triCount.toLocaleString('en-US')} ${tt('triangles')}` : tt('Original');
 }
@@ -3759,13 +3800,8 @@ function renderCsIndicator() {
 $('#ico-cs').innerHTML = ICON.csys;
 $('#btn-cs-new').onclick = () => csNew();
 $('#btn-cs-activate').onclick = () => { if (state.csSel != null) csActivate(state.csSel || null); else toast(tt('Select a coordinate system in the tree first.')); };
-$('#btn-cs-global').onclick = () => csActivate(null);
-$('#btn-cs-edit').onclick = () => { if (state.csSel) csEditStart(state.csSel); else toast(tt('Select a coordinate system in the tree first.')); };
-$('#btn-cs-del').onclick = () => { if (state.csSel) csDelete(state.csSel); else toast(tt('Select a coordinate system in the tree first.')); };
-$('#btn-cs-show').onclick = () => { state.showCs = !state.showCs; renderAll(); };
-$('#btn-cs-view').onclick = () => csViewZ(state.activeCs);
 renderCsIndicator();
-Object.assign((window as any).__app, { setWcsVisible, centerOnWcs, csNew, csActivate, csOk, csEditStart, csResult, csPick, ensurePosition, ensureDatum });
+Object.assign((window as any).__app, { setWcsVisible, centerOnWcs, csNew, csActivate, csOk, csEditStart, csResult, csPick, ensurePosition, ensureDatum, csSelect, csCancel, propsSelection, deleteSelection, selectFeature });
 
 
 // ------------------------------------------------------------------ Constructed features
@@ -3973,12 +4009,13 @@ function bindConDefinition(d: HTMLElement, f: FeatureView) {
   d.querySelectorAll<HTMLInputElement>('[data-fpar]').forEach((i) => (i.onchange = () => { const v = Number(i.value.replace(',', '.')); if (!isFinite(v)) return; (f.cons!.params ??= {})[i.dataset.fpar!] = v; recomputeDistances(); renderAll(); }));
 }
 {
-  const g = document.querySelector('#ribbon [data-tab="merkmale"] #btn-distance')?.parentElement;
-  // ONE feature list: construction-only types (angle, bolt circle) join the type buttons; other constructions via the dialog method buttons
-  if (g) for (const o of CON_OUTS.filter((o) => o.out === 'Winkel' || o.key === 'bc-pattern')) {
-    const b = document.createElement('button'); b.className = 'big'; b.dataset.con = o.key ?? o.out;
-    b.innerHTML = `<span class="ico">${o.key === 'bc-pattern' ? '✲' : ICON[o.out] ?? ''}</span>${tt(o.label)}`; b.title = tt('Construct {0} from other features', tt(o.label));
-    b.onclick = () => startConstruct(o.out, o.key); typeBtns.appendChild(b);
+  // ONE feature list: construction-only types join the Start ribbon – Angle beside Distance, Bolt circle under ⋯ More
+  for (const o of CON_OUTS.filter((o) => o.out === 'Winkel' || o.key === 'bc-pattern')) {
+    const bc = o.key === 'bc-pattern', b = document.createElement('button'); b.className = bc ? 'rb-mi' : 'rb-s'; b.dataset.con = o.key ?? o.out;
+    b.innerHTML = `<span class="ico">${bc ? '✲' : ICON[o.out] ?? ''}</span><span>${tt(o.label)}</span>${bc ? `<span class="hint">${tt('construction')}</span>` : ''}`;
+    b.title = bc ? tt('Construct a bolt-circle pattern with pitch from holes') : tt('Construct {0} from other features', tt(o.label));
+    b.onclick = () => startConstruct(o.out, o.key);
+    if (bc) featMore.appendChild(b); else angleSlot.replaceWith(b);
   }
 }
 Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS, openFeatureProps, applyTol });

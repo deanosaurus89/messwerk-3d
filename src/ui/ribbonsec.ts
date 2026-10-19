@@ -8,7 +8,7 @@ try { mem = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* private 
 
 function apply(panel: HTMLElement, k: number) {
   panel.querySelectorAll<HTMLElement>('[data-rs]').forEach((g) => g.classList.toggle('rs-off', +g.dataset.rs! !== k));
-  panel.querySelectorAll<HTMLButtonElement>('.rsec-nav button').forEach((b, i) => { b.classList.toggle('on', i === k); b.setAttribute('aria-selected', String(i === k)); });
+  panel.querySelectorAll<HTMLButtonElement>('.rsec-nav > button').forEach((b, i) => { b.classList.toggle('on', i === k); b.setAttribute('aria-selected', String(i === k)); });
   panel.dataset.rsk = String(k);
 }
 export function initRibbonSections(root: ParentNode = document) {
@@ -37,12 +37,13 @@ export function fitRibbon() {
   const rib = document.getElementById('ribbon'); if (!rib) return;
   const panel = rib.querySelector<HTMLElement>('.panel:not(.hidden)'); if (!panel) return;
   const groups = [...panel.querySelectorAll<HTMLElement>(':scope > .group')];
-  groups.forEach((g) => g.classList.remove('compact'));
+  groups.forEach((g) => g.classList.remove('compact', 'compact3'));
   if (matchMedia('(max-width: 900px), (max-height: 560px)').matches) return;
   const over = () => panel.scrollWidth > panel.clientWidth + 1 || rib.scrollWidth > rib.clientWidth + 1;
   const cand = groups.filter((g) => (!g.classList.contains('rs-off') || panel.classList.contains('rs-phoneonly')) && g.querySelectorAll('.big').length >= 3)
     .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
   for (const g of cand) { if (!over()) break; g.classList.add('compact'); }
+  for (const g of cand) { if (!over()) break; g.classList.add('compact3'); } // narrow windows (≈1024 px): three small rows
 }
 let fitT = 0;
 export function installFitRibbon() {

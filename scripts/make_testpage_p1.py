@@ -61,6 +61,19 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('F19', 'Dialog: „Geometric properties ›“ als eine Zeile', 'Desktop: Element › Eigenschaften › unten „Geometric properties ›“ (Tooltip) anklicken.', 'Eine kompakte Zeile statt Text; öffnet das gleiche Info-Fenster wie bisher.', ''),
   ('F18', 'Baum: Gruppe anheften', 'An Data bzw. Reference 📌 klicken › Baum scrollen › erneut 📌.', 'Angeheftet steht die Gruppe immer oben sichtbar; gelöst wieder an ihrem Platz; bleibt nach Neuladen.', ''),
  ]),
+ ('0.34', 'Start-Menüband neu', [
+  ('R2', 'Desktop: alle Gruppen nebeneinander, kein Umschalter', 'Desktop (auch schmales Fenster ≈1024 px): Start-Reiter ansehen.', 'Features, Coordinate Systems und Mesh Editing gleichzeitig sichtbar; kein Abschnitts-Umschalter; nichts scrollt oder ist abgeschnitten.', ''),
+  ('R2b', 'Auto groß, 8 Standardtypen klein mit ▾', 'Start › Auto bzw. Ebene, Kreis, Zylinder, Langloch, Linie, Kegel, Kugel, Punkt; je ▾ öffnen.', 'Auto groß links; die 8 Typen klein in 3 Reihen; ▾ zeigt die Methoden (Polygonmodell / Konstruktion / Anker).', ''),
+  ('R2c', '⋯ More: Freiform, Linienzug, Torus, Lochkreis', 'Start › ⋯ More › jeden Eintrag einmal starten (Torus: ▾ = Methoden).', 'Alle vier Einträge da und funktionieren wie vorher; Menü schließt bei Klick daneben bzw. Esc.', ''),
+  ('R2d', 'Spalte Distance / Angle', 'Start › Distance (▾ = Methode) bzw. Angle.', 'Beide klein in eigener Spalte, funktionieren wie vorher.', ''),
+  ('R2e', 'EIN Properties / EIN Delete – für ein Element', 'Element im Baum wählen › Start › Properties; dann Delete.', 'Properties öffnet den Element-Dialog; Delete löscht nur dieses Element.', ''),
+  ('R2f', 'EIN Properties / EIN Delete – für ein Koordinatensystem', 'KS im Baum wählen › Properties (= bearbeiten) › abbrechen › Delete. Danach „Global (WCS)“ wählen.', 'KS wird bearbeitet bzw. gelöscht (Elemente bleiben); bei Global sind beide ausgegraut.', ''),
+  ('R2g', 'KS-Gruppe nur „New 3-2-1“ und „Activate“', 'Start › Coordinate Systems ansehen; Global/alle zeigen/Blick entlang Z über den Baum (Global-Punkt, Auge am Ordner, KS-Rechtsklick).', 'Kein From datums, Global, Show all, View along Z mehr im Band – alles weiter über den Baum erreichbar.', ''),
+  ('R2h', 'Mesh-Gruppe: Status im Gruppennamen, ⋯ More = Subdivide', 'Start › Mesh Editing: Reduce, Smooth, Magic eraser, Compare, Restore original; ⋯ More › Subdivide; eine Reduktion ausführen.', 'Alle Befehle wie vorher; Gruppenname zeigt „Mesh Editing · Original“ bzw. „n edit(s)“.', ''),
+  ('R2i', 'Schnellzugriff ↶ / ↷ in der Titelleiste', 'Eine Mesh-Bearbeitung ausführen › ↶ in der Titelleiste (oder Strg+Z); ↷ ansehen.', '↶ macht die letzte Mesh-Bearbeitung rückgängig (vorher ausgegraut); ↷ ausgegraut (kommt mit globalem Rückgängig).', ''),
+  ('R2j', 'iPhone: Umschalter bleibt, ↶ ↷ rechts in der Chip-Zeile', 'iPhone: Start › Features / Coordinate Systems / Mesh editing durchschalten.', 'Schlanke Inhalte (Auto hoch, Typen in 2 Reihen), ↶ ↷ rechts in der Chip-Zeile, nichts scrollt.', ''),
+  ('R2k', 'Tooltips im Start-Band', 'Desktop: über jede Schaltfläche (auch ▾, ⋯, ↶ ↷) fahren.', 'Jede Schaltfläche hat einen erklärenden Tooltip.', ''),
+ ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
 SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'

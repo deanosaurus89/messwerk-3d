@@ -10,7 +10,7 @@
 </head>
 <body>
 <div id="app">
-  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span id="projname">New project</span>
+  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span class="qat" id="qat" title="Quick Access Toolbar"><button id="q-undo" disabled title="Undo (Ctrl+Z) – for now: the last mesh edit; later: every operation">↶</button><button id="q-redo" disabled title="Redo (Ctrl+Y) – comes with the global undo (later)">↷</button></span><span id="projname">New project</span>
     <input id="search" placeholder="Search tree …" /></header>
   <nav id="ribbon-tabs">
     <button class="tab active" data-tab="start">Home</button>
@@ -44,40 +44,26 @@
       </div><div class="glabel">Settings &amp; help</div></div>
     </div>
     <div class="panel hidden" data-tab="merkmale">
-      <div class="rsec" title="Features"><span>Features</span></div>
-      <div class="group"><div class="btns" id="feat-type-btns"><button class="big" id="btn-distance" title="Distance between two features or two clicked points" data-ftype="Abstand"><span class="ico" id="ico-dist"></span>Distance</button></div><div class="glabel">Create feature – method (polygon model, construction, anchor) in the dialog</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-props" title="Properties of the selected feature: datum, extraction, filters, fit type, aux plane – or the inputs of a constructed feature (also: double-click the feature in the tree, or right-click › Properties…)"><span class="ico">🛠</span>Properties</button>
-        <button class="big" id="btn-delete-feat" title="Delete the selected feature or control"><span class="ico">✕</span>Delete</button>
-      </div><div class="glabel">Edit</div></div>
-    
-      <div class="rsec" title="Coordinate Systems"><span>Coordinate Systems</span></div>
+      <div class="rsec" data-phone title="Features"><span>Features</span></div>
+      <div class="group rb-grid"><div class="btns" id="feat-type-btns"></div><div class="glabel">Features</div></div>
+      <div class="rsec" data-phone title="Coordinate Systems"><span>Coordinate Systems</span></div>
       <div class="group"><div class="btns">
         <button class="big" id="btn-cs-new" title="New coordinate system from features (primary – secondary – origin)"><span class="ico" id="ico-cs"></span>New 3-2-1</button>
-        <button class="big" id="btn-cs-datum" disabled title="From datum system A|B|C (planned)"><span class="ico">⌖</span>From datums</button>
-      </div><div class="glabel">Create</div></div>
+        <div class="rb-col"><button class="rb-s" id="btn-cs-activate" title="Make the selected coordinate system active (select “Global (WCS)” in the tree to return to the global system)"><span class="ico">●</span><span>Activate</span></button><div class="rb-ghost"></div><div class="rb-ghost"></div></div>
+      </div><div class="glabel">Coordinate Systems</div></div>
+      <div class="rsec" data-phone title="Mesh editing"><span>Mesh editing</span></div>
       <div class="group"><div class="btns">
-        <button class="big" id="btn-cs-activate" title="Make the selected coordinate system active"><span class="ico">●</span>Activate</button>
-        <button class="big" id="btn-cs-global" title="Use the global coordinate system (WCS)"><span class="ico">⊕</span>Global</button>
-        <button class="big" id="btn-cs-edit" title="Edit the selected coordinate system"><span class="ico">✎</span>Edit</button>
-        <button class="big" id="btn-cs-del" title="Delete the selected coordinate system"><span class="ico">✕</span>Delete</button>
-      </div><div class="glabel">Active system</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-cs-show" title="Show or hide all coordinate system triads"><span class="ico">👁</span>Show all</button>
-        <button class="big" id="btn-cs-view" title="View along the Z axis of the active system"><span class="ico">⬇</span>View along Z</button>
-      </div><div class="glabel">Display</div></div>
-      <div class="rsec" title="Mesh editing"><span>Mesh editing</span></div>
-      <div class="group"><div class="btns">
-        <button class="big" data-pe="reduce" title="Triangle reduction with tolerance to the original"><span class="ico">◭</span>Reduce</button>
-        <button class="big" data-pe="subdiv" title="Triangle subdivision (Loop) with tolerance"><span class="ico">⟁</span>Subdivide</button>
-        <button class="big" data-pe="smooth" title="Smoothing (Taubin)"><span class="ico">≈</span>Smooth</button>
-        <button class="big" data-pe="erase" title="Magic eraser: cut out a bump and fill the hole"><span class="ico">✧</span>Magic eraser</button>
-      </div><div class="glabel">Edit polygon model</div></div>
-      <div class="group"><div class="btns">
-        <button class="big" id="btn-pe-cmp" title="Color comparison with the original polygon model"><span class="ico">◐</span>Compare</button>
-        <button class="big" id="btn-pe-undo" title="Undo the last mesh edit"><span class="ico">↶</span>Undo</button>
-        <button class="big" id="btn-pe-reset" title="Restore the original polygon model"><span class="ico">⟲</span>Original</button>
-      </div><div class="glabel">Compare · <span id="pe-info">Original</span></div></div>
+        <div class="rb-col">
+          <button class="rb-s" data-pe="reduce" title="Triangle reduction with tolerance to the original"><span class="ico">◭</span><span>Reduce</span></button>
+          <button class="rb-s" data-pe="smooth" title="Smoothing (Taubin)"><span class="ico">≈</span><span>Smooth</span></button>
+          <button class="rb-s" data-pe="erase" title="Magic eraser: cut out a bump and fill the hole"><span class="ico">✧</span><span>Magic eraser</span></button>
+        </div>
+        <div class="rb-col sep">
+          <button class="rb-s" id="btn-pe-cmp" title="Color comparison with the original polygon model"><span class="ico">◐</span><span>Compare</span></button>
+          <button class="rb-s" id="btn-pe-reset" title="Restore the original polygon model (discards all mesh edits)"><span class="ico">⟲</span><span>Restore original</span></button>
+          <button class="rb-s more" id="btn-mesh-more" data-pop="mesh-more-pop" title="More mesh tools: Subdivide"><span class="ico">⋯</span><span>More</span></button>
+        </div>
+      </div><div class="glabel">Mesh Editing · <span id="pe-info">Original</span></div></div>
     </div>
     <div class="panel hidden" data-tab="pruef">
       <div class="group"><div class="btns">
@@ -200,6 +186,9 @@
       </div><div class="glabel">Panels</div></div>
     </div>
   </section>
+  <div class="rb-pop hidden" id="feat-more-pop" role="menu"><div class="rb-ph">More feature types</div></div>
+  <div class="rb-pop hidden" id="mesh-more-pop" role="menu"><div class="rb-ph">More mesh tools</div>
+    <button class="rb-mi" data-pe="subdiv" title="Triangle subdivision (Loop) with tolerance"><span class="ico">⟁</span><span>Subdivide</span></button></div>
   <main id="workspace">
     <aside id="tree-pane"><div class="pane-title">Tree</div><div id="tree"></div></aside>
     <div id="center">

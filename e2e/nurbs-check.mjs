@@ -22,7 +22,7 @@ try {
   await page.goto(URL, { waitUntil: 'networkidle' });
   await page.click('#btn-sample'); await page.click('.sample-card[data-key="freiform"]');
   await page.waitForFunction(() => window.__app.state.data?.name === 'freiform', null, { timeout: 180000 });
-  await page.click('.tab[data-tab="merkmale"]'); await page.click('[data-ftype="Freiformfläche"]');
+  await page.click('.tab[data-tab="merkmale"]'); await page.click('#btn-feat-more'); await page.click('[data-ftype="Freiformfläche"]');
   await S(() => window.__app.viewer.viewDir([0.35, -1, 1.3])); await sleep(500);
   const hitP = [35, 40, Zf(35, 40)]; await tap(await screenOf(hitP));
   await page.waitForFunction(() => window.__app.state.preview?.fit?.nurbs, null, { timeout: 90000 });
@@ -73,7 +73,7 @@ try {
   await page.screenshot({ path: `docs/${MODE}-freiform-merkmal.png` });
   if (touch) { await S(() => window.__app.togglePanel('dialog', true)); await page.locator('#fp-box').scrollIntoViewIfNeeded(); await page.screenshot({ path: `docs/${MODE}-freiform-eigenschaften.png` }); await S(() => window.__app.togglePanel('dialog', false)); }
   // Pinsel: Teilbereich (getrimmtes oder vierseitiges Patch)
-  await page.click('[data-ftype="Freiformfläche"]'); await page.click('#mode-bar [data-a="brush"]');
+  await page.click('#btn-feat-more'); await page.click('[data-ftype="Freiformfläche"]'); await page.click('#mode-bar [data-a="brush"]');
   await S(() => { window.__app.state.opts.brush = 6; });
   const pts = [[20, 25], [30, 30], [40, 35], [45, 45], [35, 50], [25, 45]].map(([x, y]) => [x, y, Zf(x, y)]);
   for (const p of pts) { const xy = await screenOf(p); if (touch) await page.touchscreen.tap(xy[0], xy[1]); else { await page.mouse.move(xy[0], xy[1]); await page.mouse.down(); await page.mouse.move(xy[0] + 3, xy[1] + 3, { steps: 3 }); await page.mouse.up(); } await sleep(150); }

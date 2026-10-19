@@ -7,6 +7,14 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.34', date: '2026-10-19', items: [
+    'Start ribbon redesigned: on desktop all groups side by side (no section switcher, no scrolling down to 1024 px). Features: large Auto, the 8 standard types small in 3 rows (▾ = method), Distance/Angle, ⋯ More = Freeform, Polyline, Torus, Bolt circle.',
+    'ONE Properties and ONE Delete act on the current selection – a feature/control or a coordinate system (Properties on a coordinate system = edit). Coordinate Systems group: New 3-2-1 and Activate only; Global, Show all and View along Z stay available in the tree; From datums removed for now (planned: coordinate system from datum features A/B/C).',
+    'Mesh Editing: Reduce, Smooth, Magic eraser, Compare, Restore original; ⋯ More = Subdivide; status in the group label.',
+    'Quick Access Toolbar in the title bar: ↶ undoes the last mesh edit (also Ctrl+Z), ↷ comes with the global undo. iPhone: section switcher stays, slimmer content, ↶ ↷ at the right end of the switcher row.',
+    'View ribbon fits at 1024 px (three small rows when needed).',
+    'Fix: the mesh status (“Original” / “n edit(s)”), Undo and Restore original now follow every mesh edit (they were not refreshed before).',
+  ] },
   { version: '2026.0.33', date: '2026-10-19', items: [
     'Brush in one step: points, form deviation and std. dev. appear in the panel after every stroke; the green ✓ creates the feature directly (no second confirm window). No outer-contour option for the brush – the feature is the painted area (several patches possible); a re-extraction searches only there.',
     'Slimmer Creation Panel: “All inside boundary” removed – planes always take every point inside the detected contour of the selected/added regions; islands stay listed (remove one with “Not an island”, add one with “＋ Island” and a tap – a disc of the brush diameter). Outlier removal and “Growth limit r” (incl. Shift+wheel) removed from creation. Normal angle under ⚙ Advanced parameters with tooltip and a documentation section with a picture.',

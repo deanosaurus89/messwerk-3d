@@ -127,7 +127,7 @@ try {
   // ---------------- Torus
   if (touch) await panel('table', false);
   await page.click('.tab[data-tab="merkmale"]');
-  await page.click('[data-ftype="Torus"]');
+  await page.click('#btn-feat-more'); await page.click('[data-ftype="Torus"]');
   if (!(await clickWorld([40, 16, 22.8], ['iso', '-Y', '+Z', '+Y']))) fail('Torus nicht anklickbar');
   await page.waitForFunction(() => window.__app.state.preview?.fit.type === 'Torus', null, { timeout: 60000 });
   const to = await S(() => { const f = window.__app.state.preview.fit; return { R: f.radius, r: f.minorRadius, c: f.center, card: document.querySelector('#preview-card').textContent }; });

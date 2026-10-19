@@ -573,3 +573,43 @@ body:not(.tol-tables) .gentol { display:none !important; }
 #tree .pin-btn { margin-left:auto; font-size:11px; opacity:.25; cursor:pointer; padding:0 3px; }
 #tree .node:hover .pin-btn, #tree .pin-btn.on { opacity:1; }
 @media (pointer: coarse) { #tree .pin-btn { opacity:.6; } }
+/* 0.34 Start ribbon: Auto large, small buttons in 3 rows (desktop), ⋯ More popups, Quick Access Toolbar */
+.rb-col { display:flex; flex-direction:column; gap:1px; justify-content:center; align-self:center; }
+.rb-col.sep { border-left:1px dotted #c3ccd6; padding-left:4px; }
+.rb-s { display:flex; align-items:center; gap:4px; height:20px; padding:0 5px 0 3px; border:1px solid transparent; border-radius:3px; background:none; font-size:11.5px; color:#1d2833; white-space:nowrap; text-align:left; cursor:pointer; touch-action:manipulation; }
+.rb-s .ico { width:16px; height:16px; font-size:13px; display:flex; align-items:center; justify-content:center; flex:none; } .rb-s svg { width:16px; height:16px; }
+.rb-s:hover { background:var(--acc2); border-color:#b8cde8; } .rb-s.on { background:#d4e4f7; border-color:var(--acc); } .rb-s:disabled { opacity:.4; cursor:default; }
+.rb-s.more { color:#1f4f8f; font-weight:600; }
+.rb-ghost { height:20px; }
+.rb-split { display:flex; align-items:center; height:20px; } .rb-split > .rb-s { flex:1; } .rb-split .split-dd { height:20px; line-height:18px; padding:0 3px; }
+.big.rb-auto { min-width:66px; background:#e3edf9; border-color:#a9c3e4; font-weight:600; } .big.rb-auto svg { width:30px; height:30px; }
+.big.rb-auto.on { background:#d4e4f7; border-color:var(--acc); }
+.rb-pop { position:fixed; z-index:70; background:#fff; border:1px solid #9fb2c8; border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.25); padding:4px; display:flex; flex-direction:column; min-width:210px; }
+.rb-ph { font-size:10.5px; color:#5b6875; padding:3px 10px 1px; font-weight:600; }
+.rb-mi { display:flex; gap:8px; align-items:center; text-align:left; border:none; background:none; padding:5px 10px; font:inherit; font-size:12.5px; border-radius:4px; min-height:28px; cursor:pointer; color:#1d2833; width:100%; }
+.rb-mi .ico { width:16px; display:flex; justify-content:center; } .rb-mi svg { width:16px; height:16px; }
+.rb-mi:hover, .rb-mi.on { background:#e6eef8; } .rb-mi .hint { font-size:10.5px; color:#7a8794; margin-left:auto; padding-left:10px; }
+.rb-mi-split { display:flex; } .rb-mi-split > .rb-mi { flex:1; } .rb-mi-split .split-dd { padding:0 8px; }
+.qat { display:flex; align-items:center; gap:1px; padding:0 6px; border-left:1px solid #3b4d61; border-right:1px solid #3b4d61; }
+.qat button { width:26px; height:22px; border:1px solid transparent; border-radius:3px; background:none; color:#e6edf5; font-size:15px; line-height:1; cursor:pointer; padding:0; }
+.qat button:hover:not(:disabled) { background:#34475c; border-color:#4d6681; } .qat button:disabled { opacity:.35; cursor:default; }
+.pqat { display:none; }
+@media (max-width: 900px), (max-height: 560px) {
+  #titlebar .qat { display:none; }
+  #ribbon .panel .rsec-nav .pqat { margin-left:auto; display:flex; gap:2px; }
+  #ribbon .panel .rsec-nav .pqat button { width:28px; height:22px; border:1px solid #c9d4e0; background:#fff; border-radius:5px; font-size:14px; line-height:1; padding:0; color:#1e3a5c; max-width:none; display:flex; align-items:center; justify-content:center; }
+  #ribbon .panel .rsec-nav .pqat button:disabled { opacity:.35; }
+  #ribbon .panel .rb-col { display:contents; }
+  #ribbon .panel .rb-ghost { display:none; }
+  #ribbon .panel .rb-s { flex-direction:column; justify-content:center; min-width:42px; height:40px; padding:1px 2px; font-size:8.5px; line-height:9px; gap:1px; overflow:hidden; text-align:center; letter-spacing:-.2px; }
+  #ribbon .panel .rb-grid .rb-s { width:42px; } #ribbon .panel .rb-grid .rb-s > span:not(.ico) { max-width:40px; overflow:hidden; text-overflow:ellipsis; }
+  #ribbon .panel .rb-s .ico, #ribbon .panel .rb-s svg { width:18px; height:18px; font-size:15px; }
+  #ribbon .panel .rb-split { height:auto; } #ribbon .panel .rb-split .split-dd { height:auto; }
+  #ribbon .panel > .group.rb-grid:not(.rs-off) { display:flex; flex:1 1 auto; }
+  #ribbon .panel > .group.rb-grid:not(.rs-off) > .btns { display:grid; grid-auto-flow:column; grid-template-rows:40px 40px; gap:2px 1px; justify-content:start; align-items:stretch; }
+  #ribbon .panel .big.rb-auto { grid-row:span 2; height:82px; width:48px; min-width:48px; max-width:48px; font-size:10px; }
+  #ribbon .panel .big.rb-auto svg { width:24px; height:24px; }
+}
+.group.compact3 .btns { grid-template-rows:repeat(3, auto); gap:1px 2px; }
+.group.compact3 .big { height:20px; font-size:11px; padding:0 5px 0 3px; } .group.compact3 .big .ico { font-size:13px; height:16px; line-height:16px; } .group.compact3 .big svg { width:16px; height:16px; }
+.group.compact .big.decbig { font-size:0; gap:0; } .group.compact .big.decbig .dec-row { font-size:13px; } /* label hidden at 1024 px, tooltip stays */

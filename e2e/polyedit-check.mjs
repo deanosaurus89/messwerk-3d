@@ -30,7 +30,7 @@ try {
   console.log('Kopplung: 0.1 mm -> Regler', r1, '; Regler 500 ->', n1);
   if (r1 !== '667' || n1[0] !== '0.032' || n1[1] !== 0.032) fail('Toleranz nicht gekoppelt');
   // Abbrechen
-  await click('[data-pe="subdiv"]'); await S(() => { document.querySelector('#pe-lv').value = '2'; document.querySelector('#pe-lv').dispatchEvent(new Event('change')); });
+  await click('#btn-mesh-more'); await click('[data-pe="subdiv"]'); await S(() => { document.querySelector('#pe-lv').value = '2'; document.querySelector('#pe-lv').dispatchEvent(new Event('change')); });
   await click('#pe-run'); await sleep(300); await page.waitForSelector('#pe-cancel', { state: 'attached' }); await click('#pe-cancel');
   await page.waitForFunction(() => /Abgebrochen/.test(document.querySelector('#pe-live').textContent));
   if ((await tris()) !== t0) fail('Abbrechen hat Netz verändert');
@@ -59,7 +59,7 @@ try {
   console.log('Radierer:', await S(() => document.querySelector('#pe-live').textContent));
   await page.waitForFunction(() => window.__app.pe.dev && document.querySelector('#busy').classList.contains('hidden'), null, { timeout: 60000 });
   if (SHOT) { await sleep(500); await page.screenshot({ path: SHOT }); console.log('Screenshot', SHOT); }
-  await click('#btn-pe-undo'); await page.waitForFunction((b) => window.__app.state.data.triCount === b, before, { timeout: 30000 }).catch(() => fail('Rückgängig'));
+  await click('#q-undo'); await page.waitForFunction((b) => window.__app.state.data.triCount === b, before, { timeout: 30000 }).catch(() => fail('Rückgängig'));
   // Extraktion am bearbeiteten Netz
   await click('#pe-exit'); await click('.tab[data-tab="merkmale"]'); await click('[data-ftype="auto"]');
   const xy = await S(() => { const { viewer } = window.__app; viewer.view('iso'); const v = viewer.camera.position.clone().set(20, 26.04, 17).project(viewer.camera); const r = viewer.renderer.domElement.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; });
