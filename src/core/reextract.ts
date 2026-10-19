@@ -156,12 +156,15 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   const p0f = fit0.type === 'Ebene' && p0.frozen ? { ...p0, fill: false } : p0; // frozen boundary: no inner/outer/island questions
   const p = normReex(p0f);
   const type = fit0.type as GeomType;
-  const R0 = buildRegion(fit0, pos, current, p, seedPts, tris);
+  // 0.38 (F11): the zone of a non-plane is always built from its creation point set (if known), never from the last
+  // result – otherwise each re-extract with a lateral margin grew the zone again until it saturated
+  const base = type !== 'Ebene' && p.frozenIdx && p.frozenIdx.length >= 3 ? Uint32Array.from(p.frozenIdx) : current;
+  const R0 = buildRegion(fit0, pos, base, p, seedPts, tris);
   // planes: the zone already contains the boundary exclusion distance (inset > 0 shrinks, < 0 grows it). With All inside
   // boundary and a positive inset the candidates come from the full zone (so the raised-feature classification sees the
   // whole face); the inset is then applied by the fill (contour + openings) and the result clipped to the shown zone.
   const zoneInset = type === 'Ebene' && R0.kind === 'prism', fillInset = !!p.fill && type === 'Ebene' && (p.inset ?? 0) > 0 && zoneInset;
-  const Rc = fillInset ? buildRegion(fit0, pos, current, { ...p, inset: 0 }, seedPts, tris) : R0;
+  const Rc = fillInset ? buildRegion(fit0, pos, base, { ...p, inset: 0 }, seedPts, tris) : R0;
   let dispR: SearchRegion = R0; // shown zone (with fill + inset: the zone of the final points)
   const cosA = p.angleOn === false ? -2 : Math.cos((p.maxAngleDeg * Math.PI) / 180), N = pos.length / 3, outl = p.sigmaOn !== false && p.sigma > 0;
   // candidates of the region (region fixed from the start geometry; the distance test is part of the region)
@@ -172,10 +175,12 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   const offR = lateralOf(p) - (Rc === R0 ? (p.inset ?? 0) : 0);
   let own: Uint8Array | null = null;
   if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9 && !p.frozen) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
-  const fset = p.frozen && type === 'Ebene' && p.frozenIdx && p.frozenIdx.length >= 3 && lateralOf(p) <= 1e-9 ? p.frozenIdx : null;
+  // 0.38 (F11): non-planes with “Boundary from: Point selection” also keep their creation point set – before, the zone was
+  // rebuilt from the LAST result, so every re-extract grew the set until it saturated.
+  const fset = p.frozenIdx && p.frozenIdx.length >= 3 && lateralOf(p) <= 1e-9 && (type === 'Ebene' ? !!p.frozen : true) ? p.frozenIdx : null;
   const ft = p.frozen && type === 'Ebene' ? frozenTester(p.frozen, p.maxDist, lateralOf(p) - (p.inset ?? 0), !!fset) : null; // exact frozen boundary (no raster)
   const cands: number[] = [];
-  if (fset) { for (const v of fset) { if (v >= N) continue; const q = P3(pos, v); if (ft!(q) && trimPass(p.trims, q)) cands.push(v); } cands.sort((a, b) => a - b); } // 0.35: frozen point set
+  if (fset) { for (const v of fset) { if (v >= N) continue; const q = P3(pos, v); if ((ft ? ft(q) : true) && trimPass(p.trims, q)) cands.push(v); } cands.sort((a, b) => a - b); } // 0.35: frozen point set
   else for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if ((ft ? ft(q) : inRegion(Rc, q)) && trimPass(p.trims, q)) cands.push(v); }
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {

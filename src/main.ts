@@ -1047,6 +1047,9 @@ function commitPreview() {
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
     const g = viewer.model.geometry; f.frozen = freezeBoundary(p.fit, g.getAttribute('position').array as Float32Array, g.index!.array as ArrayLike<number>, p.indices) ?? undefined;
     if (f.frozen) { if (p.bandUsed) f.frozen.band = p.bandUsed; f.src = p.indices; f.frozenIdx = p.indices; f.hit = undefined; if (f.fp?.fill) f.fp.fill = { ...f.fp.fill, on: false }; } }
+  // 0.38 (F11): other surface types with “Boundary from: Point selection” keep their creation point set as well – re-extraction
+  // then works from it (stable, identical count on repeat) instead of growing from its own last result
+  if (t !== 'Ebene' && !p.aux && f.fp?.zoneSrc !== 'geom' && p.method !== 'Konstruiert' && p.indices.length >= 3 && GEOM_ZONE.includes(t)) f.frozenIdx = p.indices;
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
