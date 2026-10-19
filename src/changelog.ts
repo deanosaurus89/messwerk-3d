@@ -7,6 +7,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.37', date: '2026-10-19', items: [
+    'Region growing: ONE robust normal for every triangle (no special rule for needle triangles any more): weighted plane fit over the neighbourhood (1.3 × local edge length, at least 10 points); neighbours off the local plane – the other face beyond an edge – are down-weighted, so growth still stops at sharp edges. 3 σ distance to the growing fit unchanged.',
+    'Fix (BLOCKER, t106u): Analyze › 🔗 Derive (median line, minimum-zone axis, flatness zone planes) – the confirm button “＋ Add to tree” looked empty: inside the panel a generic button rule set a white background while the text stayed white. Primary buttons in the panel now keep their blue background.',
+    'Analyze › Classes: tooltip and docs with an example (10 classes over ±0.05 mm = bands of 0.01 mm; 0 = continuous gradient).',
+  ] },
   { version: '2026.0.36', date: '2026-10-19', items: [
     'Region growing (Click & grow, ＋ Add region, Auto and growth in extraction) uses a robust normal: for needle triangles (long and thin) the normal is a plane fit over the neighbourhood (1.3 × local edge length, at least 10 points), not the triangle alone – before, a few µm of noise tilted such triangles by > 20° and growing left holes in the middle of a plane. Fit-guided growing takes triangles closer than 3 σ to the growing fit (before 4 σ). Small patches fully enclosed by the region are absorbed. The Normal angle keeps its meaning.',
     'Frozen plane boundary: only the outer contour and real islands (≥ 0.25 mm², not thin) are frozen – no sliver loops.',
