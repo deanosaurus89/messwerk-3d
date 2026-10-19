@@ -90,6 +90,16 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('A37', 'Analyze › 🔗 Derive: Bestätigen-Knopf sichtbar', 'iPhone und Desktop: Zylinder › Rechtwinkligkeit › Analyze › 🔗 Derive › Derived median line; ebenso Minimum-zone axis (Ebene: Flatness zone planes).', '„＋ Add to tree“ ist blau mit weißer Schrift (nicht leer); Klick legt den Linienzug/die Linie im Baum an.', ''),
   ('A37b', 'Analyze › Classes erklärt', 'Analyze › über „Classes“ fahren; Doku Farbskala öffnen.', 'Beispiel: 10 Klassen über ±0,05 mm = Bänder von 0,01 mm; 0 = stufenloser Verlauf; blau unten, grün Mitte, rot oben.', ''),
  ]),
+ ('0.38', 'Einheitliche Normalen, Pick-Modus, Inseln, Fixes', [
+  ('N38', 'Einheitliche kantenerhaltende Normalen – Kanten wie 0.36, Laden schnell', 'Beispielteil und Flansch laden (Ladezeit beobachten, auch iPhone); Ebene oben, Bohrung Ø12, Bolzen, Kegel, Kugel, Torus je per Auto antippen, auch knapp (0,3–0,8 mm) neben einer Kante.', 'Laden mindestens so schnell wie 0.37; Flächen werden bis ca. 0,3 mm an die Kante gewählt, kein Auslaufen über Kanten; Maße wie 0.37 (Ø 12,08, Bolzen Ø 16, Kugel R 7).', ''),
+  ('P38', 'Desktop: Pick-Modus in der Merkmalerzeugung', 'Desktop › Auto oder Kreis/Ebene … (Click & grow) › Maus ziehen und Mausrad drehen; dann Leertaste › ziehen/drehen; wieder Leertaste.', 'Im Pick-Modus ändert die Maus die Ansicht NICHT; das Rad ändert den Pick-Radius (Kreis am Cursor). Leertaste = Navigation (drehen/zoomen), nochmals Leertaste = wieder picken. Auch bei Pinsel/Radierer: Rad = Pinselradius.', ''),
+  ('I38', 'Inseln: alle entfernbar, auch Löcher', 'Inseldemo › Ebene › Click & grow auf die Platte › 🏝 Islands aufklappen › ein Loch (◯) antippen › „Not an island“.', 'Auch Löcher lassen sich entfernen; danach ist das Loch geschlossen dargestellt (keine Kontur); Hinweis „⚠ probably a hole/bore“.', ''),
+  ('I38b', 'Inseln: Abschnitt zugeklappt, Zusammenfassung in der ersten Zeile', 'Wie I38, Panel ansehen (Desktop und iPhone).', 'Inselbereich standardmäßig zugeklappt, „🏝 Islands n“ steht in der ersten Zeile; aufgeklappt umbrechen die Chips ohne Scrollen; ab > 20 Inseln eine kompakte Auswahlliste.', ''),
+  ('D38', 'Neues Demo-Teil „Multi-Feature plate (real scan)“', 'Load sample › Multi-Feature plate › laden; einige Elemente per Auto antippen.', 'Teil lädt mit Vorschaubild und Kurzbeschreibung; Auto erkennt Ebenen, Bohrungen, Langlöcher.', ''),
+  ('F11b', 'Retest F11: Re-Extract mit „Boundary from: Point selection“ stabil', 'Zylinder/Kegel per Click & grow (Boundary from: Point selection) › ✓ › Eigenschaften › Re-extraction mehrmals hintereinander ausführen.', 'Punktzahl bleibt bei jeder Wiederholung identisch (wächst nicht mehr).', ''),
+  ('F13b', 'Retest F13: ⚙ über dem Navigationswürfel bleibt sichtbar', 'Desktop und iPhone › Merkmal erzeugen (Auto/Ebene) › ⚙ links über dem Würfel suchen und anklicken.', '⚙ ist während der Merkmalerzeugung sichtbar und bedienbar (nicht vom Panel verdeckt).', ''),
+  ('F15b', 'Retest F15: Datenobjekt standardmäßig undurchsichtig, Transparent schaltet', 'Desktop › App neu laden › Modell ansehen › ⚙ › Transparent an/aus (auch Options › Display).', 'Modell ist beim Start undurchsichtig; Transparent macht es durchscheinend, nochmals aus wieder undurchsichtig.', ''),
+ ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
 SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'
@@ -100,9 +110,19 @@ def item(rel, i, t, s, e, note):
             + RADIO.replace('{id}', i) + SEV + '\n<textarea class="cm" placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea>\n'
             '<details class="bug"><summary>🐞 Fehler melden</summary><textarea class="bt" placeholder="Was passiert? Schritte, Gerät (Desktop/iPhone), erwartet vs. tatsächlich"></textarea></details></div>')
 out = ['<h2>Phase 1 – Merkmalerzeugung (19.–25.10.)</h2><p class="note">Je Release ein Abschnitt; jeder Punkt prüft genau EINE Funktion/Änderung. Punkte mit „noch nicht verfügbar“ kommen mit dem genannten Release.</p>']
+# 0.38 (Martin 19.10. 23:35/23:57): bestandene Punkte in einen zugeklappten Abschnitt „Erledigt“, offene oben
+DONE = {'R1', 'F1', 'F1b', 'F2', 'F2b', 'F3', 'F3b', 'F5a', 'F4', 'F4b', 'F5c', 'F5d', 'F5e', 'F5f', 'F5g', 'F12', 'F14', 'F17', 'F18', 'F19'}
+DNOTE = {'F4': 'ersetzt durch F4b'}
+done = []
 for rel, name, items in R:
-    out.append(f'<h3 class="rel">Release {rel} – {html.escape(name)}</h3>')
-    out += [item(rel, *x) for x in items]
+    op = [x for x in items if x[0] not in DONE]
+    done += [(rel, x) for x in items if x[0] in DONE]
+    if op:
+        out.append(f'<h3 class="rel">Release {rel} – {html.escape(name)}</h3>')
+        out += [item(rel, *x) for x in op]
+out.append(f'<details class="sec done-sec"><summary>✅ Erledigt ({len(done)}) – von Martin bestanden</summary>')
+out += [item(rel, x[0], x[1], x[2], x[3], DNOTE.get(x[0], x[4] or 'bestanden')) for rel, x in done]
+out.append('</details>')
 s = open(P).read()
 a = s.index('<h2>Phase 1'); b = s.index('<details class="sec"', a)
 s = s[:a] + '\n'.join(out) + '\n' + s[b:]
