@@ -13,6 +13,7 @@ import { installNumFields, parseNum } from './ui/numfield';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
 import { OverlayManager } from './ui/overlays';
 import { initRibbonSections } from './ui/ribbonsec';
+import { GENTOL_DEFAULT, GenTol, TolKind, generalTol, iso286 } from './core/tolerances';
 import { FIT_CRITS, FitCrit, critSupported } from './core/chebyshev';
 /** cache of trimmed geometry per feature (key: fit centre + point count) */
 const trimCache = new Map<number, { key: string; tri: Float32Array; edges: Float32Array }>();
@@ -93,7 +94,7 @@ const state = {
   selControl: null as number | null,
   mode: null as Mode,
   preview: null as Preview | null,
-  opts: { maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
+  opts: { genTol: { ...GENTOL_DEFAULT } as GenTol, maxAngleDeg: 20, radius: 0, pick: Number(localStorage.getItem('mw3d-pick') ?? 0) || 0, brush: 3, aux: 'auto' as 'auto' | 'ring' | 'none' | number, lineSide: 0 as 0 | 1, ring: { gap: 0.5, width: 3 }, multi: false, datumAssoc: 'iso' as DatumAssoc, datumFilter: true, newDatum: '' as string, fill: { on: false, band: null as number | null, exRaised: false },
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: true, outlierK: 3, zoneSrc: 'points' as 'points' | 'geom' } },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
@@ -198,6 +199,13 @@ document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => (b.onclick =
 }));
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view as any)));
 $('#ico-dist').innerHTML = ICON['Abstand 3D'];
+// general tolerance (project setting): ISO 2768-1 / -2 class for new controls; “Apply to all” refills every non-manual control
+function syncGenTolUI() { const g = state.opts.genTol ?? GENTOL_DEFAULT; ($('#gt-lin') as HTMLSelectElement).value = g.lin ?? ''; ($('#gt-geo') as HTMLSelectElement).value = g.geo ?? ''; }
+syncGenTolUI();
+($('#gt-lin') as HTMLSelectElement).onchange = (e) => { state.opts.genTol = { ...(state.opts.genTol ?? GENTOL_DEFAULT), lin: ((e.target as HTMLSelectElement).value || null) as GenTol['lin'] }; scheduleAutosave(); };
+($('#gt-geo') as HTMLSelectElement).onchange = (e) => { state.opts.genTol = { ...(state.opts.genTol ?? GENTOL_DEFAULT), geo: ((e.target as HTMLSelectElement).value || null) as GenTol['geo'] }; scheduleAutosave(); };
+$('#gt-apply').onclick = () => { reapplyAllTol(); renderAll(); scheduleAutosave(); toast(tt('General tolerance applied to all controls without a typed tolerance.')); };
+
 
 const TYPES: (GeomType | 'auto')[] = ['auto', 'Ebene', 'Kreis', 'Zylinder', 'Langloch', 'Linie', 'Kegel', 'Kugel', 'Torus', 'Punkt', 'Freiformfläche'];
 const FIT_TYPES = TYPES.filter((t) => t !== 'auto') as GeomType[];
@@ -1209,7 +1217,7 @@ function ctrlPanel(): { html: string; bind: (el: HTMLElement) => void } {
       <label>${isZoneControl(c.kind) ? tt('Tol') : tt('Tol+')} <input id="an-tol" inputmode="decimal" data-num="${isZoneControl(c.kind) ? 'abs' : 'signed'}" value="${c.tolUp}"></label>${c.datumIds?.length ? '<span data-dsl></span>' : ''}<span data-teds></span><span data-dia></span> ${st}${membersHtml(c, r)}</span>`,
     bind: (el) => {
       const upd = () => { void analyzeControl(c.id, true); };
-      const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = parseNum(t.value) ?? NaN; if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; upd(); } };
+      const t = el.querySelector<HTMLInputElement>('#an-tol'); if (t) t.onchange = () => { const v = parseNum(t.value) ?? NaN; if (isFinite(v)) { c.tolUp = isZoneControl(c.kind) ? Math.abs(v) : v; c.tolSrc = 'manual'; upd(); } };
       const dsl = el.querySelector('.an-ctrl [data-dsl]'); if (dsl && f) dsl.appendChild(datumSlots(c, f, upd));
       const tz = el.querySelector('.an-ctrl [data-teds]'); if (tz) for (const t of spec) tz.appendChild(tedEl(c, t, upd, true));
       if (tz) { const all = tedConfirmAll(c, spec, upd); if (all) tz.appendChild(all); }
@@ -1536,8 +1544,61 @@ function addControl(kind: ControlKind, id: number) {
   const t = defaultTolerance(kind);
   const c: Control = { id: state.nextCtrl++, kind, featureIds: [id], nominal: t.nominal, tolUp: t.up, tolLo: t.lo };
   if (isDatumControl(kind)) { c.datumIds = []; /* no auto-prefill: the user picks Primary (required) → Secondary → Tertiary */ if (kind === 'Neigung') c.basic = [null]; else if (kind === 'Position' || kind === 'Profil (Bezug)') c.basic = [null, null, null]; } // TED never prefilled: user enters drawing values
-  state.controls.push(c);
+  state.controls.push(c); applyTol(c);
   state.selControl = state.nextCtrl - 1;
+}
+// ---------------- general tolerances (ISO 2768-1/-2) and fits (ISO 286): auto-filled, typed values override
+const SIZE_KINDS = ['Durchmesser', 'Länge', 'Breite', 'Rohrdurchmesser', 'Abstand 3D', 'Abstand X', 'Abstand Y', 'Abstand Z'];
+function tolKindOf(c: Control, f?: FeatureView): TolKind | null {
+  const k = c.kind as string;
+  if (SIZE_KINDS.includes(k)) return 'size';
+  if (k === 'Radius' || k === 'Rohrradius') return 'radius';
+  if (k.startsWith('Winkel') || k === 'Kegelwinkel') return 'angle';
+  if (k === 'Form') return f?.type === 'Ebene' || f?.type === 'Linie' ? 'straight' : f?.type === 'Kreis' ? 'round' : null;
+  if (k === 'Rechtwinkligkeit') return 'perp'; if (k === 'Symmetrie') return 'sym'; if (k === 'Parallelität') return 'parallel';
+  if (k === 'Rundlauf' || k === 'Gesamtrundlauf') return 'runout';
+  return null;
+}
+/** relevant length of a feature for ISO 2768 (plane extent, line length, shorter angle leg): bounding-box diagonal of its points */
+function featExtent(f?: FeatureView): number {
+  if (!f) return 0; const m = f.measured; const P = featPoints(f.id);
+  if (P && P.length >= 2) { const a = [Infinity, Infinity, Infinity], b = [-Infinity, -Infinity, -Infinity]; const st = Math.max(1, Math.floor(P.length / 5000));
+    for (let i = 0; i < P.length; i += st) for (let k = 0; k < 3; k++) { a[k] = Math.min(a[k], P[i][k]); b[k] = Math.max(b[k], P[i][k]); } return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]); }
+  return Math.max(m?.length ?? 0, m?.diameter ?? 0, m?.width ?? 0);
+}
+const fitApplies = (c: Control) => SIZE_KINDS.includes(c.kind as string) || c.kind === 'Radius';
+/** (re)fill the tolerance of a control from its fit code or the project's general tolerance – unless typed by hand */
+function applyTol(c: Control, force = false): void {
+  if (c.tolSrc === 'manual' && !force) return;
+  const fm = featMap(), f = fm.get(c.featureIds[0]) as FeatureView | undefined, kind = tolKindOf(c, f); if (!kind) return;
+  let val = c.nominal; if (val == null) { try { val = evaluate({ ...c, nominal: null }, fm, ctx).measured; } catch { val = null; } }
+  if (val == null && kind !== 'runout') return;
+  const v = Math.abs(val ?? 0);
+  let L = featExtent(f);
+  if (c.datumIds?.length && (kind === 'perp' || kind === 'parallel')) L = Math.min(L || Infinity, ...c.datumIds.map((id) => featExtent(fm.get(id) as FeatureView)).filter((x) => x > 0));
+  if (kind === 'angle' && f?.refs?.length) L = Math.min(...f.refs.map((id) => featExtent(fm.get(id) as FeatureView)).filter((x) => x > 0), L || Infinity);
+  let out: { up: number; lo: number; src: string } | null = null;
+  if (c.fit && fitApplies(c)) { const r = iso286(c.fit, c.kind === 'Radius' ? 2 * v : v); if (r) out = { up: c.kind === 'Radius' ? r.up / 2 : r.up, lo: c.kind === 'Radius' ? r.lo / 2 : r.lo, src: `ISO 286 ${c.fit}` }; }
+  if (!out) out = generalTol(kind, state.opts.genTol ?? GENTOL_DEFAULT, v, L, f?.measured?.diameter);
+  if (!out) { if (c.tolSrc && c.tolSrc !== 'manual') c.tolSrc = undefined; return; }
+  c.tolUp = out.up; c.tolLo = isZoneControl(c.kind) ? 0 : out.lo; c.tolSrc = out.src;
+}
+function reapplyAllTol() { for (const c of state.controls) applyTol(c); }
+/** tolerance source badge: general tolerance / fit / manual (↺ = back to the general tolerance) */
+function tolSrcEl(c: Control): HTMLElement {
+  const s = document.createElement('span'); s.className = 'tsrc' + (c.tolSrc === 'manual' ? ' man' : '');
+  const k = tolKindOf(c, featMap().get(c.featureIds[0]) as FeatureView | undefined);
+  s.textContent = c.tolSrc === 'manual' ? tt('manual') : c.tolSrc ?? (k ? tt('default') : '');
+  s.title = c.tolSrc === 'manual' ? tt('Tolerance typed by hand (overrides the general tolerance). ↺ = back to the general tolerance / fit.') : c.tolSrc ? tt('Tolerance from {0} (project general tolerance or fit code); typing a value overrides it.', c.tolSrc) : tt('Built-in default tolerance (no general tolerance applies).');
+  if (c.tolSrc === 'manual') { const b = document.createElement('button'); b.type = 'button'; b.className = 'tsrc-rs'; b.textContent = '↺'; b.title = tt('Back to the general tolerance / fit'); b.onclick = (e) => { e.stopPropagation(); c.tolSrc = undefined; applyTol(c, true); renderAll(); scheduleAutosave(); }; s.appendChild(b); }
+  return s;
+}
+function fitInput(c: Control): HTMLInputElement {
+  const i = document.createElement('input'); i.type = 'text'; i.className = 'fitcode'; i.value = c.fit ?? ''; i.placeholder = 'H7'; i.size = 4; i.autocapitalize = 'off'; i.spellcheck = false;
+  i.title = tt('ISO 286 fit (e.g. H7 hole, g6 shaft, JS9): the tolerances follow from the nominal size. Empty = general tolerance.');
+  i.onchange = () => { const v = i.value.trim(); if (v && !iso286(v, Math.max(1, Math.abs(c.nominal ?? 10)))) { toast(tt('Unknown fit code {0} (ISO 286, sizes up to 500 mm)', v)); i.value = c.fit ?? ''; return; }
+    c.fit = v || undefined; c.tolSrc = undefined; applyTol(c, true); renderAll(); scheduleAutosave(); };
+  return i;
 }
 /** Katalog-Haken: Prüfmerkmal hinzufügen bzw. entfernen. */
 function toggleControl(kind: ControlKind, id: number, on: boolean) {
@@ -2027,7 +2088,8 @@ function renderTable() {
       if (c && r && isDatumControl(c.kind)) {
         const ed = document.createElement('span'); ed.className = 'cat-ed datum-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
-        lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0)), 'abs'));
+        lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => { c.tolUp = Math.abs(x ?? 0); if (tolKindOf(c, f)) c.tolSrc = 'manual'; }, 'abs'));
+        if (tolKindOf(c, f)) ed.appendChild(tolSrcEl(c));
         lab(tt('Datums'), datumSlots(c, f, () => renderAll()));
         tedInputs(c, f, lab);
         if (diaInfo(c, f).applies) lab(tt('Zone'), diaButton(c, f, () => renderAll()));
@@ -2041,12 +2103,14 @@ function renderTable() {
       } else if (c && r) {
         const ed = document.createElement('span'); ed.className = 'cat-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
-        if (isZoneControl(c.kind)) lab(tt('Tol (0..t)'), numInput(c.tolUp, (x) => (c.tolUp = Math.abs(x ?? 0)), 'abs'));
+        if (isZoneControl(c.kind)) lab(tt('Tol (0..t)'), numInput(c.tolUp, (x) => { c.tolUp = Math.abs(x ?? 0); c.tolSrc = 'manual'; }, 'abs'));
         else {
-          lab(tt('Nominal'), numInput(c.nominal, (x) => (c.nominal = x), 'signed'));
-          lab(tt('Tol+'), numInput(c.tolUp, (x) => (c.tolUp = x ?? 0), 'signed'));
-          lab(tt('Tol−'), numInput(c.tolLo, (x, raw) => (c.tolLo = tolLoOf(x, raw)), 'neg'));
+          lab(tt('Nominal'), numInput(c.nominal, (x) => { c.nominal = x; applyTol(c); }, 'signed'));
+          if (fitApplies(c)) lab(tt('Fit'), fitInput(c));
+          lab(tt('Tol+'), numInput(c.tolUp, (x) => { c.tolUp = x ?? 0; c.tolSrc = 'manual'; }, 'signed'));
+          lab(tt('Tol−'), numInput(c.tolLo, (x, raw) => { c.tolLo = tolLoOf(x, raw); c.tolSrc = 'manual'; }, 'neg'));
         }
+        ed.appendChild(tolSrcEl(c));
         ed.insertAdjacentHTML('beforeend', `<span class="dev ${r.status}">${r.deviation == null || isZoneControl(c.kind) ? '' : sgn(r.deviation)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
         row.appendChild(ed);
       }
@@ -2074,11 +2138,11 @@ function renderTable() {
     td(fc?.name ?? '?');
     td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag && r.flag !== NOMINAL_UNCONFIRMED ? ` <span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
     const zone = isZoneControl(c.kind);
-    td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => (c.nominal = x), 'signed'), 'num');
+    td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => { c.nominal = x; applyTol(c); }, 'signed'), 'num');
     td(fmt(r.measured), 'num');
     td(zone ? '' : fmt(r.deviation), `num dev ${r.status}`);
-    td(numInput(c.tolUp, (x) => (c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0), zone ? 'abs' : 'signed'), 'num');
-    td(zone ? '<span class="note" title="' + tt('Form/orientation tolerance zone 0..t') + '">0</span>' : numInput(c.tolLo, (x, raw) => (c.tolLo = tolLoOf(x, raw)), 'neg'), 'num');
+    const tu = td(numInput(c.tolUp, (x) => { c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0; c.tolSrc = 'manual'; }, zone ? 'abs' : 'signed'), 'num'); if (c.tolSrc) tu.title = c.tolSrc === 'manual' ? tt('manual') : c.tolSrc;
+    td(zone ? '<span class="note" title="' + tt('Form/orientation tolerance zone 0..t') + '">0</span>' : numInput(c.tolLo, (x, raw) => { c.tolLo = tolLoOf(x, raw); c.tolSrc = 'manual'; }, 'neg'), 'num');
     td(r.flag === NOMINAL_MISSING ? `<span class="st missing" title="${tt('Enter the theoretically exact dimensions (TED) from the drawing in the control catalog')}">${tt('Nominal missing')}</span>` : stHtml(r));
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = tt('Delete');
     x.onclick = (e) => { e.stopPropagation(); state.controls = state.controls.filter((k) => k.id !== c.id); renderAll(); };
@@ -2489,7 +2553,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;
-    if (st.opts) Object.assign(state.opts, st.opts);
+    if (st.opts) Object.assign(state.opts, st.opts); syncGenTolUI();
     state.csys = st.csys ?? []; state.activeCs = st.activeCs ?? null; state.nextCs = st.nextCs ?? state.csys.length + 1; state.showCs = st.showCs ?? true; state.csSel = null; state.csEdit = null;
     curvesReset(); state.curves = st.curves ?? []; state.nextCurve = st.nextCurve ?? state.curves.length + 1; state.showLayout = !!st.showLayout;
     if (state.curves.length) updateLayout();
@@ -3655,4 +3719,4 @@ function bindConDefinition(d: HTMLElement, f: FeatureView) {
     b.onclick = () => startConstruct(o.out, o.key); typeBtns.appendChild(b);
   }
 }
-Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS, openFeatureProps });
+Object.assign((window as any).__app, { startConstruct, conPick, CONSTRUCTIONS, openFeatureProps, applyTol });

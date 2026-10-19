@@ -5,7 +5,7 @@ import { Control, Feature, FORM_NAME, DEG, controlLabel, evaluate, datumText, Ev
 export interface ReportFeatureRow { name: string; type: string; x: number; y: number; z: number; i: number; j: number; k: number;
   size: string; form: number | null; formName: string; rms: number | null; points: number; aux: string; }
 export interface ReportControlRow { feature: string; control: string; nominal: number | null; measured: number | null; deviation: number | null;
-  tolUp: number; tolLo: number; status: string; }
+  tolUp: number; tolLo: number; status: string; tolSrc?: string; }
 export interface Report { id: number; name: string; created: string; source: string; features: ReportFeatureRow[]; controls: ReportControlRow[]; io: number; nio: number; }
 
 export const statusText = (s: string) => (s === 'IO' ? 'OK' : s === 'NIO' ? 'NOK' : s);
@@ -41,7 +41,7 @@ export function buildReport(id: number, features: Feature[], controls: Control[]
     const f = fm.get(c.featureIds[0]); const r = evaluate(c, fm, ctx);
     if (r.status === 'IO') io++; if (r.status === 'NIO') nio++;
     const dt = datumText(c, fm);
-    return { feature: f?.name ?? '?', control: controlLabel(c, f) + (dt ? ` |${dt}|` : '') + (r.flag ? ` ⚠ ${r.flag}` : ''), nominal: c.nominal, measured: r.measured, deviation: r.deviation, tolUp: c.tolUp, tolLo: c.tolLo, status: r.status };
+    return { feature: f?.name ?? '?', control: controlLabel(c, f) + (dt ? ` |${dt}|` : '') + (r.flag ? ` ⚠ ${r.flag}` : ''), nominal: c.nominal, measured: r.measured, deviation: r.deviation, tolUp: c.tolUp, tolLo: c.tolLo, status: r.status, tolSrc: c.tolSrc === 'manual' ? 'manual' : c.tolSrc ?? '' };
   });
   return { id, name: `Table ${id}`, created: now.toLocaleString('en-GB'), source, features: frows, controls: crows, io, nio };
 }
@@ -54,8 +54,8 @@ export function reportCSV(r: Report): string {
     ['Features'], ['Name', 'Type', 'X', 'Y', 'Z', 'I', 'J', 'K', 'Size', 'Form', 'Form value', 'RMS', 'Points', 'Aux. plane'],
     ...r.features.map((f) => [f.name, f.type, f.x, f.y, f.z, f.i, f.j, f.k, f.size, f.formName, f.form, f.rms, f.points, f.aux]),
     [], ['Controls', `${r.io} OK`, `${r.nio} NOK`],
-    ['Feature', 'Control', 'Nominal', 'Actual', 'Deviation', 'Tol +', 'Tol -', 'Status'],
-    ...r.controls.map((c) => [c.feature, c.control, c.nominal, c.measured, c.deviation, c.tolUp, c.tolLo, statusText(c.status)]),
+    ['Feature', 'Control', 'Nominal', 'Actual', 'Deviation', 'Tol +', 'Tol -', 'Tol. source', 'Status'],
+    ...r.controls.map((c) => [c.feature, c.control, c.nominal, c.measured, c.deviation, c.tolUp, c.tolLo, c.tolSrc ?? '', statusText(c.status)]),
   ];
   return '\ufeff' + L.map((row) => row.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }
@@ -70,10 +70,10 @@ export function reportTablesHTML(r: Report): string {
   ${r.features.map((f) => `<tr><td>${esc(f.name)}${f.aux ? `<div class="aux">${esc(f.aux)}</div>` : ''}</td><td>${f.type}</td><td class="n">${n(f.x, 3)}</td><td class="n">${n(f.y, 3)}</td><td class="n">${n(f.z, 3)}</td>
     <td class="n">${esc(f.size)}</td><td class="n">${f.form == null ? '' : `${f.formName} ${n(f.form)}`}</td><td class="n">${n(f.rms)}</td><td class="n">${f.points}</td></tr>`).join('')}
   </tbody></table>
-  <h3>Controls</h3><table><thead><tr><th>Feature</th><th>Control</th><th>Nominal</th><th>Actual</th><th>Dev.</th><th>Tol +</th><th>Tol −</th><th>Status</th></tr></thead><tbody>
+  <h3>Controls</h3><table><thead><tr><th>Feature</th><th>Control</th><th>Nominal</th><th>Actual</th><th>Dev.</th><th>Tol +</th><th>Tol −</th><th>Tol. source</th><th>Status</th></tr></thead><tbody>
   ${r.controls.length ? r.controls.map((c) => `<tr><td>${esc(c.feature)}</td><td>${esc(c.control)}</td><td class="n">${n(c.nominal)}</td><td class="n">${n(c.measured)}</td>
-    <td class="n ${c.status}">${n(c.deviation)}</td><td class="n">${n(c.tolUp)}</td><td class="n">${n(c.tolLo)}</td><td><span class="st ${c.status === '—' ? 'none' : c.status}">${statusText(c.status)}</span></td></tr>`).join('')
-    : '<tr><td colspan="8">No controls selected.</td></tr>'}
+    <td class="n ${c.status}">${n(c.deviation)}</td><td class="n">${n(c.tolUp)}</td><td class="n">${n(c.tolLo)}</td><td class="src">${esc(c.tolSrc ?? '')}</td><td><span class="st ${c.status === '—' ? 'none' : c.status}">${statusText(c.status)}</span></td></tr>`).join('')
+    : '<tr><td colspan="9">No controls selected.</td></tr>'}
   </tbody></table>`;
 }
 

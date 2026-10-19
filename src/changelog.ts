@@ -6,6 +6,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.24', date: '2026-10-19', items: [
+    'General tolerances (project setting, Controls ribbon): ISO 2768-1 class f/m/c/v for sizes, distances, radii and angles and ISO 2768-2 class H/K/L for flatness/straightness, roundness, perpendicularity, symmetry, parallelism and run-out. Default mK; new controls are filled automatically from the nominal (or actual) size and the feature length.',
+    'ISO 286 fits per size control: type e.g. H7 (hole) or g6 (shaft) in the Fit field – Tol+/Tol− follow from the nominal size (IT4–IT12, D…P / d…p, JS/js, up to 500 mm).',
+    'Tolerance source shown in Control Properties (badge “ISO 2768-m”, “ISO 286 H7”, “manual”) and as a column in the report/CSV. Typing a tolerance overrides it (manual); ↺ returns to the general tolerance / fit; “Apply to all” refills every non-manual control.',
+  ] },
   { version: '2026.0.23', date: '2026-10-19', items: [
     'Global coordinate system in the tree: eye button shows/hides the WCS triad (remembered), right-click › Center on origin; every CS offers triad on/off and Center on origin.',
     'Fix: the extraction zone of a click-grown plane at boundary exclusion 0 now contains exactly the grown points (before it also collected not-grown neighbours on scan meshes – ~27k instead of 14.7k points). All inside boundary (gap filling) is unchanged.',

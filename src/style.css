@@ -491,3 +491,9 @@ details.dsec details.reex { margin-top: 2px; }
   .panel[data-tab="merkmale"] .big { white-space:normal; line-height:9px; text-align:center; overflow:hidden; word-break:normal; overflow-wrap:normal; hyphens:manual; }
 }
 @media (max-width: 900px), (max-height: 560px) { body.lasso-on #dialog-pane, body.lasso-on #table-pane, body.lasso-on #tree-pane { display:none !important; } }
+/* general tolerance (Controls ribbon) and tolerance source badge */
+.gentol .btns { gap:6px; } .gentol label.gt { display:flex; flex-direction:column; font-size:11px; color:#334; gap:2px; } .gentol select { font-size:12px; }
+.big.sm { min-width:54px; }
+.tsrc { font-size:10px; padding:1px 5px; border-radius:8px; background:#e7eef8; color:#1f4f8f; white-space:nowrap; align-self:center; }
+.tsrc.man { background:#fdf0d8; color:#8a5a00; } .tsrc-rs { border:none; background:none; cursor:pointer; padding:0 0 0 3px; font-size:11px; color:inherit; }
+input.fitcode { width:3.6em; }

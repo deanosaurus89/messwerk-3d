@@ -57,6 +57,10 @@ export interface Control {
   datumMods?: ('M' | 'L' | null)[];
   /** pattern: common zone (CZ, default) or separate zones */
   cz?: boolean;
+  /** ISO 286 fit code for size controls (e.g. 'H7' hole, 'g6' shaft); tolerances then follow from the nominal */
+  fit?: string;
+  /** where the tolerance comes from: 'ISO 2768-m', 'ISO 286 H7' … ; 'manual' = typed by the user (override); undefined = built-in default */
+  tolSrc?: string;
   basic?: (number | null)[];  // TED (theoretically exact dimensions): position X/Y/Z in the DRF or angularity angle; null = not entered yet (never prefilled)
 }
 
