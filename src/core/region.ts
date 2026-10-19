@@ -81,10 +81,15 @@ export class MeshTopology {
     // Mehrheitsregel (kantenerhaltend): liegt ein Knoten des Dreiecks schon auf der Nachbarfläche (Normale > 15° von den
     // beiden anderen), zählen nur die zwei übereinstimmenden Knoten – sonst entstünden an Kanten Mischnormalen.
     const d = (i: number, j: number) => o[i] * o[j] + o[i + 1] * o[j + 1] + o[i + 2] * o[j + 2];
-    const dab = d(a, b), dbc = d(b, c), dca = d(c, a), C15 = 0.9659;
+    const dab = d(a, b), dbc = d(b, c), dca = d(c, a), C15 = 0.9659; void dab;
     let use = [a, b, c];
-    if (Math.min(dab, dbc, dca) < C15) { const best = Math.max(dab, dbc, dca); use = best === dab ? [a, b] : best === dbc ? [b, c] : [c, a];
-      if (best < C15) { const fn = this.mesh.faceNormals!; let bi = a, bd = -2; for (const i of [a, b, c]) { const q = o[i] * fn[3 * t] + o[i + 1] * fn[3 * t + 1] + o[i + 2] * fn[3 * t + 2]; if (q > bd) { bd = q; bi = i; } } use = [bi]; } }
+    if (Math.min(dab, dbc, dca) < C15) {
+      // Knoten uneinig (Dreieck berührt eine Kante): Anker = Knotennormale, die der eigenen Flächennormale am nächsten
+      // liegt (sagt, auf welcher Seite das Dreieck liegt); gemittelt werden nur Knoten innerhalb 15° davon.
+      const fn = this.mesh.faceNormals!; let bi = a, bd = -2;
+      for (const i of [a, b, c]) { const q = o[i] * fn[3 * t] + o[i + 1] * fn[3 * t + 1] + o[i + 2] * fn[3 * t + 2]; if (q > bd) { bd = q; bi = i; } }
+      use = [a, b, c].filter((i) => i === bi || d(i, bi) >= C15);
+    }
     for (const i of use) { x += o[i]; y += o[i + 1]; z += o[i + 2]; }
     const l = Math.hypot(x, y, z) || 1; const s = this.smooth; s[3 * t] = x / l; s[3 * t + 1] = y / l; s[3 * t + 2] = z / l; return s;
   }
@@ -425,6 +430,8 @@ export class MeshTopology {
 export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
 /** Normalenverfahren: 'robust' = Standard ab 0.37 (gewichteter Nachbarschafts-Fit für alle), 'plain' = ungewichteter Fit für alle,
  *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
+export const ROBUST_HARD = +((globalThis as any).process?.env?.RHARD ?? 2);
+export const ROBUST_HA = +((globalThis as any).process?.env?.RHA ?? 15);
 export const ROBUST_CT = +((globalThis as any).process?.env?.RCT ?? 0.5);
 export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== '0';
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
@@ -497,13 +504,16 @@ export class RobustNormals {
             for (let i = 0; i < nb; i++) { const w = q[i]; const t = tris[offsets[w]]; const ax = fnn[3 * t], ay = fnn[3 * t + 1], az = fnn[3 * t + 2]; const sco = score(ax, ay, az); if (sco > best) { best = sco; x = ax; y = ay; z = az; } }
           }
         }
-        for (let iter = 0; iter < (rms0 < 0.2 * sc ? 0 : ROBUST_IT); iter++) {
-          let sw = 0, mx = 0, my = 0, mz = 0;
+        const nIt = rms0 < 0.2 * sc ? 0 : ROBUST_IT, H2 = (2.5 * sc) ** 2, HC = Math.cos((ROBUST_HA * Math.PI) / 180);
+        for (let iter = 0; iter < (nIt ? nIt + ROBUST_HARD : 0); iter++) {
+          const hard = iter >= nIt; let sw = 0, mx = 0, my = 0, mz = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz; const d = (dx - cxw) * x + (dy - cyw) * y + (dz - czw) * z;
-            let wt = 1 / (1 + (d * d) / s2);
+            // Abschluss (hart): nur Punkte nahe der Ebene UND mit passender eigener Knotennormale (< ROBUST_HA°) –
+            // Punkte der Nachbarfläche direkt an der Kante liegen auch nahe der Ebene, ihre Normalen aber nicht.
+            let wt = hard ? (d * d < H2 && Math.abs(vn[3 * w] * x + vn[3 * w + 1] * y + vn[3 * w + 2] * z) > HC ? 1 : 0) : 1 / (1 + (d * d) / s2);
             if (ROBUST_NW > 0) { const c = Math.max(0, vn[3 * w] * x + vn[3 * w + 1] * y + vn[3 * w + 2] * z); wt *= c ** ROBUST_NW; }
             W[i] = wt; sw += wt; mx += wt * dx; my += wt * dy; mz += wt * dz; }
-          mx /= sw; my /= sw; mz /= sw; let A = 0, B = 0, Cc = 0, D = 0, E = 0, G = 0;
+          if (sw < 3) break; mx /= sw; my /= sw; mz /= sw; let A = 0, B = 0, Cc = 0, D = 0, E = 0, G = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px - mx, dy = p[3 * w + 1] - py - my, dz = p[3 * w + 2] - pz - mz, wt = W[i];
             A += wt * dx * dx; B += wt * dx * dy; Cc += wt * dx * dz; D += wt * dy * dy; E += wt * dy * dz; G += wt * dz * dz; }
           const t2 = A + D + G;
