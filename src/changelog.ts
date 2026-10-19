@@ -7,6 +7,14 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.38', date: '2026-10-20', items: [
+    'Click & grow / Auto: one edge-aware normal for every triangle (neighbourhood plane fit that keeps to the face the point lies on) – computed only where growing reaches, so loading is as fast as before; edge coverage and nominals as in 0.37.',
+    'Desktop pick mode: while creating a feature (Auto, typed Click & grow, brush, eraser) the mouse no longer moves the view – clicks pick and the mouse wheel changes the pick/brush radius; Space switches to navigation and back.',
+    'Islands: every island can be removed, holes too (then shown closed, with “⚠ probably a hole/bore”); the island section is collapsed by default with the count in the first row, wraps without scrolling and becomes a compact list beyond 20.',
+    'Fix (F11): re-extraction with “Boundary from: Point selection” keeps the creation selection – repeated re-extracts give the identical point count.',
+    'Fix (F15): the data object is opaque by default and ⚙ › Transparent works on desktop. Fix (F13): ⚙ above the navigation cube stays visible during feature creation.',
+    'New demo part: Multi-Feature plate (real scan). Faster Auto type selection on large regions.',
+  ] },
   { version: '2026.0.37', date: '2026-10-19', items: [
     'Fix (BLOCKER, t106u): Analyze › 🔗 Derive (median line, minimum-zone axis, flatness zone planes) – the confirm button “＋ Add to tree” looked empty: inside the panel a generic button rule set a white background while the text stayed white. Primary buttons in the panel now keep their blue background (desktop and iPhone).',
     'Analyze › Classes: tooltip and docs with an example (10 classes over ±0.05 mm = bands of 0.01 mm; 0 = continuous gradient; blue below, green middle, red above).',
