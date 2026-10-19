@@ -1,6 +1,7 @@
 import { decFor } from './display';
 // Merkmale (Features) und Prüfmerkmale (Controls). Erweiterbar um Soll-Komponente (CAD).
 import { FitResult, GeomType } from './fit';
+import type { IstState, SollState } from './featuremodel';
 import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
 import { toLocal, dirLocal } from './csys';
 import { DATUM_CONTROLS, DatumKindCtl, EvalCtx, datumKind, evalDatumControl, isDatumControl } from './datum';
@@ -11,21 +12,25 @@ export interface Feature {
   id: number;
   name: string;
   type: GeomType;
-  measured?: FitResult;      // Ist-Komponente
-  nominal?: FitResult;       // Soll-Komponente (spätere CAD-Erweiterung)
-  pointCount: number;
-  method: 'Klick' | 'Pinsel' | 'Konstruiert' | 'Anker' | 'Abgeleitet';
+  // ---- Ist (actual) – stored in `ist` (see core/featuremodel.ts); the flat names below are accessors onto it
+  ist?: IstState;
+  /** reserved: nominal (Soll) from CAD – not implemented */
+  soll?: SollState;
+  measured?: FitResult;      // → ist.fit
+  pointCount: number;        // → ist.pointCount
+  method: 'Klick' | 'Pinsel' | 'Konstruiert' | 'Anker' | 'Abgeleitet'; // → ist.method
+  aux?: AuxPlane;            // → ist.aux: Hilfsebene (Projektionsebene) für Kreis/Langloch
+  /** anchor feature: the picked points (mathematical minimum) and their surface normals → ist.anchor */
+  anchor?: { pts: Vec3[]; nrm: Vec3[] };
+  /** re-extraction applied on top of the initial method (parameters + result) → ist.reex */
+  reex?: { maxDist: number; sigma: number; maxAngleDeg: number; margin?: number | null; fill?: boolean; fillBand?: number; points: number; removed: number; before: number };
+  // ---- node (placeholder): dependencies and datum
   /** derived from an analysis (Derive feature from Analyze): recomputed from the parent's points when it changes */
   derived?: { key: string; parent: number; error?: string };
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
-  aux?: AuxPlane;            // Hilfsebene (Projektionsebene) für Kreis/Langloch
   datum?: string;            // Bezugsbuchstabe (A, B, C …)
   /** constructed feature: construction key, parents (also in refs) and parameters */
   cons?: { key: string; refs: number[]; params?: Record<string, number>; error?: string };
-  /** anchor feature: the picked points (mathematical minimum) and their surface normals */
-  anchor?: { pts: Vec3[]; nrm: Vec3[] };
-  /** re-extraction applied on top of the initial method (parameters + result) */
-  reex?: { maxDist: number; sigma: number; maxAngleDeg: number; margin?: number | null; fill?: boolean; fillBand?: number; points: number; removed: number; before: number };
 }
 
 /** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */

@@ -11,6 +11,7 @@ import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
 import { TRIM_TYPES, trimmedSurface, analyticShell, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
 import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
+import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
 import { OverlayManager } from './ui/overlays';
 import { initRibbonSections, installFitRibbon } from './ui/ribbonsec';
@@ -899,7 +900,7 @@ function commitPreview() {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
     f.auxIndices = p.aux.indices;
   }
-  state.features.push(f);
+  state.features.push(asNode(f)); // node + Ist (core/featuremodel.ts)
   if (state.opts.newDatum && !state.features.some((g) => g.datum === state.opts.newDatum)) setDatum(f, state.opts.newDatum);
   state.opts.newDatum = '';
   state.preview = null; clearBrush();
@@ -1297,7 +1298,7 @@ function addDerived(key: string, p: FeatureView) {
   const fit = runDerive(key, p, featPoints(p.id)), t = fit.type, n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
   const f: FeatureView = { id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, measured: fit, pointCount: 0, method: 'Abgeleitet', derived: { key, parent: p.id }, refs: [p.id],
     color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: new Uint32Array(0), candidates: [], src: new Uint32Array(0), fp: defaultFp() } as FeatureView;
-  state.features.push(f); deriveSrc.set(f, { m: p.measured, P: featPoints(p.id) });
+  state.features.push(asNode(f)); deriveSrc.set(f, { m: p.measured, P: featPoints(p.id) });
   toast(`✔ ${tt('{0} created', f.name)} (🔗 ${tt('derived from {0}', p.name)})`);
 }
 /** Compact bottom area of the axis/position analysis: value-label checkboxes + [Hide mesh][Transparent] side by side. */
@@ -1813,7 +1814,7 @@ function renderTree() {
       an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu(e.clientX, e.clientY, [[`ⓘ ${tt('Properties…')}`, () => showProperties(f)], [`⌖ ${tt('Center')}`, () => centerOn(f.id)]]); };
       an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
-    if (f.nominal) node(`<span class="tw"></span>${ICON.soll}${tt('Nominal')}`, 'indent3', () => selectFeature(f.id));
+    if (f.soll) node(`<span class="tw"></span>${ICON.soll}${tt('Nominal')}`, 'indent3', () => selectFeature(f.id));
   }
   if (state.curves.length) {
     const cv = state.curves.some((c) => c.visible);
@@ -2574,9 +2575,9 @@ function attachContext(el: HTMLElement, fid: number | null) {
 // ------------------------------------------------------------------ Projekt speichern / öffnen / Autosave
 let loadCount = 0, meshKey = '', restoring = false;
 function projectJSON() {
-  const feats = state.features.map(({ indices, auxIndices, candidates, src, dev, ...rest }) => { void indices; void auxIndices; void candidates; void src; void dev; return rest; });
+  const feats = state.features.map((f) => nodeToJSON(f)); // node + ist (runtime point sets go to the index blob)
   return {
-    savedAt: new Date().toISOString(), app: 'MessWerk 3D',
+    savedAt: new Date().toISOString(), app: 'MessWerk 3D', featureModel: FEATURE_MODEL,
     mesh: { name: state.data!.name, vertexCount: state.data!.vertexCount, triCount: state.data!.triCount },
     state: {
       features: feats, controls: state.controls, typeCount: state.typeCount, nextId: state.nextId, nextCtrl: state.nextCtrl, nextReport: state.nextReport,
@@ -2616,7 +2617,10 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     viewer.setModel(r.positions, r.indices, r.normals); peReset();
     const st = json.state;
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
-    state.features = st.features.map((f: any) => ({ ...f, ...(f.reex ? { reex: normReex(f.reex) } : {}), indices: unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0), auxIndices: unpackIndex(idx, 'a' + f.id), src: unpackIndex(idx, 's' + f.id), dev: ((d) => (d ? new Float32Array(d.slice().buffer) : undefined))(unpackIndex(idx, 'd' + f.id)) }));
+    // feature model 1 (≤ 0.27: flat features) is migrated to feature node + Ist; format 2 passes through
+    state.features = migrateFeatures(st.features, json.featureModel).map((f: any) => { if (f.reex) f.reex = normReex(f.reex);
+      f.indices = unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0); f.auxIndices = unpackIndex(idx, 'a' + f.id); f.src = unpackIndex(idx, 's' + f.id);
+      f.dev = ((d) => (d ? new Float32Array(d.slice().buffer) : undefined))(unpackIndex(idx, 'd' + f.id)); return f; });
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
     state.labelOffsets = new Map(st.labelOffsets ?? []); state.showLabels = st.showLabels ?? true; state.showPrims = st.showPrims ?? true; state.colorPts = st.colorPts ?? true;

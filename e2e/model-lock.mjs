@@ -68,6 +68,14 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   const s1 = await page.evaluate(SNAPSHOT);
   const d01 = diff(s0, s1); if (d01.length) fail(`${v.name}: save/load roundtrip changed results: ${d01.join(' | ')}`);
   results[v.name] = s0;
+  if (!BASELINE) { // structure from 0.28: feature node + Ist, project format 2
+    const m = await page.evaluate(() => { const A = window.__app, S = A.state, j = A.projectJSON();
+      const flat = ['measured', 'pointCount', 'method', 'aux', 'reex', 'anchor', 'fp', 'indices', 'src'];
+      return { nodes: S.features.every((f) => f.ist && f.ist.source && !flat.some((k) => Object.keys(f).includes(k))), format: j.featureModel,
+        json: j.state.features.every((f) => f.ist && !('measured' in f) && !('indices' in f.ist) && (f.ist.fit || f.type === 'Punkt')), src: [...new Set(S.features.map((f) => f.ist.source))].join() }; });
+    console.log(v.name, 'model', JSON.stringify(m));
+    if (!m.nodes || m.format !== 2 || !m.json) fail(`${v.name}: feature node/Ist structure not in place (${JSON.stringify(m)})`);
+  }
   console.log(v.name, `${s0.features.length} features, ${s0.controls.length} controls, ${s0.csys.length} CS – roundtrip ${d01.length ? '✗' : 'identical'}`);
   if (v.name === 'desktop') {
     if (BASELINE) { const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__app.saveProject())]); await dl.saveAs(OLD); console.log('old-format project written', OLD); }

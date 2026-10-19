@@ -4,7 +4,8 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 export interface ProjectBinary { positions: Float32Array; indices: Uint32Array; }
 export interface IndexBlob { offsets: Record<string, [number, number]>; data: Uint32Array; }
 export const FORMAT = 'messwerk3d-project';
-export const VERSION = 1;
+/** 1 = flat features (≤ 0.27); 2 = feature node + Ist (0.28, core/featuremodel.ts – older files are migrated on load) */
+export const VERSION = 2;
 
 /** Typisierte Merkmals-Indizes (Punkte, Hilfsebenen-Punkte) in einen Block packen. */
 export function packIndices(arrs: Record<string, Uint32Array | undefined>): IndexBlob {

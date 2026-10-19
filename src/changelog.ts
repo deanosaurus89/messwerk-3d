@@ -7,6 +7,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.28', date: '2026-10-19', items: [
+    'Internal: new feature data model – every feature is a node (name, type, dependencies, datum) with its actual state (Ist: points, fit, aux plane, extraction parameters) underneath; prepared for a nominal state from CAD later. No visible change: all results are identical (checked against 0.27 with 12 features, 19 controls and a coordinate system).',
+    'Project files: format version 2. Projects saved with 0.27 or older (and the last autosave) open unchanged and are converted automatically; a project saved with 0.28 cannot be opened by older versions.',
+    'Test checklist reorganised by phase: Phase 1 (feature creation) on top with how-to-test steps and expected results, earlier items in a collapsed archive, bug report with severity per item.',
+  ] },
   { version: '2026.0.27', date: '2026-10-19', items: [
     'Boundary from “Fitted geometry” (cylinder/cone/sphere/torus) now really is the fitted shape: the created feature keeps all surface points of the zone (demo hole: 6 183 selected → 10 057 of 10 079 wall points) instead of falling back to the selected triangles – also when Auto detection found a circle and the type was switched to Cylinder, and after a refit. Shown as a clean surface with circles at its ends (full 360° for a closed wall, arc for an open one), no polygon outline. The option is also offered in Auto detection before the click; the Dialog shows “Boundary from: Fitted geometry”.',
     'Assigning a datum no longer changes the 3D view: re-rendering the dialog opened the re-extraction section, which started its zone preview (orange points + zone). The section now stays as you left it.',

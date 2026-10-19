@@ -6,6 +6,7 @@
 //    a secondary plane nominally ⟂ the primary may only rotate about the primary direction, a tertiary plane ⟂ both
 //    is fixed in orientation; a secondary axis nominally ∥ (or ⟂) the primary is kept exactly ∥ (⟂) to it.
 // Cones, spheres, tori and points stay least squares (documented as a simplification).
+import { withActualFit } from './featuremodel';
 import type { Feature } from './features';
 import type { FitResult } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
@@ -117,7 +118,7 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
       else if (perp.length === 1) { n0 = unit(sub(n0, scale(perp[0], dot(n0, perp[0])))); cons.about = perp[0]; }
       const t = tangentPlane(P, n0, cons), c = add(m.center, scale(t.n, t.c - dot(m.center, t.n)));
       const nm = dot(t.n, m.normal) < 0 ? scale(t.n, -1) : t.n;
-      out.push({ ...D, measured: { ...m, center: c, normal: nm } });
+      out.push(withActualFit(D, { ...m, center: c, normal: nm }));
       info.push({ method: `tangent plane, minimax outside material${cons.fixed ? ', orientation fixed by previous datums' : cons.about ? ', constrained ⟂ previous datum' : ''}${tagN}`, shift: t.c - dot(m.center, t.n), tilt: Math.acos(Math.min(1, Math.abs(dot(t.n, m.normal)))) * 180 / Math.PI });
       dirs.push(t.n); continue;
     }
@@ -127,7 +128,7 @@ export function simulateDatums(ds: Feature[], ctx: SimCtx = {}): { feats: Featur
       const par = dirs.find((g) => Math.abs(dot(g, a)) > Math.cos((10 * Math.PI) / 180)); if (par) dir = dot(par, a) < 0 ? scale(par, -1) : par;
       const c = contactCylinder(P, m, side.hole, { dir });
       const shift = norm(sub(sub(c.centre, m.center), scale(c.dir, dot(sub(c.centre, m.center), c.dir))));
-      out.push({ ...D, measured: { ...m, center: c.centre, normal: c.dir, radius: c.r, diameter: 2 * c.r } });
+      out.push(withActualFit(D, { ...m, center: c.centre, normal: c.dir, radius: c.r, diameter: 2 * c.r }));
       info.push({ method: `${side.hole ? 'maximum inscribed' : 'minimum circumscribed'} ${D.type === 'Kreis' ? 'circle' : 'cylinder'}${dir && D.type !== 'Kreis' ? ', ∥ previous datum' : ''}${tagN}`, shift, tilt: Math.acos(Math.min(1, Math.abs(dot(c.dir, a)))) * 180 / Math.PI });
       dirs.push(c.dir); continue;
     }
