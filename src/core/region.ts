@@ -76,8 +76,16 @@ export class MeshTopology {
   /** robuste Dreiecksnormale t (lazy): gibt das Normalen-Array zurück, Eintrag t ist danach gültig */
   N(t: number): Float32Array {
     if (this.sReady[t]) return this.smooth; this.sReady[t] = 1;
-    const f = this.mesh.indices, rn = this.rn!; let x = 0, y = 0, z = 0;
-    for (let k = 0; k < 3; k++) { const v = f[3 * t + k], o = rn.get(v); x += o[3 * v]; y += o[3 * v + 1]; z += o[3 * v + 2]; }
+    const f = this.mesh.indices, rn = this.rn!, o = rn.out; let x = 0, y = 0, z = 0;
+    const a = 3 * f[3 * t], b = 3 * f[3 * t + 1], c = 3 * f[3 * t + 2]; rn.get(a / 3); rn.get(b / 3); rn.get(c / 3);
+    // Mehrheitsregel (kantenerhaltend): liegt ein Knoten des Dreiecks schon auf der Nachbarfläche (Normale > 15° von den
+    // beiden anderen), zählen nur die zwei übereinstimmenden Knoten – sonst entstünden an Kanten Mischnormalen.
+    const d = (i: number, j: number) => o[i] * o[j] + o[i + 1] * o[j + 1] + o[i + 2] * o[j + 2];
+    const dab = d(a, b), dbc = d(b, c), dca = d(c, a), C15 = 0.9659;
+    let use = [a, b, c];
+    if (Math.min(dab, dbc, dca) < C15) { const best = Math.max(dab, dbc, dca); use = best === dab ? [a, b] : best === dbc ? [b, c] : [c, a];
+      if (best < C15) { const fn = this.mesh.faceNormals!; let bi = a, bd = -2; for (const i of [a, b, c]) { const q = o[i] * fn[3 * t] + o[i + 1] * fn[3 * t + 1] + o[i + 2] * fn[3 * t + 2]; if (q > bd) { bd = q; bi = i; } } use = [bi]; } }
+    for (const i of use) { x += o[i]; y += o[i + 1]; z += o[i + 2]; }
     const l = Math.hypot(x, y, z) || 1; const s = this.smooth; s[3 * t] = x / l; s[3 * t + 1] = y / l; s[3 * t + 2] = z / l; return s;
   }
   /** Normalen für das fit-geführte Wachsen (needle036: alte 1-Ring-Normalen außer Nadeln) */
