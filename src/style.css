@@ -286,7 +286,7 @@ body.resizing, body.resizing * { cursor:inherit; user-select:none; }
 #ctx-panel input[type=number] { width:58px; font:inherit; padding:2px 4px; } #ctx-panel select { font:inherit; padding:2px; max-width:150px; }
 #ctx-panel .cp-s { display:flex; gap:10px; flex-wrap:wrap; align-items:baseline; font-variant-numeric:tabular-nums; }
 #ctx-panel .cp-kv small { color:#5b6b7c; margin-right:3px; } #ctx-panel .cp-type { font-weight:700; } #ctx-panel .cp-hint { color:#5b6b7c; font-style:italic; }
-#ctx-panel .cp-isl { display:flex; flex-wrap:wrap; gap:4px; align-items:center; width:100%; } #ctx-panel .cp-isl-h { font-weight:600; margin-right:4px; }
+#ctx-panel .cp-isl { width:100%; } #ctx-panel .cp-isl > summary { cursor:pointer; font-weight:600; list-style-position:inside; white-space:nowrap; } #ctx-panel .cp-isl-b { display:flex; flex-wrap:wrap; gap:4px; align-items:center; width:100%; max-height:none; overflow:visible; margin-top:3px; } #ctx-panel .isl-sel { max-width:100%; } #ctx-panel .isl-warn { color:#b26a00; font-weight:600; }
 #ctx-panel .cp-c button.isl-chip { min-height:26px; padding:2px 6px; border-color:#ff8c1a; color:#9a4d00; } #ctx-panel .cp-c button.isl-chip.inc { border-color:#2e7d32; color:#2e7d32; background:#eef7ee; } #ctx-panel .cp-c button.isl-chip.on { background:#ff2bd6; border-color:#ff2bd6; color:#fff; }
 #ctx-panel .isl-det { display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; } #ctx-panel .isl-det input, #ctx-panel .smooth-in { width:4.5em; }
 #ctx-panel .cp-chip { max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

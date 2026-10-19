@@ -32,12 +32,14 @@ describe('Islands at creation (inseldemo)', () => {
     expect(form(auto.indices)).toBeLessThan(0.12);
     expect(form(fill({}).indices)).toBeGreaterThan(0.3); // old behaviour (islands included) keeps the rims
   });
-  it('“not an island” puts the rim points back; holes cannot be included', () => {
+  it('“not an island” puts the rim points back; 0.38: holes can be removed too (closed, no points added)', () => {
     const r = at(60, 30), h = at(40, 30);
     const g = fill({ isl: [{ c: r.c, inc: true }, { c: h.c, inc: true }] });
     expect(g.indices.length).toBeGreaterThan(auto.indices.length + 100);
     expect(form(g.indices)).toBeGreaterThan(0.2);
-    expect(g.islands!.find((i) => Math.hypot(i.c[0] - 40, i.c[1] - 30) < 1.5)!.inc).toBe(false);
+    // 0.38 (Martin 19.10. 23:35): every island is removable – a plain hole becomes inc (shown closed) but adds no points
+    expect(g.islands!.find((i) => Math.hypot(i.c[0] - 40, i.c[1] - 30) < 1.5)!.inc).toBe(true);
+    const gh = fill({ isl: [{ c: h.c, inc: true }] }); expect(Math.abs(gh.indices.length - auto.indices.length)).toBeLessThan(0.02 * auto.indices.length);
   });
   it('refine: + grows, − shrinks the excluded zone of one island', () => {
     const h = at(40, 30), n0 = auto.indices.length;

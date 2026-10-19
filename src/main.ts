@@ -809,8 +809,14 @@ function islandsHTML(list: Island[]) {
     <label title="${tt('Refine the island: grow (+) or shrink (−) its excluded zone by this distance [mm]')}">${tt('Refine')} ± <input id="cp-islm" data-num="signed" value="${S.m}" inputmode="text"> mm</label></div>` : '';
   const man = state.opts.fill.man.map((I, k) => `<button type="button" class="isl-chip man" data-islman="${k}" title="${tt('Island added by tap, Ø {0} mm – click to remove it', fmt(2 * I.r, 1))}">✚${k + 1} ✕</button>`).join('');
   const addB = `<button type="button" class="isl-chip add${state.opts.addIsl ? ' on' : ''}" data-isladd="1" title="${tt('Add an island: tap the plane where detection was too generous – a disc of the brush diameter (Ø {0} mm) is excluded', fmt(2 * state.opts.brush, 1))}">＋ ${tt('Island')}</button>`;
-  return `<div class="cp-isl"><span class="cp-isl-h" title="${tt('Islands inside the outer contour, detected automatically: ◯ hole/opening, ◎ hole with raised rim, ▲ local bump, ▮ raised feature. Excluded from the plane unless marked “Not an island”. Tap an island (here or in the 3D view) to change it.')}">🏝 ${tt('Islands')} ${list.length}${ex !== list.length ? ` (${tt('{0} excluded', ex)})` : ''}</span>${chips}${man}${addB}${det}</div>`;
+  // 0.38: collapsible (collapsed by default), summary = count in one line; expanded the chips wrap (no scrolling),
+  // beyond 20 islands a compact dropdown list replaces the chips
+  const many = list.length > 20;
+  const pickL = many ? `<select class="isl-sel" data-islsel="1" title="${tt('Select an island')}"><option value="-1">${tt('Island…')}</option>${list.map((I, i) => `<option value="${i}" ${i === islSel ? 'selected' : ''}>${islIcon(I)}${I.id} ${islKind(I)}${I.inc ? ' · ' + tt('not an island') : ''}</option>`).join('')}</select>` : chips;
+  const sum = `🏝 ${tt('Islands')} ${list.length}${ex !== list.length ? ` (${tt('{0} excluded', ex)})` : ''}`;
+  return `<details class="cp-isl" ${islOpen || islSel >= 0 ? 'open' : ''}><summary class="cp-isl-h" title="${tt('Islands inside the outer contour, detected automatically: ◯ hole/opening, ◎ hole with raised rim, ▲ local bump, ▮ raised feature. Excluded from the plane unless marked “Not an island”. Tap an island (here or in the 3D view) to change it.')}">${sum}</summary><div class="cp-isl-b">${pickL}${man}${addB}${det}</div></details>`;
 }
+let islOpen = false;
 function islandChoice(I: Island): IslandChoice {
   const L = state.opts.fill.isl; let o = L.find((q) => Math.hypot(q.c[0] - I.c[0], q.c[1] - I.c[1], q.c[2] - I.c[2]) < Math.max(1, 0.5 * I.r));
   if (!o) { o = { c: [...I.c] }; L.push(o); } return o;
@@ -818,7 +824,9 @@ function islandChoice(I: Island): IslandChoice {
 function bindIslands(el: ParentNode) {
   el.querySelectorAll<HTMLButtonElement>('[data-islman]').forEach((b) => (b.onclick = () => { state.opts.fill.man.splice(Number(b.dataset.islman), 1); extractLive(); }));
   el.querySelectorAll<HTMLButtonElement>('[data-isladd]').forEach((b) => (b.onclick = () => { state.opts.addIsl = !state.opts.addIsl; state.opts.sub = false; renderModeBar(); status(state.opts.addIsl ? tt('Add island: tap the plane – a disc of the brush diameter is excluded.') : ''); }));
+  const dt = el.querySelector<HTMLDetailsElement>('details.cp-isl'); if (dt) dt.ontoggle = () => { islOpen = dt.open; };
   const list = state.preview?.islands; if (!list) return;
+  const sel = el.querySelector<HTMLSelectElement>('[data-islsel]'); if (sel) sel.onchange = () => { islSel = Number(sel.value); renderAll(); };
   el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = () => { const i = Number(b.dataset.isl); islSel = islSel === i ? -1 : i; renderAll(); }));
   el.querySelectorAll<HTMLButtonElement>('[data-islinc]').forEach((b) => (b.onclick = () => { const I = list[islSel]; if (!I) return; islandChoice(I).inc = b.dataset.islinc === '1'; extractLive(); }));
   const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; extractLive(); };
