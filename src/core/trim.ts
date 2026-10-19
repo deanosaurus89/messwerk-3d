@@ -69,3 +69,38 @@ export function trimmedSurface(f: FitResult, pos: ArrayLike<number>, tris: Array
   const ed: number[] = []; for (const [a, b, c] of cnt.values()) if (c === 1) ed.push(...P(a), ...P(b));
   return { tri: new Float32Array(out), edges: new Float32Array(ed) };
 }
+
+/**
+ * Analytic display of a cylinder/cone whose boundary comes from the FITTED GEOMETRY (not the selected triangles):
+ * the surface between the axial extent of the points (t0…t1 along the axis), over the full 360° when the wall is
+ * closed, otherwise over the covered angular range (largest empty sector cut out). Edges are clean circles/arcs at
+ * t0 and t1 (+ the two axial lines of an open wall) – no polygonal outline of the mesh selection.
+ */
+export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint32Array, bins = 72): { tri: Float32Array; edges: Float32Array; closed: boolean; t0: number; t1: number; a0: number; a1: number } {
+  const n = unit(f.normal), c = f.center, [u, v] = basis(n), occ = new Uint8Array(bins);
+  const ts: number[] = [];
+  for (let i = 0; i < verts.length; i++) {
+    const k = verts[i], q: Vec3 = [pos[3 * k] - c[0], pos[3 * k + 1] - c[1], pos[3 * k + 2] - c[2]];
+    ts.push(dot(q, n)); const a = Math.atan2(dot(q, v), dot(q, u)); occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
+  }
+  ts.sort((a, b) => a - b);
+  const qn = (p: number) => ts.length ? ts[Math.min(ts.length - 1, Math.max(0, Math.round(p * (ts.length - 1))))] : 0;
+  const t0 = qn(0.001), t1 = qn(0.999);
+  // largest run of empty bins (cyclic)
+  let best = 0, bestEnd = -1, run = 0;
+  for (let i = 0; i < 2 * bins; i++) { if (!occ[i % bins]) { run++; if (run > best && run <= bins) { best = run; bestEnd = i; } } else run = 0; }
+  const closed = best <= 2; // ≤ 10° gap (scan holes, sparse lines) counts as a closed wall
+  const step = (2 * Math.PI) / bins;
+  let a0 = -Math.PI, a1 = Math.PI;
+  if (!closed) { a0 = -Math.PI + ((bestEnd + 1) % bins) * step; a1 = a0 + (bins - best) * step; }
+  const R = (t: number) => f.type === 'Kegel' ? Math.max(0, f.radius! + t * Math.tan(f.halfAngle ?? 0)) : f.radius!;
+  const P = (a: number, t: number): Vec3 => { const r = R(t), ca = Math.cos(a) * r, sa = Math.sin(a) * r; return [c[0] + n[0] * t + u[0] * ca + v[0] * sa, c[1] + n[1] * t + u[1] * ca + v[1] * sa, c[2] + n[2] * t + u[2] * ca + v[2] * sa]; };
+  const na = Math.max(8, Math.round(((a1 - a0) / (2 * Math.PI)) * 96)), nt = 4, tri: number[] = [], ed: number[] = [];
+  for (let i = 0; i < na; i++) for (let j = 0; j < nt; j++) {
+    const aa = a0 + ((a1 - a0) * i) / na, ab = a0 + ((a1 - a0) * (i + 1)) / na, ta = t0 + ((t1 - t0) * j) / nt, tb = t0 + ((t1 - t0) * (j + 1)) / nt;
+    const p00 = P(aa, ta), p10 = P(ab, ta), p01 = P(aa, tb), p11 = P(ab, tb); tri.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
+  }
+  for (const t of [t0, t1]) for (let i = 0; i < na; i++) ed.push(...P(a0 + ((a1 - a0) * i) / na, t), ...P(a0 + ((a1 - a0) * (i + 1)) / na, t));
+  if (!closed) for (const a of [a0, a1]) ed.push(...P(a, t0), ...P(a, t1));
+  return { tri: new Float32Array(tri), edges: new Float32Array(ed), closed, t0, t1, a0, a1 };
+}

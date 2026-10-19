@@ -7,7 +7,8 @@ import { docsHtml } from './docs';
 import { provenanceOf, hardParentsOf, dependentsOf } from './core/provenance';
 import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
 import { sideView } from './ui/axisview';
-import { TRIM_TYPES, trimmedSurface, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
+import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
+import { TRIM_TYPES, trimmedSurface, analyticShell, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
 import { normReex, lateralOf } from './core/reextract';
 import { installNumFields, parseNum } from './ui/numfield';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
@@ -23,6 +24,13 @@ function curveTrimFor(f: FeatureView) {
   const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
   const c = curveCache.get(f.id); if (c && c.key === key) return c.seg;
   const pts = featPoints(f.id); const seg = pts ? trimmedCurve(f.measured!, pts) : null; curveCache.set(f.id, { key, seg }); return seg;
+}
+const shellCache = new Map<number, { key: string } & ReturnType<typeof analyticShell>>();
+function shellFor(f: FeatureView) {
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
+  const c = shellCache.get(f.id); if (c && c.key === key) return c;
+  const r = analyticShell(f.measured!, viewer.model!.geometry.getAttribute('position').array as Float32Array, f.indices);
+  const e = { key, ...r }; shellCache.set(f.id, e); return e;
 }
 function trimFor(f: FeatureView) {
   const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
@@ -70,7 +78,7 @@ type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm:
 type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
-interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
+interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
@@ -84,6 +92,9 @@ const engine = new Engine();
 const viewer = new Viewer($('#scene'));
 const canvas = viewer.renderer.domElement;
 const PALETTE = [0xe6194b, 0x3cb44b, 0x4363d8, 0xf58231, 0x911eb4, 0x00a3a3, 0xf032e6, 0x9a6324, 0x2f4f4f, 0x808000, 0x000075, 0xaa6e28];
+/** user preferences (localStorage, not the project): general tolerance tables (ISO 2768 / ISO 286) off by default = pre-0.24 behaviour */
+const prefs = { tolTables: false };
+setDec(2); // display default 2 decimal places (mm); the stored preference is applied below
 const PREVIEW_COLOR = 0xff8c00;   // Merkmalspunkte der Vorschau (orange)
 const AUX_COLOR = 0x2f7bff;       // Punkte der Hilfsebene (blau)
 
@@ -171,8 +182,8 @@ let showZone = (() => { try { return localStorage.getItem('mw3d-show-zone') !== 
 function setShowZone(on: boolean) { showZone = on; try { localStorage.setItem('mw3d-show-zone', on ? '1' : '0'); } catch { /* private mode */ } renderAll(); }
 const dialogVisible = () => (isPhone() ? document.body.classList.contains('show-dialog') : !document.body.classList.contains('no-dialog'));
 const zoneAlive = (id: number) => state.sel.length === 1 && state.sel[0] === id && !state.mode && !state.csEdit && dialogVisible() && state.features.some((x) => x.id === id);
-const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(d));
-const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(d);
+const fmt = (v: number | null | undefined, d = 4) => (v == null || !isFinite(v) ? '—' : v.toFixed(decFor(d)));
+const sgn = (v: number, d = 4) => (v >= 0 ? '+' : '') + v.toFixed(decFor(d));
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
 const rgb = (c: number) => [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255];
 const nameOf = (id: number | null) => state.features.find((f) => f.id === id)?.name ?? '—';
@@ -466,14 +477,14 @@ const areaMode = () => state.mode?.kind === 'fit' && state.mode.method === 'Klic
 function setBrushRadius(v: number) {
   v = +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 2).toFixed(v < 1 ? 2 : 1);
   if (areaMode() && pe.tool !== 'erase') { state.opts.radius = v; const a = document.querySelector<HTMLInputElement>('#cp-area'); if (a) a.value = String(v); const d = document.querySelector<HTMLInputElement>('#d-rad'); if (d) d.value = String(v);
-    if (lastHit) viewer.showCursor(lastHit, pickR(), true); status(tt('Analysis area r = {0} mm (Shift+mouse wheel; 0 = unlimited).', v)); return; }
+    if (lastHit) viewer.showCursor(lastHit, pickR(), true); status(tt('Growth limit r = {0} mm (Shift+mouse wheel; 0 = unlimited).', v)); return; }
   if (pe.tool === 'erase') { pe.radius = v; for (const id of ['#pe-rad-n', '#pe-rad-r']) { const el = document.querySelector<HTMLInputElement>(id); if (el) el.value = String(v); } }
   else { state.opts.brush = v; const el = document.querySelector<HTMLInputElement>('#d-brush'); if (el) el.value = String(v); const mb = document.querySelector('#mb-brush-r'); if (mb) mb.textContent = String(v); }
   if (lastHit) viewer.showCursor(lastHit, v, true);
   status(`Pinselradius ${v} mm (Mausrad; Strg+Mausrad = Zoom).`);
 }
 canvas.parentElement!.addEventListener('wheel', (e) => {
-  // Click & grow: the wheel ZOOMS (as everywhere); only Shift+wheel changes the analysis area. (Before, the plain wheel
+  // Click & grow: the wheel ZOOMS (as everywhere); only Shift+wheel changes the growth limit. (Before, the plain wheel
   // changed the area r – after a zoom the cursor showed a circle like the brush and growing was limited to r.)
   if (navPaused) return;
   if (areaMode() && pe.tool !== 'erase' && e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); setPickR(pickR() * Math.pow(1.1, (e.deltaY || e.deltaX) > 0 ? -1 : 1)); return; }
@@ -638,7 +649,7 @@ function ctxSpec(): CtxSpec | null {
     + auxPlaneSel(ao) + (ao === 'none' ? `<span class="cp-hint">${tt('None (3D fit)')}</span>` : '') : '';
   const pick = `<span class="cp-pick" title="${tt('Pick radius [mm]: the circle at the cursor is the seed area of Click & grow – the region starts from the surface inside it. For circles/slots/lines place it across the edge between hole wall and plane (the transition must lie inside the circle). Desktop: Alt + mouse wheel. Empty = automatic (6 × mesh edge length).')}">◎ r <button type="button" data-pk="-">−</button><input class="cp-pick-v" data-num="abs" value="${state.opts.pick || ''}" placeholder="${tt('auto')} ${pickR()}" inputmode="decimal"><button type="button" data-pk="+">＋</button></span>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}${p ? '' : pick}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this feature (plane, cylinder, cone, sphere): click further faces (or Shift+click) – the union of all regions is fitted. Also for split or interrupted areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}<label title="${tt('Analysis area at the cursor (mouse wheel). 0 = unlimited region growing')}">${tt('Area r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>`
+    ? `${seg}${type}${p ? '' : pick}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this feature (plane, cylinder, cone, sphere): click further faces (or Shift+click) – the union of all regions is fitted. Also for split or interrupted areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}`
     : `${seg}${type}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -646,14 +657,16 @@ function ctxSpec(): CtxSpec | null {
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
   // collapsible 'Parameters': the unified extraction parameters (identical in Re-extraction)
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
-  const pars = !p || p.aux || ['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) ? '' : `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Extraction parameters – the same set as in Re-extraction (Dialog). Changes update the preview live.')}">⚙ ${tt('Parameters')}</summary><div class="cp-pg">
+  const glim = m.method === 'Klick' ? `<label title="${tt('Region growing stops at this radius around the click (mm). 0 = unlimited (whole connected face). Desktop: Shift+mouse wheel.')}">${tt('Growth limit r')} <input id="cp-area" type="number" min="0" step="0.5" value="${state.opts.radius}" inputmode="decimal"> mm</label>` : '';
+  const fullPars = !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (!!p || m.method === 'Klick');
+  const pars = !fullPars && !glim ? '' : `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Extraction parameters – the same set as in Re-extraction (Dialog). Changes update the preview live.')}">⚙ ${tt('Parameters')}</summary><div class="cp-pg">${glim}${fullPars ? `
     ${isPl ? `<label title="${tt('Use outer contour (All inside boundary): region growing only defines the outer contour; every point inside it within ± search distance is taken')}"><input type="checkbox" data-ex="contour" ${state.opts.fill.on ? 'checked' : ''}> ${tt('Use outer contour')}</label>` : ''}
     ${isPl && state.opts.fill.on ? `<label title="${tt('Include detected islands: interior regions inside the outer contour that region growing did not reach (bump patches, spatter rings). Off = only the grown region.')}"><input type="checkbox" data-ex="islands" ${x.islands ? 'checked' : ''}> ${tt('Islands')}</label>` : ''}
-    ${GEOM_ZONE.includes(ptype) ? `<label title="${tt('Boundary from: “Point selection” = the grown region(s) as clicked; “Fitted geometry” = a zone around the fitted shape (e.g. cylinder radius ± search distance over the axial extent of the points, cone, sphere cap) – collects all points of that surface, also where growing stopped. Exclusion distance ± then shrinks (+) or extends (−) the zone at its ends. Live preview; the zone is drawn transparent.')}">${tt('Boundary from')} <select data-exs="zoneSrc"><option value="points" ${x.zoneSrc !== 'geom' ? 'selected' : ''}>${tt('Point selection')}</option><option value="geom" ${x.zoneSrc === 'geom' ? 'selected' : ''}>${tt('Fitted geometry')}</option></select></label>` : ''}
+    ${GEOM_ZONE.includes(ptype) || ptype === 'auto' ? `<label title="${tt('Boundary from: “Point selection” = the grown region(s) as clicked; “Fitted geometry” = a zone around the fitted shape (e.g. cylinder radius ± search distance over the axial extent of the points, cone, sphere cap) – collects all points of that surface, also where growing stopped. Exclusion distance ± then shrinks (+) or extends (−) the zone at its ends. Live preview; the zone is drawn transparent.')}">${tt('Boundary from')} <select data-exs="zoneSrc"><option value="points" ${x.zoneSrc !== 'geom' ? 'selected' : ''}>${tt('Point selection')}</option><option value="geom" ${x.zoneSrc === 'geom' ? 'selected' : ''}>${tt('Fitted geometry')}</option></select></label>` : ''}
     ${isPl || (GEOM_ZONE.includes(ptype) && x.zoneSrc === 'geom') ? `<label title="${exclTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}"> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     <label title="${tt('Normal angle criterion: points whose surface normal deviates from the fitted geometry by more than this angle are removed (edges, chamfers, adjacent faces)')}"><input type="checkbox" data-ex="angleOn" ${x.angleOn ? 'checked' : ''}> ${tt('Normal angle ≤')} <input data-exn="angleDeg" data-num="abs" value="${x.angleDeg}" inputmode="decimal" ${x.angleOn ? '' : 'disabled'}>°</label>
     <label title="${tt('Outlier removal: points whose deviation is larger than n × the standard deviation (RMS) are removed – the points with the largest deviation. Unchecked = nothing removed.')}"><input type="checkbox" data-ex="outlierOn" ${x.outlierOn ? 'checked' : ''}> ${tt('Outlier removal >')} <input data-exn="outlierK" data-num="abs" value="${x.outlierK}" inputmode="decimal" ${x.outlierOn ? '' : 'disabled'}>× RMS</label>
-  </div></details>`;
+  ` : ''}</div></details>`;
   return {
     title: p ? `${tt('Creation Panel')} · ${tt('Preview')}` : m.method === 'Klick' ? (m.type === 'auto' ? tt('Auto detection') : typeName(m.type)) : tt('Brush'), cls: m.method === 'Pinsel' ? 'brush' : '',
     controls: ctl + dsel + pars, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
@@ -783,15 +796,22 @@ async function applyExtract() {
     const r = await busy(engine.call<any>({ op: 'fit', indices: grown, type, params: geom ? { ...extractParams(type), inset: 0 } : extractParams(type) }));
     let zone: import('./core/reextract').SearchRegion | undefined;
     if (geom) { // boundary from the fitted geometry: zone around the fitted shape, all points of that surface inside it
-      const band = state.opts.fill.band ?? Math.max(0.1, Math.round(3 * (r.fit.rms || 0) * 100) / 100);
-      const g = await busy(engine.call<any>({ op: 'reex', fit: r.fit, indices: r.indices, seedPts: pv.hit ? [pv.hit.point] : [],
-        params: { maxDist: band, sigma: x0.outlierK, sigmaOn: x0.outlierOn, angleOn: x0.angleOn, maxAngleDeg: x0.angleDeg, margin: -x0.inset, iterations: 3 } }));
-      r.fit = g.fit; r.indices = g.indices; r.band = band; zone = g.region; }
+      const g = await geomZoneExtract(r.fit, r.indices, pv.hit?.point, state.opts.fill.band ?? undefined, { k: x0.outlierOn ? x0.outlierK : 0, angleOn: x0.angleOn, angleDeg: x0.angleDeg, inset: x0.inset });
+      r.fit = g.fit; r.indices = g.indices; r.band = g.band; zone = g.zone; }
     state.preview = { ...pv, fit: r.fit, indices: r.indices, grown, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, zone };
     const x = state.opts.ex, extra = [x.inset > 0 ? tt('exclusion distance {0} mm', x.inset) : '', x.angleOn ? tt('normal angle ≤ {0}°{1}', x.angleDeg, r.fit.nfRemoved ? ` (−${r.fit.nfRemoved})` : '') : '', x.outlierOn ? tt('outliers > {0} × RMS removed', x.outlierK) : tt('no outlier removal')].filter(Boolean).join(' · ');
     if (fill) status(tt('Inside outer boundary: {0} points (+{1} on bumps/rims), flatness {2} mm.', r.indices.length, r.filled ?? 0, fmt(r.fit.form, 4)) + ' ' + extra + (r.raised?.length ? ' · ' + (state.opts.fill.exRaised ? tt('Raised features excluded: {0} points (magenta).', r.raised.length) : tt('Raised features (magenta) included: {0} points – “Exclude raised” drops them.', r.raised.length)) : ''));
     else status(tt('{0} points', r.indices.length) + ' · ' + extra);
   } catch (e: any) { toast(tt('Fit failed: {0}', e.message)); }
+}
+/** Boundary from “Fitted geometry”: ONE zone around the analytic fitted shape (cylinder/cone: radius ± band over the axial
+ *  extent of the points, full 360°; sphere/torus shell), the exclusion distance shortens (+) / extends (−) it at its ends.
+ *  All mesh points of that surface inside the zone are taken – not only the grown/selected triangles. */
+async function geomZoneExtract(fit: FitResult, indices: Uint32Array, seed: Vec3 | undefined, band: number | undefined, x: { k: number; angleOn: boolean; angleDeg: number; inset: number }, crit?: FitCrit) {
+  const b = band ?? Math.max(0.1, Math.round(3 * (fit.rms || 0) * 100) / 100);
+  const g = await busy(engine.call<any>({ op: 'reex', fit, indices, seedPts: seed ? [seed] : [],
+    params: { maxDist: b, sigma: x.k > 0 ? x.k : 3, sigmaOn: x.k > 0, angleOn: x.angleOn, maxAngleDeg: x.angleDeg, margin: -x.inset, iterations: 3 }, ...(crit ? { crit, formBy: true } : {}) }));
+  return { fit: g.fit as FitResult, indices: g.indices as Uint32Array, band: b, zone: g.region as import('./core/reextract').SearchRegion };
 }
 /** debounced live update of the preview after a parameter change */
 let exTimer = 0;
@@ -849,8 +869,12 @@ async function refitPreview(t: GeomType | 'auto') {
     renderAll(); return;
   }
   try {
-    const r = await busy(engine.call<any>({ op: 'fit', indices: p.indices, type: t }));
-    state.preview = { ...p, aux: undefined, fit: r.fit, candidates: r.candidates.length ? r.candidates : p.candidates };
+    const src = p.grown ?? p.indices;
+    const r = await busy(engine.call<any>({ op: 'fit', indices: src, type: t }));
+    state.preview = { ...p, aux: undefined, zone: undefined, fit: r.fit, indices: r.indices, grown: src, candidates: r.candidates.length ? r.candidates : p.candidates };
+    // the Creation Panel parameters (Boundary from: Fitted geometry, exclusion, angle, outliers) apply to the new type too –
+    // before 0.27 a type change (e.g. Auto ▸ circle → Cylinder) kept only the selected points, so ✓ stored a trimmed feature
+    if (extractActive()) await applyExtract();
     status(tt('Refitted as {0}.', typeName(r.fit.type)));
   } catch (e: any) { status(tt('Fit failed: {0}', e.message)); }
   renderAll();
@@ -867,6 +891,7 @@ function commitPreview() {
   };
   if (p.auxFill) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised };
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = x.outlierOn ? x.outlierK : 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
+    if (p.zone && GEOM_ZONE.includes(t)) { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands }; } }
   if (p.regions) { f.hit = undefined; state.opts.multi = false; }
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
@@ -922,6 +947,9 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
     } else {
       const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type, crit: fp.crit ?? 'lsq', formBy: true, params: { k: fp.k, nf: fp.nf.on ? fp.nf : null, fill: fp.fill?.on && type === 'Ebene' ? { band: fp.fill.band, excludeRaised: !!fp.fill.exRaised, islands: fp.fill.islands !== false, inset: fp.inset ?? 0 } : null, inset: type === 'Ebene' && !fp.fill?.on ? fp.inset ?? 0 : 0 } }));
       f.measured = r.fit; f.indices = r.indices; f.src = idx; f.aux = undefined; f.auxIndices = undefined; f.dev = undefined;
+      if (fp.zoneSrc === 'geom' && GEOM_ZONE.includes(type)) { // keep the boundary from the fitted geometry (not the grown triangles)
+        const g = await geomZoneExtract(r.fit, r.indices, f.hit?.point, fp.zoneBand, { k: fp.k, angleOn: !!fp.nf?.on, angleDeg: fp.nf?.angleDeg ?? 30, inset: fp.inset ?? 0 }, fp.crit ?? 'lsq');
+        f.measured = { ...g.fit, type }; f.indices = g.indices; }
     }
     f.type = f.measured!.type; f.pointCount = f.indices.length; ptsCache.delete(f.id);
     state.controls = state.controls.filter((c) => !(c.featureIds[0] === f.id && !availableControls(f.type).includes(c.kind)));
@@ -1575,6 +1603,7 @@ function featExtent(f?: FeatureView): number {
 const fitApplies = (c: Control) => SIZE_KINDS.includes(c.kind as string) || c.kind === 'Radius';
 /** (re)fill the tolerance of a control from its fit code or the project's general tolerance – unless typed by hand */
 function applyTol(c: Control, force = false): void {
+  if (!prefs.tolTables) return; // Options: tolerance tables off = manual tolerances (pre-0.24), nothing auto-filled
   if (c.tolSrc === 'manual' && !force) return;
   const fm = featMap(), f = fm.get(c.featureIds[0]) as FeatureView | undefined, kind = tolKindOf(c, f); if (!kind) return;
   let val = c.nominal; if (val == null) { try { val = evaluate({ ...c, nominal: null }, fm, ctx).measured; } catch { val = null; } }
@@ -1616,7 +1645,7 @@ function toggleControl(kind: ControlKind, id: number, on: boolean) {
 // ------------------------------------------------------------------ Berichte
 function makeReport() {
   if (!state.features.length) { toast('No features for a report.'); return; }
-  const r = buildReport(state.nextReport++, state.features, state.controls, state.data?.name ?? '', new Date(), ctx);
+  const r = buildReport(state.nextReport++, state.features, state.controls, state.data?.name ?? '', new Date(), ctx, { tolTables: prefs.tolTables });
   state.reports.push(r); state.openReport = r.id;
   renderAll();
   toast(tt('✔ {0} created ({1} features, {2} controls)', r.name, r.features.length, r.controls.length));
@@ -1714,7 +1743,7 @@ function renderHint() {
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
   if (state.preview && state.opts.multi && MULTI_TYPES.includes(state.preview.fit.type)) return hint(tt('Add region: click further faces of the {0} (Shift+click also works), then ✓ create.', typeName(state.preview.fit.type)));
   if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
-  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface – the circle is the pick radius (seed area; for circles place it across the hole edge). Wheel = zoom · Alt+wheel = pick radius · Shift+wheel = analysis area.', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
+  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface – the circle is the pick radius (seed area; for circles place it across the hole edge). Wheel = zoom · Alt+wheel = pick radius · Shift+wheel = growth limit.', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
   hint('');
 }
 
@@ -1914,7 +1943,7 @@ function renderFitDialog(d: HTMLElement) {
     <p class="note">${tt('Method, type, brush/area radius and ✓ ✕ are in the Action Bar (bottom of the 3D view). Here: settings and details.')}</p>
     ${m.method === 'Klick' ? `<h4>${tt('Region growing')}</h4>
     <div class="row"><label>${tt('Max. normal angle [°]')}</label><input id="d-ang" value="${state.opts.maxAngleDeg}" inputmode="decimal"></div>
-    <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="d-rad" value="${state.opts.radius}" inputmode="decimal"></div>
+    <div class="row"><label>${tt('Growth limit r [mm] (0 = ∞)')}</label><input id="d-rad" value="${state.opts.radius}" inputmode="decimal"></div>
     ${usesAuxType(m.type) ? `<h4>${ICON.aux} ${tt('Auxiliary plane (projection plane)')}</h4>
     <div class="row"><select id="d-aux"><option value="auto" ${state.opts.aux === 'auto' ? 'selected' : ''}>${tt('Automatic – full adjacent planar face')}</option><option value="ring" ${state.opts.aux === 'ring' ? 'selected' : ''}>${tt('Local ring around the contour')}</option>
       ${state.features.filter((f) => f.type === 'Ebene').map((f) => `<option value="${f.id}" ${state.opts.aux === f.id ? 'selected' : ''}>${tt('Existing plane')}: ${f.name}</option>`).join('')}
@@ -2013,7 +2042,7 @@ function selectionParamsHTML(f: FeatureView) {
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
   return `<div id="fp-sel">
     ${grow ? `<div class="row"><label>${tt('Region growing: max. angle [°]')}</label><input id="fp-ang" value="${fp.maxAngleDeg}" inputmode="decimal"></div>
-      <div class="row"><label>${tt('Area radius [mm] (0 = ∞)')}</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection – no region growing.') : tt('Points from project file – no region growing.')}</p>`}
+      <div class="row"><label>${tt('Growth limit r [mm] (0 = ∞)')}</label><input id="fp-rad" value="${fp.radius}" inputmode="decimal"></div>` : `<p class="note">${f.method === 'Pinsel' ? tt('Points from brush selection – no region growing.') : tt('Points from project file – no region growing.')}</p>`}
     ${(f.type === 'Kreis' || f.type === 'Langloch' || f.type === 'Linie') && grow ? `<div class="row"><label>${tt('Auxiliary plane')}</label><select id="fp-aux"><option value="auto" ${fp.aux === 'auto' ? 'selected' : ''}>${tt('Automatic')}</option><option value="ring" ${fp.aux === 'ring' ? 'selected' : ''}>${tt('Local ring')}</option>
       ${planes.map((g) => `<option value="${g.id}" ${fp.aux === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}<option value="none" ${fp.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
       ${fp.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap / width [mm]')}</label><input id="fp-rg" data-num="abs" value="${fp.ring?.gap ?? state.opts.ring.gap}" inputmode="decimal" style="width:4em"><input id="fp-rw" data-num="abs" value="${fp.ring?.width ?? state.opts.ring.width}" inputmode="decimal" style="width:4em"></div>` : ''}` : ''}
@@ -2095,7 +2124,7 @@ function renderTable() {
         const ed = document.createElement('span'); ed.className = 'cat-ed datum-ed';
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         lab(c.kind === 'Position' || c.kind === 'Koaxialität' || c.kind === 'Konzentrizität' ? 'Tol Ø' : 'Tol', numInput(c.tolUp, (x) => { c.tolUp = Math.abs(x ?? 0); if (tolKindOf(c, f)) c.tolSrc = 'manual'; }, 'abs'));
-        if (tolKindOf(c, f)) ed.appendChild(tolSrcEl(c));
+        if (prefs.tolTables && tolKindOf(c, f)) ed.appendChild(tolSrcEl(c));
         lab(tt('Datums'), datumSlots(c, f, () => renderAll()));
         tedInputs(c, f, lab);
         if (diaInfo(c, f).applies) lab(tt('Zone'), diaButton(c, f, () => renderAll()));
@@ -2112,11 +2141,11 @@ function renderTable() {
         if (isZoneControl(c.kind)) lab(tt('Tol (0..t)'), numInput(c.tolUp, (x) => { c.tolUp = Math.abs(x ?? 0); c.tolSrc = 'manual'; }, 'abs'));
         else {
           lab(tt('Nominal'), numInput(c.nominal, (x) => { c.nominal = x; applyTol(c); }, 'signed'));
-          if (fitApplies(c)) lab(tt('Fit'), fitInput(c));
+          if (prefs.tolTables && fitApplies(c)) lab(tt('Fit'), fitInput(c));
           lab(tt('Tol+'), numInput(c.tolUp, (x) => { c.tolUp = x ?? 0; c.tolSrc = 'manual'; }, 'signed'));
           lab(tt('Tol−'), numInput(c.tolLo, (x, raw) => { c.tolLo = tolLoOf(x, raw); c.tolSrc = 'manual'; }, 'neg'));
         }
-        ed.appendChild(tolSrcEl(c));
+        if (prefs.tolTables) ed.appendChild(tolSrcEl(c));
         ed.insertAdjacentHTML('beforeend', `<span class="dev ${r.status}">${r.deviation == null || isZoneControl(c.kind) ? '' : sgn(r.deviation)}</span><span class="st ${r.status === '—' ? 'none' : r.status}">${statusText(r.status)}</span>`);
         row.appendChild(ed);
       }
@@ -2277,6 +2306,10 @@ function renderScene() {
     else if (state.trimGeo && CURVE_TRIM_TYPES.includes(f.type) && f.indices.length >= 2 && viewer.model) {
       const seg = curveTrimFor(f); if (seg) { viewer.addTrimmed(new Float32Array(0), seg, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
+    else if (f.fp?.zoneSrc === 'geom' && GEOM_ZONE.includes(f.type)) { // boundary from the fitted geometry: clean analytic surface + circles/arcs
+      const t = (f.type === 'Zylinder' || f.type === 'Kegel') && viewer.model ? shellFor(f) : null;
+      if (t) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+    }
     else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
       const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
@@ -2369,7 +2402,14 @@ function syncViewToggles() {
   $('#btn-toggle-wire').classList.toggle('on', !!viewer.wire);
   for (const el of document.querySelectorAll('[data-vt="prims"]')) el.classList.toggle('on', state.showPrims);
   for (const el of document.querySelectorAll('[data-vt="labels"]')) el.classList.toggle('on', state.showLabels);
+  for (const el of document.querySelectorAll('[data-vt="apts"]')) el.classList.toggle('on', state.annot.pts);
+  for (const el of document.querySelectorAll('[data-vt="astd"]')) el.classList.toggle('on', state.annot.std);
 }
+/** View ▸ Annotations: annotation content toggles (same preference as Options ▸ Annotation, persistent) */
+function setAnnot(k: 'pts' | 'std', on: boolean) { state.annot[k] = on; saveViewPrefs(); syncViewToggles(); renderAll();
+  const o = document.getElementById(k === 'pts' ? 'od-pts' : 'od-std') as HTMLInputElement | null; if (o) o.checked = on; }
+$('#btn-annot-pts').onclick = () => setAnnot('pts', !state.annot.pts);
+$('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
 {
   const g = document.createElement('div'); g.id = 'view-gear';
   g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
@@ -2406,12 +2446,19 @@ function openOptions() {
     <h4>${tt('Annotation')}</h4>
     <div class="row"><label><input type="checkbox" id="od-pts" ${state.annot.pts ? 'checked' : ''}> ${tt('Show point count')}</label></div>
     <div class="row"><label><input type="checkbox" id="od-std" ${state.annot.std ? 'checked' : ''}> ${tt('Show standard deviation σ')}</label></div>
+    <h4>${tt('Display')}</h4>
+    <div class="row" title="${tt('Decimal places of all displayed values: annotations, panels, tree properties, report and CSV (lengths in mm, deviations and angles). Internal precision and input fields are not rounded; unit direction vectors keep at least 5 places. Also View ▸ Decimals.')}"><label>${tt('Decimal places')}</label> <span class="od-dec"><button class="btn" type="button" data-dec="-1" title="${tt('One decimal place less')}">−</button><input id="od-dec" type="number" min="${DEC_MIN}" max="${DEC_MAX}" step="1" value="${getDec()}" inputmode="numeric"><button class="btn" type="button" data-dec="1" title="${tt('One decimal place more')}">+</button></span> <span class="note">(${tt('default')} 2)</span></div>
+    <h4>${tt('Tolerances')}</h4>
+    <div class="row" title="${tt('On: new controls get their tolerance from the project general tolerance (ISO 2768-1/-2) or an ISO 286 fit code (e.g. H7); the source is shown and reported. Off (default): tolerances are entered by hand as before 0.24. Values already in a project are kept either way.')}"><label><input type="checkbox" id="od-tol" ${prefs.tolTables ? 'checked' : ''}> ${tt('Use general tolerance tables (ISO 2768 / ISO 286)')}</label></div>
     <div class="row"><button class="btn primary" data-ok>${tt('Close')}</button></div></div>`;
   const apply = () => { applyColorMode(); renderAll(); saveViewPrefs(); };
   el.querySelectorAll<HTMLInputElement>('input[name=od-cm]').forEach((r) => (r.onchange = () => { state.colorMode = r.value as any; apply(); }));
   el.querySelector<HTMLInputElement>('#od-uc')!.oninput = (e) => { state.uniformColor = parseInt((e.target as HTMLInputElement).value.slice(1), 16); apply(); };
-  el.querySelector<HTMLInputElement>('#od-pts')!.onchange = (e) => { state.annot.pts = (e.target as HTMLInputElement).checked; apply(); };
-  el.querySelector<HTMLInputElement>('#od-std')!.onchange = (e) => { state.annot.std = (e.target as HTMLInputElement).checked; apply(); };
+  el.querySelector<HTMLInputElement>('#od-pts')!.onchange = (e) => { state.annot.pts = (e.target as HTMLInputElement).checked; apply(); syncViewToggles(); };
+  el.querySelector<HTMLInputElement>('#od-std')!.onchange = (e) => { state.annot.std = (e.target as HTMLInputElement).checked; apply(); syncViewToggles(); };
+  el.querySelectorAll<HTMLButtonElement>('[data-dec]').forEach((b) => (b.onclick = () => setDecimals(getDec() + Number(b.dataset.dec))));
+  el.querySelector<HTMLInputElement>('#od-dec')!.onchange = (e) => { const v = parseInt((e.target as HTMLInputElement).value, 10); setDecimals(isFinite(v) ? v : 2); };
+  el.querySelector<HTMLInputElement>('#od-tol')!.onchange = (e) => { prefs.tolTables = (e.target as HTMLInputElement).checked; saveViewPrefs(); syncPrefsUI(); renderAll(); };
   el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => el.remove();
   el.addEventListener('pointerdown', (e) => { if (e.target === el) el.remove(); });
   document.body.appendChild(el);
@@ -2421,8 +2468,21 @@ function applyColorMode() {
   state.features.forEach((f, i) => { if (!f.colorSet) f.color = state.colorMode === 'uniform' ? state.uniformColor : PALETTE[i % PALETTE.length]; });
 }
 const PREF_KEY = 'mw-view-prefs';
-function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot })); } catch { /* */ } }
-try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; } } catch { /* */ }
+function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec() })); } catch { /* */ } }
+try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); } } catch { /* */ }
+syncPrefsUI();
+/** Options ▸ Decimal places / View ▸ Decimals: display only (fmt), internal values untouched */
+function setDecimals(n: number) { setDec(n); saveViewPrefs(); syncPrefsUI(); renderAll(); if (state.openReport != null) renderReport(); }
+function syncPrefsUI() {
+  document.body.classList.toggle('tol-tables', prefs.tolTables);
+  document.querySelectorAll('[data-vt="apts"]').forEach((e) => e.classList.toggle('on', state.annot.pts)); document.querySelectorAll('[data-vt="astd"]').forEach((e) => e.classList.toggle('on', state.annot.std));
+  const v = document.getElementById('dec-val'); if (v) v.textContent = String(getDec());
+  const m = document.getElementById('dec-minus') as HTMLButtonElement | null, p = document.getElementById('dec-plus') as HTMLButtonElement | null;
+  if (m) m.disabled = getDec() <= DEC_MIN; if (p) p.disabled = getDec() >= DEC_MAX;
+  const o = document.getElementById('od-dec') as HTMLInputElement | null; if (o) o.value = String(getDec());
+}
+$('#dec-minus').onclick = (e) => { e.stopPropagation(); setDecimals(getDec() - 1); };
+$('#dec-plus').onclick = (e) => { e.stopPropagation(); setDecimals(getDec() + 1); };
 $('#btn-options').onclick = () => openOptions();
 $('#btn-whatsnew').onclick = () => showWhatsNew();
 $('#btn-testlist').onclick = () => { window.open('test.html', '_blank', 'noopener'); };
@@ -2644,7 +2704,7 @@ $('#btn-help').onclick = () => {
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
 };
 const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left button</b>: rotate · <b>middle button</b> (wheel pressed) or right button: pan · <b>mouse wheel</b>: zoom.</li>
-<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li>Click & grow: the circle at the cursor is the <b>pick radius</b> (seed area). <b>Alt + wheel</b> resizes it, <b>Shift + wheel</b> sets the analysis area, the plain wheel zooms. On phones use the ◎ r − / ＋ stepper in the Creation Panel.</li><li>Brush tools: the <b>mouse wheel changes the brush radius</b> (shown live), <b>Ctrl+wheel</b> zooms. Click &amp; grow: the wheel zooms, <b>Shift+wheel</b> changes the analysis area.</li>
+<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li>Click & grow: the circle at the cursor is the <b>pick radius</b> (seed area). <b>Alt + wheel</b> resizes it, <b>Shift + wheel</b> sets the growth limit r (region growing stops at this radius), the plain wheel zooms. On phones use the ◎ r − / ＋ stepper in the Creation Panel.</li><li>Brush tools: the <b>mouse wheel changes the brush radius</b> (shown live), <b>Ctrl+wheel</b> zooms. Click &amp; grow: the wheel zooms, <b>Shift+wheel</b> changes the growth limit r.</li>
 <li>Circle/slot/line by click with auxiliary plane: hover preview – <b style="color:#2f7de1">blue</b> auxiliary plane, <b style="color:#ff8c1a">orange</b> wall points.</li><li>Touch: one finger rotates, two fingers zoom/pan.</li>
 <li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the Action Bar (bottom of the 3D view). The Dialog shows the object selected in the tree or 3D view.</li></ul>
 <h3>Assign a datum (ISO 5459)</h3><ol><li>Select a feature (plane, cylinder/hole, circle, cone, slot, torus, sphere, line).</li>
@@ -3679,8 +3739,9 @@ function provenanceHTML(f: FeatureView): string {
   const rows: [string, string][] = [];
   if (p.kind === 'mesh') { rows.push([tt('Method'), methodName(p.method)], [tt('Points'), String(p.points)]);
     if (p.seed) rows.push([tt('Seed point'), p.seed.map((v) => fmt(v, 3)).join(' ')]);
-    if (p.params) rows.push([tt('Max. angle'), fmt(p.params.maxAngleDeg ?? 0, 1) + '°'], [tt('Area r'), p.params.radius ? fmt(p.params.radius, 2) + ' mm' : tt('unlimited')]);
-    if (p.aux) rows.push([tt('Auxiliary plane'), `${p.aux.source} (${p.aux.points} ${tt('pts')})`]); }
+    if (p.params) rows.push([tt('Max. angle'), fmt(p.params.maxAngleDeg ?? 0, 1) + '°'], [tt('Growth limit r'), p.params.radius ? fmt(p.params.radius, 2) + ' mm' : tt('unlimited')]);
+    if (p.aux) rows.push([tt('Auxiliary plane'), `${p.aux.source} (${p.aux.points} ${tt('pts')})`]);
+    if (f.fp?.zoneSrc === 'geom') rows.push([tt('Boundary from'), `${tt('Fitted geometry')} (± ${fmt(f.fp.zoneBand ?? 0, 3)} mm${f.fp.inset ? ` · ${tt('Boundary excl.')} ${fmt(f.fp.inset, 2)} mm` : ''})`]); }
   else if (p.kind === 'derived') { const d = DERIVES.find((x) => x.key === p.key); rows.push([tt('Method'), `🔗 ${tt('Derived from Analyze')}`], [tt('Derivation'), d ? tt(d.label) : p.key], [tt('Parent'), nameOf(p.parents[0])]);
     if (p.error) rows.push([tt('Error'), `⚠ ${p.error}`]); rows.push([tt('Update'), tt('recomputed automatically when the parent changes')]); }
   else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }

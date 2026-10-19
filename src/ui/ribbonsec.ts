@@ -39,8 +39,8 @@ export function fitRibbon() {
   const groups = [...panel.querySelectorAll<HTMLElement>(':scope > .group')];
   groups.forEach((g) => g.classList.remove('compact'));
   if (matchMedia('(max-width: 900px), (max-height: 560px)').matches) return;
-  const over = () => panel.scrollWidth > panel.clientWidth + 1;
-  const cand = groups.filter((g) => !g.classList.contains('rs-off') && g.querySelectorAll('.big').length >= 3)
+  const over = () => panel.scrollWidth > panel.clientWidth + 1 || rib.scrollWidth > rib.clientWidth + 1;
+  const cand = groups.filter((g) => (!g.classList.contains('rs-off') || panel.classList.contains('rs-phoneonly')) && g.querySelectorAll('.big').length >= 3)
     .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
   for (const g of cand) { if (!over()) break; g.classList.add('compact'); }
 }

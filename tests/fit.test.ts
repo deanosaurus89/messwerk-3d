@@ -121,7 +121,11 @@ describe('Bericht', () => {
     m.diameter = 99; // Momentaufnahme bleibt unverändert
     expect(r.controls[0].measured).toBeCloseTo(10.02, 6);
     const csv = R.reportCSV(r);
-    expect(csv).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;;NOK');
+    // tolerance tables off (default): pre-0.24 columns, no “Tol. source”
+    expect(csv).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;NOK');
+    expect(csv).not.toContain('Tol. source');
+    const csvT = R.reportCSV({ ...r, tolCol: true }); expect(R.buildReport(1, [f], c, 'x', new Date(), {}, { tolTables: true }).tolCol).toBe(true);
+    expect(csvT).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;;NOK');
     expect(csv).toContain('Aux. plane (automatisch');
     expect(R.reportHTML(r)).toContain('<span class="st NIO">NOK</span>');
     void F;

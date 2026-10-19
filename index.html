@@ -178,14 +178,20 @@
         <button class="big" id="btn-toggle-prims" data-vt="prims" title="Show/hide the geometry of all features"><span class="ico">◎</span>Geometries</button>
         <button class="big on" id="btn-toggle-trim" title="Trimmed geometry: show planes, cylinders, spheres and cones only over their selected points (contour), instead of a generic patch"><span class="ico">✂</span>Trimmed</button>
         <button class="big on" id="btn-toggle-zone" title="Extraction zone: show the search zone of the feature whose dialog is open (global preference, remembered). Hidden automatically when the dialog is closed."><span class="ico">⬚</span>Zone</button>
-        <button class="big" id="btn-toggle-labels" data-vt="labels" title="Show/hide the annotations of all features"><span class="ico">🏷</span>Annotations</button>
-        <button class="big" id="btn-reset-labels" title="Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected"><span class="ico">↺</span>Reset positions</button>
         <button class="big" id="btn-toggle-pts" title="Color the points of each feature"><span class="ico">⁘</span>Color points</button>
         <button class="big" id="btn-toggle-wire" data-vt="wire" title="Show triangle edges"><span class="ico">▦</span>Mesh edges</button>
         <button class="big" id="btn-toggle-wcs" title="Global coordinate system (from the scan/CAD import): show its triad at the origin (also the eye in the tree). Right-click it in the tree › Center on origin."><span class="ico">⊹</span>Global CS</button>
         <button class="big" id="btn-center-wcs" title="Center the view on the origin of the global coordinate system"><span class="ico">⌖</span>Center origin</button>
         <button class="big on" id="btn-toggle-curves" data-vt="curves" title="Show curves and CAD edges"><span class="ico">〰</span>Curves/edges</button>
       </div><div class="glabel">Display</div></div>
+      <div class="rsec" data-phone title="Annotations"><span>Annotations</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-toggle-labels" data-vt="labels" title="Show/hide the annotations of all features"><span class="ico">🏷</span>Annotations</button>
+        <button class="big" id="btn-reset-labels" title="Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected"><span class="ico">↺</span>Reset positions</button>
+        <button class="big" id="btn-annot-pts" data-vt="apts" title="Annotation content: show the point count of each feature (also in Options)"><span class="ico">#</span>Point count</button>
+        <button class="big" id="btn-annot-std" data-vt="astd" title="Annotation content: show the standard deviation σ of each feature (also in Options)"><span class="ico">σ</span>Std. dev.</button>
+        <div class="big decbig" title="Decimal places of all displayed values (annotations, panels, tree, report/CSV) – also in Options. Internal values and input fields are not rounded."><span class="ico dec-row"><button type="button" id="dec-minus" title="One decimal place less">−</button><b id="dec-val">2</b><button type="button" id="dec-plus" title="One decimal place more">+</button></span>Decimals</div>
+      </div><div class="glabel">Annotations</div></div>
       <div class="rsec" data-phone title="Panels"><span>Panels</span></div>
       <div class="group"><div class="btns">
         <button class="big on" data-pane-toggle="tree" title="Show/hide the tree"><span class="ico">☰</span>Tree</button>

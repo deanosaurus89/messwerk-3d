@@ -7,6 +7,14 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.27', date: '2026-10-19', items: [
+    'Boundary from “Fitted geometry” (cylinder/cone/sphere/torus) now really is the fitted shape: the created feature keeps all surface points of the zone (demo hole: 6 183 selected → 10 057 of 10 079 wall points) instead of falling back to the selected triangles – also when Auto detection found a circle and the type was switched to Cylinder, and after a refit. Shown as a clean surface with circles at its ends (full 360° for a closed wall, arc for an open one), no polygon outline. The option is also offered in Auto detection before the click; the Dialog shows “Boundary from: Fitted geometry”.',
+    'Assigning a datum no longer changes the 3D view: re-rendering the dialog opened the re-extraction section, which started its zone preview (orange points + zone). The section now stays as you left it.',
+    'View tab: new section “Annotations” (show/hide all, Reset positions, Point count, Std. dev., Decimals −/+), synced with Options and remembered. Options › Display › Decimal places (default 2): number of decimal places of all displayed values (annotations, panels, tree, status, report and CSV, angles too). Internal values and input fields are not rounded; direction vectors keep at least 5 places.',
+    'Options › Tolerances › “Use general tolerance tables (ISO 2768 / ISO 286)” – off by default = tolerances by hand as before 0.24 (no auto-fill, badge, fit field, ribbon group or “Tol. source” column); on = 0.24 behaviour. Project values are kept.',
+    'Creation Panel: “Area r” is now “Growth limit r” (region growing stops at this radius around the click; 0 = unlimited) and sits in the collapsible Parameters, which are available before the click too (Auto detection included, with Boundary from). Stale “mouse wheel” hints fixed (Shift+wheel).',
+    'Test checklist: shows the real app version, “Test first” section, tolerance tables as an optional section, superseded items marked.',
+  ] },
   { version: '2026.0.26', date: '2026-10-19', items: [
     'Help/info overlays on the iPhone: the ✕ is always visible – the "?" help opened during feature creation no longer slides under the ribbon (a jump to a doc section used to scroll the whole layout). Documentation, help, datum info, sample dialog, What\'s new and Properties have a fixed header with a large ✕ and close by ✕, Esc, tapping outside or swiping down. On the phone the help opens as a bottom sheet, so the upper third of the 3D view stays visible.',
   ] },

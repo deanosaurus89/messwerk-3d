@@ -1,3 +1,4 @@
+import { decFor } from './display';
 // Merkmale (Features) und Prüfmerkmale (Controls). Erweiterbar um Soll-Komponente (CAD).
 import { FitResult, GeomType } from './fit';
 import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
@@ -239,7 +240,7 @@ export function defaultTolerance(kind: ControlKind): { nominal: number | null; u
   return { nominal: null, up: 0.1, lo: -0.1 };
 }
 
-const fmt = (v: number | null | undefined, d = 4) => (v == null ? '' : v.toFixed(d));
+const fmt = (v: number | null | undefined, d = 4) => (v == null ? '' : v.toFixed(decFor(d)));
 
 /** CSV (Semikolon, deutsches Dezimalkomma) für Excel. */
 export function controlsCSV(controls: Control[], feats: Map<number, Feature>, ctx: EvalCtx = {}): string {
