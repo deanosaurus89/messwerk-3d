@@ -1576,7 +1576,7 @@ function showDatumInfo() {
 $('#btn-an-ctrl').onclick = () => { const v = ($('#an-ctrl') as HTMLSelectElement).value; if (v) void analyzeControl(+v); };
 document.querySelector('#btn-an-off')?.addEventListener('click', analyzeOff);
 document.querySelector('#btn-an-whisk')?.addEventListener('click', () => { state.an.whisk = !state.an.whisk; renderAll(); });
-document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state.an.trans = !state.an.trans; localStorage.setItem('mw3d-trans', state.an.trans ? '1' : '0'); status(state.an.trans ? tt('Model semi-transparent (also outside Analyze) – click again for opaque.') : tt('Model opaque.')); renderAll(); });
+document.querySelector('#btn-an-trans')?.addEventListener('click', () => { state.an.trans = !state.an.trans; localStorage.setItem('mw3d-trans', state.an.trans ? '1' : '0'); status(state.an.trans ? tt('Model semi-transparent in Analyze – click again for opaque.') : tt('Model opaque.')); renderAll(); });
 document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!state.an.on) analyze(state.an.kind); else document.querySelector<HTMLInputElement>('#an-sc')?.focus(); });
 
 // ------------------------------------------------------------------ Auswahl, Prüfmerkmale
@@ -2477,7 +2477,7 @@ function renderScene() {
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
   const peOn = paintPolyCompare() || paintLayout() || paintAnalysis();
-  if (!state.an.on) { const o = viewTrans.on ? 1 - viewTrans.amt / 100 : 1; viewer.setModelOpacity(state.an.trans ? Math.min(0.4, o) : o); setCadOpacity(state.an.trans ? 0.4 : 1); } // 0.33: ⚙ › Transparent (data object; CAD later)
+  if (!state.an.on) { const o = viewTrans.on ? 1 - viewTrans.amt / 100 : 1; viewer.setModelOpacity(o); setCadOpacity(viewTrans.on ? Math.max(0.4, o) : 1); } // 0.38 (F15): outside Analyze only ⚙ › Transparent counts – the stored Analyze “Transparent” flag made the model transparent by default and the toggle had no effect // 0.33: ⚙ › Transparent (data object; CAD later)
   if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) { const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i)); viewer.paint(Uint32Array.from(ids), [0.62, 0.2, 0.95]); }
   if (!peOn) for (const f of state.features) { // used points: all (View ribbon) or per feature (tree right-click)
     if (f.type === 'Abstand' || !vis(f) || !(state.colorPts || state.usedPts.has(f.id))) continue;
