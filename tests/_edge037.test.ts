@@ -26,10 +26,12 @@ for (const file of FILES) for (const mode of MODES) for (const S of SS) it(`${fi
   const res: any = { ms: Math.round(ms) };
   for (const ft of F) {
     let best = -1, bd = Infinity; for (let t = 0; t < f.length / 3; t++) { if (fn[3 * t] * ft.n[0] + fn[3 * t + 1] * ft.n[1] + fn[3 * t + 2] * ft.n[2] < 0.7) continue; let d = 0; for (let k = 0; k < 3; k++) { const c = (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3; d += (c - ft.seed[k]) ** 2; } if (d < bd) { bd = d; best = t; } }
-    const tr = topo.growRegion(best, ft.seed, { maxAngleDeg: 20, radius: 0 }); const sel = new Uint8Array(nv); for (const v of topo.regionVertices(tr).all) sel[v] = 1;
+    const tr = topo.growRegion(best, ft.seed, { maxAngleDeg: 20, radius: 0, noCurv: !!process.env.NOCURV }); const sel = new Uint8Array(nv); for (const v of topo.regionVertices(tr).all) sel[v] = 1;
     const tot = BINS.slice(1).map(() => 0), got = BINS.slice(1).map(() => 0); let wrong = 0, nsel = 0, minE = Infinity;
     for (let v = 0; v < nv; v++) { const q: V3 = [p[3 * v], p[3 * v + 1], p[3 * v + 2]]; const on = ft.d(q) < 0.05; if (sel[v]) { nsel++; if (!on) wrong++; } if (!on) continue; const e = ft.e(q); const k = BINS.findIndex((x, i) => e >= x && e < BINS[i + 1]); tot[k]++; if (sel[v]) { got[k]++; minE = Math.min(minE, e); } }
     // edge "stop distance": smallest e such that ≥ 50 % of the face points beyond it are selected (per 0.05 mm step)
+    if (process.env.KPROF) { const ks: number[][] = BINS.slice(1).map(() => []); for (let t = 0; t < f.length / 3; t++) { const q: V3 = [0, 1, 2].map((k) => (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3) as V3; if (ft.d(q) > 0.05) continue; const e = ft.e(q); const k = BINS.findIndex((x, i) => e >= x && e < BINS[i + 1]); if (k >= 0 && k < ks.length) ks[k].push(topo.K(t)); }
+      console.log('KPROF', mode, ft.name, ks.map((a) => { a.sort((x, y) => x - y); return a.length ? `${a[a.length >> 1].toFixed(3)}/${a[Math.floor(a.length * 0.9)].toFixed(3)}` : '-'; }).join(' ')); }
     res[ft.name] = { sel: nsel, wrong, frac: got.map((g, i) => (tot[i] ? +(g / tot[i]).toFixed(3) : null)), tot, minE: +minE.toFixed(3), info: topo.lastGrow?.legacy ? 'kante' : topo.lastGrow?.model };
   }
   out[`${file.includes('old') ? 'ALT-Nadelnetz' : 'neu'} ${mode} s=${S}`] = res; writeFileSync(process.env.OUT ?? '/workspace/research/edge037/edge.json', JSON.stringify(out, null, 1));

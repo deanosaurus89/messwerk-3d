@@ -85,10 +85,13 @@ export class MeshTopology {
   /** alle Normalen vorab (Tests/Vergleich) */
   allN(): Float32Array { for (let t = 0; t < this.sReady.length; t++) this.N(t); return this.smooth; }
   private cenK(t: number, out: number[]) { const p = this.mesh.positions, f = this.mesh.indices; for (let k = 0; k < 3; k++) out[k] = (p[3 * f[3 * t] + k] + p[3 * f[3 * t + 1] + k] + p[3 * f[3 * t + 2] + k]) / 3; }
+  // 0.38: Krümmung aus den Dreiecks-Flächennormalen (nur auf isotropen Netzen benutzt – dort sind sie gut definiert):
+  // die geglätteten Nachbarschaftsnormalen verbreitern den Krümmungsanstieg an Kanten auf ±R und senken den
+  // Grundwert -> die relative Schwelle (1,8·k0 + 0,2) schnitt dann 0,5–1 mm vor der Kante ab (gemessen, research/edge037).
   private kr(t: number): number {
     if (this.kRawReady[t]) return this.kRaw[t]; this.kRawReady[t] = 1;
-    const ct = [0, 0, 0], cu = [0, 0, 0]; this.cenK(t, ct); const fn = this.N(t); let s = 0, n = 0;
-    for (const u of this.neighbors(t)) { this.cenK(u, cu); const d = Math.hypot(cu[0] - ct[0], cu[1] - ct[1], cu[2] - ct[2]); if (d < 1e-9) continue; this.N(u);
+    const ct = [0, 0, 0], cu = [0, 0, 0]; this.cenK(t, ct); const fn = this.mesh.faceNormals!; let s = 0, n = 0;
+    for (const u of this.neighbors(t)) { this.cenK(u, cu); const d = Math.hypot(cu[0] - ct[0], cu[1] - ct[1], cu[2] - ct[2]); if (d < 1e-9) continue;
       const dot = fn[3 * t] * fn[3 * u] + fn[3 * t + 1] * fn[3 * u + 1] + fn[3 * t + 2] * fn[3 * u + 2]; s += Math.acos(Math.max(-1, Math.min(1, dot))) / d; n++; }
     return (this.kRaw[t] = n ? s / n : 0);
   }
@@ -414,6 +417,7 @@ export class MeshTopology {
 export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
 /** Normalenverfahren: 'robust' = Standard ab 0.37 (gewichteter Nachbarschafts-Fit für alle), 'plain' = ungewichteter Fit für alle,
  *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
+export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== '0';
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
 export let ROBUST_VSTART = !!(globalThis as any).process?.env?.RVS, ROBUST_IT = +((globalThis as any).process?.env?.RIT ?? 3);
@@ -473,7 +477,17 @@ export class RobustNormals {
         let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
         const rms0 = Math.sqrt(rr / nb);
         // alle Nachbarn liegen schon eng an der Ebene (rms < 0,2·s): Gewichte ≈ 1, Ergebnis = ungewichteter Fit -> Iteration sparen
-        if (rms0 > 0.5 * sc || ROBUST_VSTART) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
+        if (rms0 > 0.5 * sc || ROBUST_VSTART) {
+          // 0.38: Knoten an einer Kante – Startebene durch den Knoten, deren Normale die meisten Nachbarn trägt
+          // (Kandidaten: Flächennormalen der Nachbarschaft + Knotennormale). Die Fläche, auf der der Knoten liegt,
+          // hat im Radius die Mehrheit -> sie gewinnt, statt einer Mittelung über die Kante.
+          cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2];
+          if (ROBUST_CAND) {
+            const fnn = m.faceNormals!; const score = (ax: number, ay: number, az: number) => { let sw = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px) * ax + (p[3 * w + 1] - py) * ay + (p[3 * w + 2] - pz) * az; sw += 1 / (1 + (d * d) / s2); } return sw; };
+            let best = score(x, y, z);
+            for (let i = 0; i < nb; i++) { const w = q[i]; const t = tris[offsets[w]]; const ax = fnn[3 * t], ay = fnn[3 * t + 1], az = fnn[3 * t + 2]; const sco = score(ax, ay, az); if (sco > best) { best = sco; x = ax; y = ay; z = az; } }
+          }
+        }
         for (let iter = 0; iter < (rms0 < 0.2 * sc ? 0 : ROBUST_IT); iter++) {
           let sw = 0, mx = 0, my = 0, mz = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz; const d = (dx - cxw) * x + (dy - cyw) * y + (dz - czw) * z;
