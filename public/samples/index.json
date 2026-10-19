@@ -11,6 +11,16 @@
   "default": true
  },
  {
+  "key": "multifeature",
+  "name": "Multi-Feature plate (real scan)",
+  "file": "multifeature.stl.gz",
+  "kind": "Real measured scan (PolyWorks STL)",
+  "description": "Bracket plate approx. 230 × 235 × 52 mm (real scan): two inclined faces, slots, round, square and hexagonal openings, bosses, pins and spheres – many feature types for Auto extraction.",
+  "triangles": 295022,
+  "bytes": 8111497,
+  "thumb": "thumb-multifeature.jpg"
+ },
+ {
   "key": "flansch",
   "name": "Shaft/flange",
   "file": "flansch.stl.gz",
