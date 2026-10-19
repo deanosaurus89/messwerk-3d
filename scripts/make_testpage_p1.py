@@ -121,7 +121,7 @@ for rel, name, items in R:
         out.append(f'<h3 class="rel">Release {rel} – {html.escape(name)}</h3>')
         out += [item(rel, *x) for x in op]
 out.append(f'<details class="sec done-sec"><summary>✅ Erledigt ({len(done)}) – von Martin bestanden</summary>')
-out += [item(rel, x[0], x[1], x[2], x[3], DNOTE.get(x[0], x[4] or 'bestanden')) for rel, x in done]
+out += [item(rel, x[0], x[1], x[2], x[3], ' · '.join(q for q in (x[4], DNOTE.get(x[0], 'bestanden')) if q)) for rel, x in done]
 out.append('</details>')
 s = open(P).read()
 a = s.index('<h2>Phase 1'); b = s.index('<details class="sec"', a)

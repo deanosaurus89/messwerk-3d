@@ -47,7 +47,7 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     // Remove region: grow the top plane, tap the plane itself (0.33: plane always inside contour → disc removal), selection shrinks, ↶ restores
     S.preview = null; S.mode = null; S.opts.multi = false; S.opts.sub = false; A.renderAll();
     p = await prev('Ebene', [70, 52, 20], [0, 0, 1]); const nBefore = p.indices.length; const cp = document.querySelector('#ctx-panel .cp-main')?.textContent ?? ''; const iT = cp.indexOf('Freeform surface'), iD = cp.indexOf('Datum'), iR = cp.indexOf('Remove region'), iA = cp.indexOf('Advanced parameters');
-    document.querySelector('#ctx-panel button[data-a="fill"]')?.click(); await w(1500); const cp2 = document.querySelector('#ctx-panel .cp-main')?.innerText ?? ''; const det = document.querySelector('#ctx-panel details'); 
+    document.querySelector('#ctx-panel button[data-a="fill"]')?.click(); await w(1500); const cp2 = document.querySelector('#ctx-panel .cp-main')?.innerText ?? ''; const det = document.querySelector('#ctx-panel details.cp-params'); 
     out.order = { datumAfterType: iT >= 0 && iD > iT && iD < iR, boundaryVisible: null, advancedAfter: iA > iR, searchInAdv: !!det && /Search distance/.test(det.textContent) };
     document.querySelector('#ctx-panel button[data-a="fill"]')?.click(); await w(1500);
     { const pr = document.querySelector('#ctx-panel').getBoundingClientRect(), sc = document.querySelector('#ctx-panel').parentElement.getBoundingClientRect(); out.width = pr.width; out.avail = sc.width; out.h = pr.height; }
