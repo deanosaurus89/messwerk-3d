@@ -67,7 +67,8 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   if (!(r.ring.n2 < r.ring.n)) fail(`${v.name}: width change not applied live (${r.ring.n} → ${r.ring.n2})`);
   if (!/Band/.test(r.slotLabel ?? '') || !(r.slot.n > 100 && Math.abs(r.slot.w - 10) < 0.01 && Math.abs(r.slot.L - 30) < 0.02)) fail(`${v.name}: slot band ${r.slotLabel} ${JSON.stringify(r.slot)}`);
   if (!(r.assigned.aux && r.assigned.refId && r.assigned.type === 'Kreis' && Math.abs(r.assigned.d - 12.08) < 0.01 && r.assigned.sel)) fail(`${v.name}: assigned plane ${JSON.stringify(r.assigned)}`);
-  if (r.autoRef !== null || !/automatic/.test(r.autoSrc)) fail(`${v.name}: Auto used the assigned plane (${r.autoRef}, ${r.autoSrc}) – implicit switch should be gone`);
+  // (0.36: a wall tap 5 mm below the rim is a plain cylinder in Auto – no aux plane at all is fine; it must just not be the assigned one)
+  if (r.autoRef !== null || (r.autoSrc && !/automatic/.test(r.autoSrc))) fail(`${v.name}: Auto used the assigned plane (${r.autoRef}, ${r.autoSrc}) – implicit switch should be gone`);
   if (r.trimBtn || r.ptsBtn !== '⁘Used points' && r.ptsBtn !== '⁘ Used points' || r.colorDefault !== false) fail(`${v.name}: display buttons ${r.trimBtn} ${r.ptsBtn} ${r.colorDefault}`);
   if (r.menu !== '⁘ Show used points' || !r.used) fail(`${v.name}: tree right-click Show used points (${r.menu}, ${r.used})`);
   if (!r.dlg.pts || r.dlg.aux || !r.dlg.ptsOn) fail(`${v.name}: dialog top row (plane has no aux) ${JSON.stringify(r.dlg)}`);
