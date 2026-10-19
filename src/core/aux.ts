@@ -7,6 +7,7 @@ import { Vec3, dot, norm, scale, sub, unit } from './linalg';
 import { MeshData } from './mesh';
 import { GrowOptions, MeshTopology, gather } from './region';
 
+import { inZone } from './auxzone';
 const projOnPlane = (pl: FitResult, q: Vec3): Vec3 => sub(q, scale(pl.normal, dot(sub(q, pl.center), pl.normal)));
 
 /** Kreis/Langloch in einer gegebenen Ebene fitten (robust, 3σ-Ausreißer iterativ). */
@@ -164,13 +165,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   // Local ring: only the plane points in an annulus (circle) / stadium band (slot) around the contour, after a safety gap
   if (ring && planeReg && !givenPlane) {
     const Pp = mesh.positions, Nn = mesh.vertexNormals, keep: number[] = [];
-    const d = fit.direction ? fit.direction : null, half = fit.type === 'Langloch' ? (fit.length! - fit.width!) / 2 : 0, r0 = fit.radius!;
-    for (const v of planeReg.verts) {
-      const q = projOnPlane(plane, [Pp[3 * v], Pp[3 * v + 1], Pp[3 * v + 2]]), w = sub(q, fit.center);
-      let e = w; if (d && half > 0) { const t = Math.max(-half, Math.min(half, dot(w, d))); e = sub(w, scale(d, t)); }
-      const x = Math.hypot(e[0], e[1], e[2]) - r0;
-      if (x >= ring.gap && x <= ring.gap + ring.width) keep.push(v);
-    }
+    for (const v of planeReg.verts) if (inZone(fit, plane, [Pp[3 * v], Pp[3 * v + 1], Pp[3 * v + 2]], ring.gap, ring.width)) keep.push(v); // core/auxzone.ts (same function as the display)
     if (keep.length < 20) throw new Error(`Local ring: only ${keep.length} plane points – increase the ring width or reduce the gap`);
     const pts = keep.map((v) => [Pp[3 * v], Pp[3 * v + 1], Pp[3 * v + 2]] as Vec3), nrm = Nn ? keep.map((v) => [Nn[3 * v], Nn[3 * v + 1], Nn[3 * v + 2]] as Vec3) : pts.map(() => plane.normal);
     let pl = fitType('Ebene', pts, nrm); if (dot(pl.normal, plane.normal) < 0) pl = { ...pl, normal: scale(pl.normal, -1) };

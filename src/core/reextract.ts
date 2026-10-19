@@ -12,6 +12,7 @@
 import { FitResult, GeomType, fitType, modelNormal, signedDistance } from './fit';
 import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { fillOuterBoundary, insetPlane, rasterTris } from './fillplane';
+import { fitInPlane } from './aux';
 
 export interface ReexParams {
   /** search distance ± [mm]: normal thickness of the search region (and band for All inside boundary) */
@@ -140,7 +141,12 @@ export function inRegion(R: SearchRegion, q: Vec3): boolean {
   }
 }
 
-export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLike<number> | null, current: Uint32Array, p0: ReexParams, seedPts: Vec3[] = [], tris: ArrayLike<number> | null = null): ReexResult {
+export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLike<number> | null, current: Uint32Array, p0: ReexParams, seedPts: Vec3[] = [], tris: ArrayLike<number> | null = null, auxPlane: FitResult | null = null): ReexResult {
+  // 0.32 fix: features with an aux plane (circle, slot, line) keep THEIR plane – the curve is fitted in it, never re-detected
+  const inPl = auxPlane && (fit0.type === 'Kreis' || fit0.type === 'Langloch' || fit0.type === 'Linie') ? auxPlane : null;
+  const fitT = (t: GeomType, Pp: Vec3[], Nn: Vec3[]): FitResult => !inPl ? fitType(t, Pp, Nn, false)
+    : t === 'Linie' ? { ...fitType('Linie', Pp.map((q) => sub(q, scale(inPl.normal, dot(sub(q, inPl.center), inPl.normal)))), Nn, false) }
+    : fitInPlane(t as 'Kreis' | 'Langloch', Pp, inPl, false);
   const p = normReex(p0);
   const type = fit0.type as GeomType;
   const R0 = buildRegion(fit0, pos, current, p, seedPts, tris);
@@ -170,7 +176,7 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
     const mu = dv.reduce((a, b) => a + b, 0) / dv.length, sd = Math.sqrt(dv.reduce((a, b) => a + (b - mu) ** 2, 0) / dv.length);
     const keep = outl ? sel.filter((_, i) => Math.abs(dv[i] - mu) <= p.sigma * sd || sd === 0) : sel; removed = sel.length - keep.length;
     const Pp: Vec3[] = keep.map((v) => P3(pos, v)), Nn: Vec3[] = nrm ? keep.map((v) => [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]]) : [];
-    const nf = fitType(type, Pp, Nn.length ? Nn : Pp.map(() => fit.normal), false);
+    const nf = fitT(type, Pp, Nn.length ? Nn : Pp.map(() => fit.normal));
     const nIdx = Uint32Array.from(keep); const same = nIdx.length === idx.length && nIdx.every((v, i) => v === idx[i]);
     fit = { ...nf, type }; idx = nIdx; if (same) break;
   }

@@ -558,3 +558,11 @@ body:not(.tol-tables) .gentol { display:none !important; }
 .group.compact .big.decbig { min-width:0; }
 @media (max-width: 900px), (max-height: 560px) { #ribbon .big.decbig .dec-row button { width:24px; height:22px; } }
 .group.compact .big { flex-shrink:0; } .group.compact .btns > * { min-width:max-content; }
+/* 0.32: desktop creation panel wider and more compact (fewer wrapped rows → less height during preview); phone layout unchanged */
+@media (min-width:901px) and (min-height:561px) {
+  #ctx-panel { width:max-content; min-width:min(860px, calc(100% - 150px)); max-width:calc(100% - 120px); gap:8px; padding:3px 6px 3px 8px; font-size:12px; }
+  #ctx-panel .cp-main { gap:2px; }
+  #ctx-panel .cp-c { gap:3px; }
+  #ctx-panel .cp-c button, #ctx-panel .cp-seg button { padding:2px 7px; min-height:24px; }
+  #ctx-panel details > summary { padding:1px 0; }
+}

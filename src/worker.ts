@@ -82,7 +82,7 @@ export type Req =
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams; crit?: FitCrit; formBy?: boolean }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null; seedR?: number }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
-  | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[] }
+  | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[]; auxPlane?: FitResult | null }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null };
 
 /** automatic search distance of All inside boundary: 3 × RMS of the region-grown fit, at least 0.1 mm */
@@ -237,7 +237,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
     } else if (req.op === 'nurbs') {
       result = doNurbs(req);
     } else if (req.op === 'reex') {
-      const r = reextract(req.fit, mesh!.positions, mesh!.vertexNormals ?? null, req.indices, req.params, req.seedPts ?? [], mesh!.indices);
+      const r = reextract(req.fit, mesh!.positions, mesh!.vertexNormals ?? null, req.indices, req.params, req.seedPts ?? [], mesh!.indices, req.auxPlane ?? null);
       result = { ...r, fit: { ...r.fit, residuals: undefined } };
     } else if (req.op === 'fit') {
       result = req.params && req.type !== 'auto' ? fitWithParams(req.indices, req.type, req.params) : { indices: req.indices, ...doFit(req.indices, req.type) };
