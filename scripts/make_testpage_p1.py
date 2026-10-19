@@ -86,11 +86,8 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('F21e', 'Sollwerte des Demo-Teils unverändert', 'Bohrung Ø12, Bolzen Ø16, Langloch 30×10, Kugel R7, Torus r2 per Click & grow erzeugen.', 'Bohrung ≈ 12,08, Bolzen ≈ 16,00 (X +0,05), Langloch ≈ 30 × 10, Kugel ≈ R7, Torus ≈ r2 – innerhalb der Toleranzen.', ''),
   ('F21f', 'Tooltip/Doku Normalenwinkel', 'Creation Panel › Advanced › über „Normal angle“ fahren; Doku-Abschnitt „Normal angle“ öffnen.', 'Erklärt die robuste Normale (Ebenen-Fit über 1,3 × Kantenlänge bei Nadeldreiecken), Bedeutung des Winkels unverändert.', ''),
  ]),
- ('0.37', 'Eine robuste Normale für alle Dreiecke, Derive-Knopf sichtbar', [
-  ('F22', 'Ebene: keine Löcher, Wachsen stoppt an Kanten', 'Demo-Teil: Oberseite per Click & grow; Show used points; Rand an Bohrung, Bolzen, Außenkante ansehen.', 'Ganze Fläche gewählt, keine Löcher in der Mitte; Auswahl endet ca. 0,3–0,5 mm (≈ 1 Dreieck) vor jeder Kante, läuft nicht in Wände.', ''),
-  ('F22b', 'Zylinder, Kegel, Kugel, Torus wachsen wie bisher', 'Demo-Teil: Bohrung Ø12, Bolzen, Kegel, Kugel, Torus per Click & grow.', 'Jeweils nur die eigene Fläche; Sollwerte innerhalb der Toleranz; Kugel/Torus laufen nicht auf die Ebene.', ''),
-  ('F22c', 'Andere Demo-Teile unverändert gut', 'formdemo, Flansch, Inseldemo: je 2–3 Merkmale per Click & grow.', 'Gleiches Verhalten wie 0.36, Ladezeit normal (Desktop/iPhone).', ''),
-  ('A37', 'Analyze › 🔗 Derive: Bestätigen-Knopf sichtbar', 'iPhone und Desktop: Zylinder › Rechtwinkligkeit › Analyze › 🔗 Derive › Derived median line; ebenso Minimum-zone axis.', '„＋ Add to tree“ ist blau mit weißer Schrift (nicht leer); Klick legt den Linienzug/die Linie im Baum an.', ''),
+ ('0.37', 'Derive-Knopf sichtbar, Classes erklärt', [
+  ('A37', 'Analyze › 🔗 Derive: Bestätigen-Knopf sichtbar', 'iPhone und Desktop: Zylinder › Rechtwinkligkeit › Analyze › 🔗 Derive › Derived median line; ebenso Minimum-zone axis (Ebene: Flatness zone planes).', '„＋ Add to tree“ ist blau mit weißer Schrift (nicht leer); Klick legt den Linienzug/die Linie im Baum an.', ''),
   ('A37b', 'Analyze › Classes erklärt', 'Analyze › über „Classes“ fahren; Doku Farbskala öffnen.', 'Beispiel: 10 Klassen über ±0,05 mm = Bänder von 0,01 mm; 0 = stufenloser Verlauf; blau unten, grün Mitte, rot oben.', ''),
  ]),
 ]

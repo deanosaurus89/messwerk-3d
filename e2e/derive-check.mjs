@@ -26,6 +26,11 @@ for (const [n, opt] of [['desktop', { viewport: { width: 1400, height: 900 } }],
     const mi = [...document.querySelectorAll('.ctx-menu button, #ctx-menu button, .menu button')].find((x) => /median line/.test(x.textContent)); mi?.click(); await w(1500);
     out.add = vis(document.querySelector('[data-dv="add"]')); out.x = vis(document.querySelector('[data-dv="x"]'));
     const n0 = S.features.length; document.querySelector('[data-dv="add"]')?.click(); await w(800); out.added = S.features.length - n0;
+    // flatness zone plane (plane parent)
+    const pl = S.features.find((f) => f.type === 'Ebene'); A.addControl('Form', pl.id); const fl = S.controls[S.controls.length - 1]; A.renderAll();
+    await A.analyzeControl(fl.id); await w(2000); document.querySelector('[data-dv="menu"]')?.click(); await w(300);
+    [...document.querySelectorAll('.ctx-menu button, #ctx-menu button, .menu button')].find((x) => /upper plane/.test(x.textContent))?.click(); await w(1000);
+    out.addZone = vis(document.querySelector('[data-dv="add"]')); const n1 = S.features.length; document.querySelector('[data-dv="add"]')?.click(); await w(800); out.addedZone = S.features.length - n1;
     return out; });
   console.log(n, JSON.stringify(r));
   await p.screenshot({ path: `/tmp/derive-${n}.png` });
@@ -33,6 +38,7 @@ for (const [n, opt] of [['desktop', { viewport: { width: 1400, height: 900 } }],
   const lum = (c) => { const m = (c ?? '').match(/\d+/g)?.map(Number) ?? [0, 0, 0]; return 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]; };
   if (r.add && Math.abs(lum(r.add.color) - lum(r.add.bg)) < 80) fail(`${n}: confirm button text has no contrast to its background (${r.add.color} on ${r.add.bg}) – looks empty`);
   if (!r.add || !/Add to tree/.test(r.add.txt) || r.add.w < 30 || parseFloat(r.add.fs) < 9 || !r.add.inView) fail(`${n}: confirm button not visible/empty ${JSON.stringify(r.add)}`);
+  if (!r.addZone || Math.abs(lum(r.addZone.color) - lum(r.addZone.bg)) < 80 || !/Add to tree/.test(r.addZone.txt) || r.addedZone !== 1) fail(`${n}: flatness zone plane confirm button ${JSON.stringify(r.addZone)} added ${r.addedZone}`);
   if (!r.x?.txt) fail(`${n}: discard button empty`);
   if (r.added !== 1) fail(`${n}: Add to tree did not add the derived feature (${r.added})`);
   if (errs.length) fail(`${n}: page errors ${errs}`);

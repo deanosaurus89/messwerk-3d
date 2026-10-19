@@ -22,10 +22,10 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     const rels = [...document.querySelectorAll('h3.rel')].map((h) => h.textContent.slice(8, 12)); const f4 = document.querySelector('.it[data-id="F4"] .obsn')?.textContent ?? '';
     return { n: p1.length, rels, f4, av, closed, out1, out: document.querySelector('#out').value, steps: !!f3.querySelector('.steps') && !!f3.querySelector('.exp') }; });
   console.log(v.name, JSON.stringify(r));
-  if (r.n !== 70 || !r.steps) fail(`${v.name}: Phase-1 items ${r.n}`);
+  if (r.n !== 67 || !r.steps) fail(`${v.name}: Phase-1 items ${r.n}`);
   if (r.rels.join() !== '0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37') fail(`${v.name}: release groups ${r.rels}`);
   if (!/0\.32: ❌ Major/.test(r.f4)) fail(`${v.name}: F4 retest note ${r.f4}`);
-  if (r.av.length !== 70 || !['F4', 'F5', 'F11', 'F18', 'F10c', 'R2', 'R2k', 'F20', 'F20b', 'F21', 'F21f', 'F22', 'A37'].every((i) => r.av.includes(i))) fail(`${v.name}: available at 0.37: ${r.av}`);
+  if (r.av.length !== 67 || !['F4', 'F5', 'F11', 'F18', 'F10c', 'R2', 'R2k', 'F20', 'F20b', 'F21', 'F21f', 'A37', 'A37b'].every((i) => r.av.includes(i))) fail(`${v.name}: available at 0.37: ${r.av}`);
   if (!r.closed) fail(`${v.name}: archive/tolerance sections not collapsed`);
   if (r.out1) fail(`${v.name}: bug without severity was accepted`);
   const L = r.out.split('\n');
