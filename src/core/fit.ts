@@ -444,6 +444,18 @@ export function normalFilter(f: FitResult, p: Vec3[], n: Vec3[], o: NormalFilter
 /** Automatische Erkennung: alle plausiblen Typen fitten, einfachsten Typ wählen,
  *  dessen RMS nahe am besten liegt (Modellauswahl mit Komplexitätsreihenfolge). */
 export function autoFit(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: FitResult[] } {
+  // 0.38: Typauswahl an ≤ 4000 Punkten (gleichmäßig ausgedünnt), endgültiger Fit des gewählten Typs mit allen Punkten –
+  // große Regionen (z. B. ganze Flanschfläche) kosteten sonst Sekunden für die Kandidatenfits.
+  if (p.length > AUTOFIT_MAX) {
+    const st = Math.ceil(p.length / AUTOFIT_MAX), ps: Vec3[] = [], ns: Vec3[] = [];
+    for (let i = 0; i < p.length; i += st) { ps.push(p[i]); if (n.length) ns.push(n[i]); }
+    const r = autoFitAll(ps, ns); let best = r.best; try { best = fitType(r.best.type, p, n); } catch { /* keep subsample fit */ }
+    return { best, candidates: r.candidates.map((c) => (c === r.best ? best : c)) };
+  }
+  return autoFitAll(p, n);
+}
+export const AUTOFIT_MAX = 4000;
+function autoFitAll(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: FitResult[] } {
   const ext = extent(p);
   const cands: FitResult[] = [];
   const tryFit = (t: GeomType) => { try { cands.push(fitType(t, p, n)); } catch { /* ignorieren */ } };

@@ -194,7 +194,9 @@ export class MeshTopology {
    *  3. Wachsen nur, solange Abstand zum Modell < max(4σ, 0,05·h) und Normale ≈ Modellnormale (Winkel aus dem Rauschen),
    *     Modell wird bei jedem Wachstum um 60 % neu gefittet; Obergrenze 60 % der Gesamtfläche.
    */
+  growCalls = 0;
   growRegion(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
+    this.growCalls++;
     // Freiform: kein Regelgeometrie-Modell -> reines Kanten-/Krümmungswachstum (mit Flächendeckel)
     if (o.legacy || o.type === 'Freiformfläche') return this.growLegacy(seedTri, seedPoint, o, Math.floor((o.legacyCap ?? 0.6) * this.mesh.indices.length / 3)) ?? new Uint32Array(0);
     // 1) Kanten-/Krümmungswachstum (exakt wie bisher, rotationsinvariant), mit Flächenobergrenze;
@@ -456,7 +458,7 @@ export class RobustNormals {
     const nv = m.positions.length / 3; this.out = new Float32Array(3 * nv); this.done = new Uint8Array(nv); this.stamp = new Int32Array(nv).fill(-1); this.q = new Int32Array(nv);
   }
   /** Knotennormale v (berechnet beim ersten Zugriff) */
-  get(v: number): Float32Array { if (!this.done[v]) { this.done[v] = 1; this.computed++; this.compute(v); } return this.out; }
+  get(v: number): Float32Array { if (!this.done[v]) { this.done[v] = 1; this.computed++; const t0 = performance.now(); this.compute(v); this.ms += performance.now() - t0; } return this.out; }
   private compute(v: number): void {
     const m = this.m, p = m.positions, f = m.indices, vn = m.vertexNormals!, { offsets, tris } = this.vt, k = this.k, minPts = this.minPts, weighted = this.weighted;
     const out = this.out, stamp = this.stamp, q = this.q, W = this.W, el = this.el;
