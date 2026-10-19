@@ -79,7 +79,7 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   if (!/^▾?Objects/.test(r.unpin ?? '')) fail(`${v.name}: unpin ${r.unpin}`);
   if (r.slim.fill || r.slim.outl || r.slim.glim || !r.slim.nang || !r.slim.doc || !r.slim.isl) fail(`${v.name}: slim panel ${JSON.stringify(r.slim)}`);
   if (!(r.manIsl.chip && r.manIsl.n2 < r.manIsl.n1 && r.manIsl.n3 === r.manIsl.n1)) fail(`${v.name}: manual island ${JSON.stringify(r.manIsl)}`);
-  if (!r.frozen.has || !r.frozen.json || r.frozen.runs.length !== 3 || new Set(r.frozen.runs).size !== 1 || Math.abs(r.frozen.runs[0] - r.frozen.n0) > 0.02 * r.frozen.n0) fail(`${v.name}: frozen boundary ${JSON.stringify(r.frozen)}`);
+  if (!r.frozen.has || !r.frozen.json || r.frozen.runs.length !== 3 || new Set(r.frozen.runs).size !== 1 || r.frozen.runs[0] !== r.frozen.n0) fail(`${v.name}: frozen boundary ${JSON.stringify(r.frozen)}`);
   if (r.geoLink !== 'Geometric properties ›') fail(`${v.name}: geometric properties link ${r.geoLink}`);
   if (errors.length) fail(`${v.name}: page errors ${errors}`);
   await ctx.close();

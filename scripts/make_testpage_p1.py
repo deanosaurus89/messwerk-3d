@@ -74,6 +74,10 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('R2j', 'iPhone: Umschalter bleibt, ↶ ↷ rechts in der Chip-Zeile', 'iPhone: Start › Features / Coordinate Systems / Mesh editing durchschalten.', 'Schlanke Inhalte (Auto hoch, Typen in 2 Reihen), ↶ ↷ rechts in der Chip-Zeile, nichts scrollt.', ''),
   ('R2k', 'Tooltips im Start-Band', 'Desktop: über jede Schaltfläche (auch ▾, ⋯, ↶ ↷) fahren.', 'Jede Schaltfläche hat einen erklärenden Tooltip.', ''),
  ]),
+ ('0.35', 'Re-Extract mit eingefrorener Berandung exakt', [
+  ('F20', 'Re-Extract (Ausschlussabstand 0) = genau die Punkte der Erzeugung', 'Demo-Teil: Oberseite per Click & grow › ✓ › Eigenschaften › 🔁 Extraction › „Apply extraction“ zweimal; Projekt speichern/laden, nochmals.', 'Punktzahl exakt gleich wie beim Erzeugen (z. B. 35 435), auch nach Speichern/Laden; keine Randpunkte der Rundung dazu.', ''),
+  ('F20b', 'Re-Extract mit Ausschlussabstand > 0 = Teilmenge', 'Wie F20, dann Boundary exclusion distance 1 mm › Apply.', 'Weniger Punkte, nur Punkte der Erzeugung, alle mindestens 1 mm innerhalb der Berandung (auch um Inseln).', ''),
+ ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
 SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'

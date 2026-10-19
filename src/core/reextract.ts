@@ -38,6 +38,8 @@ export interface ReexParams {
   trims?: ZoneTrim[];
   /** 0.33: frozen boundary of a plane (set at creation) – the zone is exactly this boundary, offset by −inset */
   frozen?: FrozenBoundary | null;
+  /** 0.35: the frozen point set itself (union of all regions after island edits, at creation) – exclusion 0 gives exactly it */
+  frozenIdx?: Uint32Array | number[] | null;
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
@@ -170,8 +172,11 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   const offR = lateralOf(p) - (Rc === R0 ? (p.inset ?? 0) : 0);
   let own: Uint8Array | null = null;
   if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9 && !p.frozen) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
-  const ft = p.frozen && type === 'Ebene' ? frozenTester(p.frozen, p.maxDist, lateralOf(p) - (p.inset ?? 0)) : null; // exact frozen boundary (no raster)
-  const cands: number[] = []; for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if ((ft ? ft(q) : inRegion(Rc, q)) && trimPass(p.trims, q)) cands.push(v); }
+  const fset = p.frozen && type === 'Ebene' && p.frozenIdx && p.frozenIdx.length >= 3 && lateralOf(p) <= 1e-9 ? p.frozenIdx : null;
+  const ft = p.frozen && type === 'Ebene' ? frozenTester(p.frozen, p.maxDist, lateralOf(p) - (p.inset ?? 0), !!fset) : null; // exact frozen boundary (no raster)
+  const cands: number[] = [];
+  if (fset) { for (const v of fset) { if (v >= N) continue; const q = P3(pos, v); if (ft!(q) && trimPass(p.trims, q)) cands.push(v); } cands.sort((a, b) => a - b); } // 0.35: frozen point set
+  else for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if ((ft ? ft(q) : inRegion(Rc, q)) && trimPass(p.trims, q)) cands.push(v); }
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];

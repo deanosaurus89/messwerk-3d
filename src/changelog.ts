@@ -7,6 +7,9 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.35', date: '2026-10-19', items: [
+    'Fix: re-extraction of a plane with a frozen boundary now gives exactly the points of the creation (exclusion distance 0) – before ≈ 1.3 % more: the frozen boundary is the projected selection edge, which zigzags and folds at a rounded rim, so a position-only test took ~800 fillet/rim points (≤ 0.03 mm inside the zigzag edge, within the search distance) and lost ~340 selected ones. The frozen point set (union of all regions after island edits) is now stored with the feature (project file); with an exclusion distance > 0 the result is a subset at least that far inside the boundary.',
+  ] },
   { version: '2026.0.34', date: '2026-10-19', items: [
     'Start ribbon redesigned: on desktop all groups side by side (no section switcher, no scrolling down to 1024 px). Features: large Auto, the 8 standard types small in 3 rows (▾ = method), Distance/Angle, ⋯ More = Freeform, Polyline, Torus, Bolt circle.',
     'ONE Properties and ONE Delete act on the current selection – a feature/control or a coordinate system (Properties on a coordinate system = edit). Coordinate Systems group: New 3-2-1 and Activate only; Global, Show all and View along Z stay available in the tree; From datums removed for now (planned: coordinate system from datum features A/B/C).',

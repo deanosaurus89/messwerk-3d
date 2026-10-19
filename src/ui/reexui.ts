@@ -74,7 +74,7 @@ function live(f: RxFeature, d: HTMLElement) {
   liveT = window.setTimeout(async () => {
     const seq = ++liveSeq, p = { ...cur }, key = keyOf(p) + (f.fp?.crit ?? '');
     try {
-      const out = await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: { ...p, frozen: (f as any).frozen ?? null }, seedPts: f.anchor?.pts ?? [], auxPlane: (f as any).aux?.plane ?? null, crit: f.fp?.crit ?? 'lsq' });
+      const out = await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: { ...p, frozen: (f as any).frozen ?? null, frozenIdx: (f as any).frozenIdx ?? null }, seedPts: f.anchor?.pts ?? [], auxPlane: (f as any).aux?.plane ?? null, crit: f.fp?.crit ?? 'lsq' });
       if (seq !== liveSeq) return;
       reexPrev = { id: f.id, R: out.region, idx: out.indices, out, key };
       const el = d.querySelector('#rx-live');
@@ -124,7 +124,7 @@ async function runReextract(f: RxFeature) {
   if (!f.measured) return;
   try {
     const before = f.indices.length, p = { ...cur }, key = keyOf(p) + (f.fp?.crit ?? '');
-    const r = reexPrev && reexPrev.id === f.id && reexPrev.key === key ? reexPrev.out : await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: { ...p, frozen: (f as any).frozen ?? null }, seedPts: f.anchor?.pts ?? [], auxPlane: (f as any).aux?.plane ?? null, crit: f.fp?.crit ?? 'lsq', formBy: true });
+    const r = reexPrev && reexPrev.id === f.id && reexPrev.key === key ? reexPrev.out : await H.call({ op: 'reex', fit: f.measured, indices: f.indices, params: { ...p, frozen: (f as any).frozen ?? null, frozenIdx: (f as any).frozenIdx ?? null }, seedPts: f.anchor?.pts ?? [], auxPlane: (f as any).aux?.plane ?? null, crit: f.fp?.crit ?? 'lsq', formBy: true });
     f.measured = { ...r.fit, type: f.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length; f.dev = undefined; f.hit = undefined; H.invalidate(f.id);
     const { fillBand: _fb, ...cp } = p; void _fb; f.reex = { ...cp, points: r.indices.length, removed: r.removedSigma, before }; reexPrev = null; drafts.delete(f.id);
     H.recompute(); H.renderAll(); H.autosave();

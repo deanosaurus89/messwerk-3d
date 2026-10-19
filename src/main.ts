@@ -104,7 +104,7 @@ type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
 interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean; /** 0.31: per-island choices (not an island / refine) */ isl?: IslandChoice[] }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
-interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary (planes, set at ✓) */ frozen?: FrozenBoundary; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
+interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary (planes, set at ✓) */ frozen?: FrozenBoundary; /** 0.35: the frozen point set (creation selection) */ frozenIdx?: Uint32Array; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
@@ -1041,7 +1041,7 @@ function commitPreview() {
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
     const g = viewer.model.geometry; f.frozen = freezeBoundary(p.fit, g.getAttribute('position').array as Float32Array, g.index!.array as ArrayLike<number>, p.indices) ?? undefined;
-    if (f.frozen) { if (p.bandUsed) f.frozen.band = p.bandUsed; f.src = p.indices; f.hit = undefined; if (f.fp?.fill) f.fp.fill = { ...f.fp.fill, on: false }; } }
+    if (f.frozen) { if (p.bandUsed) f.frozen.band = p.bandUsed; f.src = p.indices; f.frozenIdx = p.indices; f.hit = undefined; if (f.fp?.fill) f.fp.fill = { ...f.fp.fill, on: false }; } }
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -2820,7 +2820,7 @@ function projectJSON() {
 }
 function featureIndexBlob() {
   const o: Record<string, Uint32Array | undefined> = {};
-  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; o['s' + f.id] = f.src; o['d' + f.id] = f.dev ? new Uint32Array(f.dev.buffer.slice(f.dev.byteOffset, f.dev.byteOffset + f.dev.byteLength)) : undefined; }
+  for (const f of state.features) { o['f' + f.id] = f.indices; o['a' + f.id] = f.auxIndices; o['s' + f.id] = f.src; o['z' + f.id] = f.frozenIdx; o['d' + f.id] = f.dev ? new Uint32Array(f.dev.buffer.slice(f.dev.byteOffset, f.dev.byteOffset + f.dev.byteLength)) : undefined; }
   return packIndices(o);
 }
 function meshArrays() {
@@ -2849,7 +2849,7 @@ async function applyProject(json: any, mesh: { positions: Float32Array; indices:
     state.data = { name: r.name, vertexCount: r.vertexCount, triCount: r.triCount, diag: r.bounds.diag };
     // feature model 1 (≤ 0.27: flat features) is migrated to feature node + Ist; format 2 passes through
     state.features = migrateFeatures(st.features, json.featureModel).map((f: any) => { if (f.reex) f.reex = normReex(f.reex);
-      f.indices = unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0); f.auxIndices = unpackIndex(idx, 'a' + f.id); f.src = unpackIndex(idx, 's' + f.id);
+      f.indices = unpackIndex(idx, 'f' + f.id) ?? new Uint32Array(0); f.auxIndices = unpackIndex(idx, 'a' + f.id); f.src = unpackIndex(idx, 's' + f.id); f.frozenIdx = unpackIndex(idx, 'z' + f.id);
       f.dev = ((d) => (d ? new Float32Array(d.slice().buffer) : undefined))(unpackIndex(idx, 'd' + f.id)); return f; });
     state.controls = st.controls; state.typeCount = st.typeCount; state.nextId = st.nextId; state.nextCtrl = st.nextCtrl; state.nextReport = st.nextReport;
     state.reports = st.reports ?? []; state.hidden = new Set(st.hidden ?? []); state.modelVisible = st.modelVisible ?? true;
@@ -3267,13 +3267,13 @@ async function applyEditedMesh(positions: Float32Array, indices: Uint32Array, la
   if (pushUndo) { pe.undo.push({ ...curMesh(), label: label ?? '' }); if (pe.undo.length > 8) pe.undo.shift(); }
   if (!pe.origTris) pe.origTris = state.data!.triCount;
   const lists: (Uint32Array | null)[] = [];
-  for (const f of state.features) lists.push(f.indices ?? null, f.auxIndices ?? null, f.src ?? null);
+  for (const f of state.features) lists.push(f.indices ?? null, f.auxIndices ?? null, f.src ?? null, f.frozenIdx ?? null);
   const r = await busy(engine.call<any>({ op: 'setMesh', positions: positions.slice(), indices: indices.slice(), remap: lists,
     chains: state.curves.map((c) => c.chain), kinds: state.curves.map((c) => c.kind) }));
   if (r.curves) { state.curves.forEach((c, i) => Object.assign(c, r.curves[i], { kind: c.kind })); }
   state.features.forEach((f, i) => {
-    const [a, b, c] = [r.remap[3 * i], r.remap[3 * i + 1], r.remap[3 * i + 2]];
-    if (a) f.indices = a; f.auxIndices = b ?? undefined; f.src = c ?? undefined;
+    const [a, b, c, z] = [r.remap[4 * i], r.remap[4 * i + 1], r.remap[4 * i + 2], r.remap[4 * i + 3]];
+    if (a) f.indices = a; f.auxIndices = b ?? undefined; f.src = c ?? undefined; f.frozenIdx = z ?? undefined;
     if (f.dev && f.dev.length !== f.indices.length) f.dev = undefined;
   });
   ptsCache.clear();

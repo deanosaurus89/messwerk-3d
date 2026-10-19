@@ -56,7 +56,13 @@ export function frozenCells(F: FrozenBoundary, off = 0) {
 /** exact membership test of the frozen boundary (no raster): a point (projected into the frozen frame) belongs to the
  *  zone if it is inside the loops (even-odd) – or on them (≤ ε) – and, with an exclusion distance, at least that far
  *  from every loop edge (outer contour and masked interior areas alike). off > 0 grows the zone outward. */
-export function frozenTester(F: FrozenBoundary, d: number, off = 0) {
+/** 0.35: why a frozen POINT SET (frozenIdx) and not only the polygon: the loops are the projected 3D selection edges –
+ *  at a rounded rim the mesh folds, so the projected loops zigzag, overlap and contain hundreds of sliver hole loops
+ *  around single non-selected rim vertices. A pure position test (inside polygon + within search distance) then took
+ *  805 fillet/rim vertices (≤ 0.03 mm inside the zigzag edge, normals mostly > 30°) and lost 344 selected ones
+ *  (outside by projection / parity flips of overlapping loops) on the demo top plane: +1.3 %. With setOnly the
+ *  candidates are the frozen vertices themselves; the polygon only measures the exclusion distance. */
+export function frozenTester(F: FrozenBoundary, d: number, off = 0, setOnly = false) {
   const segs: number[] = []; let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
   for (const l of F.loops) for (let i = 0; i < l.length; i += 2) { const j = (i + 2) % l.length; segs.push(l[i], l[i + 1], l[j], l[j + 1]);
     a0 = Math.min(a0, l[i]); a1 = Math.max(a1, l[i]); b0 = Math.min(b0, l[i + 1]); b1 = Math.max(b1, l[i + 1]); }
@@ -80,6 +86,7 @@ export function frozenTester(F: FrozenBoundary, d: number, off = 0) {
     const w0 = q[0] - o[0], w1 = q[1] - o[1], w2 = q[2] - o[2];
     if (Math.abs(w0 * n[0] + w1 * n[1] + w2 * n[2]) > d) return false;
     const x = w0 * u[0] + w1 * u[1] + w2 * u[2], y = w0 * v[0] + w1 * v[1] + w2 * v[2];
+    if (setOnly) return off < 0 ? minDist(x, y, -off) >= -off : true; // 0.35: candidate is a frozen vertex – only the exclusion distance
     if (x < ox - g || x > ox + nx * g || y < oy - g || y > oy + ny * g) return false;
     const inn = inside(x, y);
     if (off < 0) return inn && minDist(x, y, -off) >= -off;
