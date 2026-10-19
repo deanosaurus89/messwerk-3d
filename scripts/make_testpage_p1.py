@@ -86,6 +86,10 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('F21e', 'Sollwerte des Demo-Teils unverändert', 'Bohrung Ø12, Bolzen Ø16, Langloch 30×10, Kugel R7, Torus r2 per Click & grow erzeugen.', 'Bohrung ≈ 12,08, Bolzen ≈ 16,00 (X +0,05), Langloch ≈ 30 × 10, Kugel ≈ R7, Torus ≈ r2 – innerhalb der Toleranzen.', ''),
   ('F21f', 'Tooltip/Doku Normalenwinkel', 'Creation Panel › Advanced › über „Normal angle“ fahren; Doku-Abschnitt „Normal angle“ öffnen.', 'Erklärt die robuste Normale (Ebenen-Fit über 1,3 × Kantenlänge bei Nadeldreiecken), Bedeutung des Winkels unverändert.', ''),
  ]),
+ ('0.37', 'Derive-Knopf sichtbar, Classes erklärt', [
+  ('A37', 'Analyze › 🔗 Derive: Bestätigen-Knopf sichtbar', 'iPhone und Desktop: Zylinder › Rechtwinkligkeit › Analyze › 🔗 Derive › Derived median line; ebenso Minimum-zone axis (Ebene: Flatness zone planes).', '„＋ Add to tree“ ist blau mit weißer Schrift (nicht leer); Klick legt den Linienzug/die Linie im Baum an.', ''),
+  ('A37b', 'Analyze › Classes erklärt', 'Analyze › über „Classes“ fahren; Doku Farbskala öffnen.', 'Beispiel: 10 Klassen über ±0,05 mm = Bänder von 0,01 mm; 0 = stufenloser Verlauf; blau unten, grün Mitte, rot oben.', ''),
+ ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
 SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'
