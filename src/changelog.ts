@@ -7,6 +7,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.29', date: '2026-10-19', items: [
+    'Feature creation, step 1 – selection: the Creation Panel offers 👆 Click & grow | ＋ Add region | 🖌 Brush as the selection method. Add region: every click grows a further region (same intelligence), the union is fitted.',
+    'Seed area feedback: the triangles inside the pick circle are highlighted where you click or tap – now also on iPhone (stays with the preview) and including the hole wall next to a plane.',
+    'Circle/slot by tapping roughly on the edge: if the tapped face alone does not give wall + aux plane (e.g. a flat facet strip of the hole wall), the extraction restarts from the other side of the edge inside the pick circle – wall points AND aux-plane points, as reliable as Auto.',
+    'Feature dialog simpler: re-extraction moved into the collapsed section “⚙ Advanced · Re-extraction”.',
+  ] },
   { version: '2026.0.28', date: '2026-10-19', items: [
     'Internal: new feature data model – every feature is a node (name, type, dependencies, datum) with its actual state (Ist: points, fit, aux plane, extraction parameters) underneath; prepared for a nominal state from CAD later. No visible change: all results are identical (checked against 0.27 with 12 features, 19 controls and a coordinate system).',
     'Project files: format version 2. Projects saved with 0.27 or older (and the last autosave) open unchanged and are converted automatically; a project saved with 0.28 cannot be opened by older versions.',
