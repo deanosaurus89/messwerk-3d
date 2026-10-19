@@ -121,7 +121,7 @@ describe('Bericht', () => {
     m.diameter = 99; // Momentaufnahme bleibt unverändert
     expect(r.controls[0].measured).toBeCloseTo(10.02, 6);
     const csv = R.reportCSV(r);
-    expect(csv).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;NOK');
+    expect(csv).toContain('Kreis 1;Diameter;10,0000;10,0200;0,0200;0,0100;-0,0100;;NOK');
     expect(csv).toContain('Aux. plane (automatisch');
     expect(R.reportHTML(r)).toContain('<span class="st NIO">NOK</span>');
     void F;
