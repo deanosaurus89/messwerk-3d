@@ -1,8 +1,8 @@
 """Schreibt public/samples/index.json (Liste für den Dialog „Beispiel laden“)."""
 import json, os
 d = "public/samples"
-items = [{"key": "beispielteil", "name": "Beispielteil (Standard)", "file": "beispielteil.stl", "kind": "CAD-Tessellierung + Rauschen",
-          "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.", "triangles": 284227}]
+items = [{"key": "beispielteil", "name": "Beispielteil (Standard)", "file": "beispielteil.stl", "kind": "Scan-ähnlich (isotropes Netz ~0,5 mm)",
+          "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.", "triangles": 183612}]
 for k in ["pruefplatte", "flansch", "freiform"]:
     j = json.load(open(f"{d}/{k}.json"))
     items.append({"key": k, "name": j["name"], "file": j["file"], "kind": "Scan-ähnlich (isotropes Netz)", "description": j["description"], "triangles": j["mesh"]["triangles"]})

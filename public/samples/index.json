@@ -45,10 +45,10 @@
   "key": "beispielteil",
   "name": "Training part",
   "file": "beispielteil.stl",
-  "kind": "CAD-Tessellierung + Rauschen",
+  "kind": "Scan-like (isotropic mesh ~0.5 mm, noise σ 8 µm)",
   "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
-  "triangles": 284227,
-  "bytes": 14211434,
+  "triangles": 183612,
+  "bytes": 9180684,
   "thumb": "thumb-beispielteil.jpg",
   "hidden": true
  }
