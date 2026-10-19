@@ -425,12 +425,13 @@ export class MeshTopology {
 export const ROBUST_MIN = 10, ROBUST_K = 1.3, NEEDLE_Q = 0.3;
 /** Normalenverfahren: 'robust' = Standard ab 0.37 (gewichteter Nachbarschafts-Fit für alle), 'plain' = ungewichteter Fit für alle,
  *  'needle036' = 0.36 (nur Nadeldreiecke) – die beiden letzten nur für Vergleichsmessungen. */
+export const ROBUST_CT = +((globalThis as any).process?.env?.RCT ?? 0.5);
 export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== '0';
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
 export let ROBUST_VSTART = !!(globalThis as any).process?.env?.RVS, ROBUST_IT = +((globalThis as any).process?.env?.RIT ?? 3);
 export let ROBUST_NW = +((globalThis as any).process?.env?.RNW ?? 0);
-export let ROBUST_S = +((globalThis as any).process?.env?.RS ?? 0.1); export function setRobustS(x: number) { ROBUST_S = x; }
+export let ROBUST_S = +((globalThis as any).process?.env?.RS ?? 0.05); export function setRobustS(x: number) { ROBUST_S = x; }
 export function needleTris(m: MeshData, qmin = NEEDLE_Q): Uint8Array {
   const p = m.positions, f = m.indices, fa = m.faceAreas!, nt = f.length / 3, out = new Uint8Array(nt);
   const d2 = (a: number, b: number) => (p[a] - p[b]) ** 2 + (p[a + 1] - p[b + 1]) ** 2 + (p[a + 2] - p[b + 2]) ** 2;
@@ -485,7 +486,7 @@ export class RobustNormals {
         let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
         const rms0 = Math.sqrt(rr / nb);
         // alle Nachbarn liegen schon eng an der Ebene (rms < 0,2·s): Gewichte ≈ 1, Ergebnis = ungewichteter Fit -> Iteration sparen
-        if (rms0 > 0.5 * sc || ROBUST_VSTART) {
+        if (rms0 > ROBUST_CT * sc || ROBUST_VSTART) {
           // 0.38: Knoten an einer Kante – Startebene durch den Knoten, deren Normale die meisten Nachbarn trägt
           // (Kandidaten: Flächennormalen der Nachbarschaft + Knotennormale). Die Fläche, auf der der Knoten liegt,
           // hat im Radius die Mehrheit -> sie gewinnt, statt einer Mittelung über die Kante.
