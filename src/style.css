@@ -566,3 +566,10 @@ body:not(.tol-tables) .gentol { display:none !important; }
   #ctx-panel .cp-c button, #ctx-panel .cp-seg button { padding:2px 7px; min-height:24px; }
   #ctx-panel details > summary { padding:1px 0; }
 }
+/* 0.33: pinned tree groups (Data, Reference) stay at the top */
+#tree .node.pin { position:sticky; z-index:2; background:#f4f8fc; }
+#tree .node.pin.sel { background:#cfe0f5; }
+#tree .node.pin-last { border-bottom:1px solid #c9d6e4; }
+#tree .pin-btn { margin-left:auto; font-size:11px; opacity:.25; cursor:pointer; padding:0 3px; }
+#tree .node:hover .pin-btn, #tree .pin-btn.on { opacity:1; }
+@media (pointer: coarse) { #tree .pin-btn { opacity:.6; } }

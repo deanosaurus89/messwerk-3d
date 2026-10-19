@@ -23,7 +23,7 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     const turn = (L) => { let s = 0; const n = L.length; for (let i = 0; i < n; i++) { const p = L[(i + n - 1) % n], b = L[i], c = L[(i + 1) % n]; const u = [b[0] - p[0], b[1] - p[1], b[2] - p[2]], v = [c[0] - b[0], c[1] - b[1], c[2] - b[2]]; const lu = Math.hypot(...u), lv = Math.hypot(...v); if (lu > 1e-12 && lv > 1e-12) s += Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (lu * lv)))); } return s; };
     const loops = A.previewLoops(P); A.setSmoothTol(0); const raw = A.previewLoops(P); A.setSmoothTol(null);
     const big = (Ls) => Ls.reduce((x, y) => (y.length > x.length ? y : x), []);
-    return { n: P.indices.length, form: P.fit.form, isl: I.map((x) => `${x.kind}${x.rim ? '+rim' : ''}`), inc: I.filter((x) => x.inc).length, chips: document.querySelectorAll('.isl-chip').length,
+    return { n: P.indices.length, form: P.fit.form, isl: I.map((x) => `${x.kind}${x.rim ? '+rim' : ''}`), inc: I.filter((x) => x.inc).length, chips: document.querySelectorAll('.isl-chip[data-isl]').length,
       loops: loops.length, turnSm: turn(big(loops)) / (2 * Math.PI), turnRaw: turn(big(raw)) / (2 * Math.PI) }; });
   console.log(v.name, 'auto', JSON.stringify(a));
   const cnt = (k) => a.isl.filter((x) => x === k).length;

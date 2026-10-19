@@ -26,7 +26,7 @@ export interface SollState { source: 'cad'; fit?: FitResult }
 
 /** flat (pre-0.28) field name → Ist field name */
 export const IST_FIELDS: Record<string, string> = {
-  measured: 'fit', pointCount: 'pointCount', method: 'method', aux: 'aux', reex: 'reex', anchor: 'anchor', fp: 'fp', hit: 'hit',
+  measured: 'fit', pointCount: 'pointCount', method: 'method', aux: 'aux', reex: 'reex', anchor: 'anchor', fp: 'fp', hit: 'hit', frozen: 'frozen',
   indices: 'indices', src: 'src', auxIndices: 'auxIndices', dev: 'dev', candidates: 'candidates',
 };
 /** Ist fields that are runtime point sets (stored in the binary index blob, not in the project JSON) */

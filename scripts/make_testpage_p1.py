@@ -1,0 +1,82 @@
+"""Phase-1 section of public/test.html: ONE feature/change per item, grouped by release (Martin 19.10. 15:42).
+Ids of earlier items are kept where the item continues (recorded results stay attached; F4/F5 = retests in 0.33)."""
+import re, html
+P = 'public/test.html'
+R = [  # (release, [(id, title, steps, expected, note)])
+ ('0.28', 'Datenmodell', [
+  ('R1', 'Umbau Merkmal-Datenmodell (Merkmal → Ist) – nichts darf sich ändern', 'Ein mit 0.27 oder älter gespeichertes Projekt (.mw3d) öffnen bzw. „Letztes Projekt wiederherstellen“; Werte in Tabelle/Bericht vergleichen; neu speichern und wieder öffnen.', 'Alle Merkmale, Prüfmerkmale, Bezüge, KS, Beschriftungen und Berichtswerte exakt wie vorher; nach erneutem Speichern/Öffnen identisch.', 'Regressionscheck'),
+ ]),
+ ('0.29', 'Auswahl', [
+  ('F1', 'Ebene per Click & grow – ein Klick, ganze Fläche', 'Beispielteil › Ebene › 👆 Click & grow › einmal auf die Oberseite tippen.', 'Die ganze zusammenhängende Oberseite ist ausgewählt (bis zu den Kanten, Bohrungen frei); ✓ erzeugt „Ebene n“.', ''),
+  ('F1b', 'Merkmaldialog: Re-Extraktion zugeklappt', 'Ein Merkmal anklicken › Eigenschaften.', 'Re-Extraktion steht nur unter „⚙ Advanced · Re-extraction“ (zugeklappt); der Dialog ist kurz.', ''),
+  ('F2', 'Zylinder per Click & grow', 'Zylinder › 👆 Click & grow › in die große Bohrung tippen.', 'Zylinder Ø ≈ 12,08.', ''),
+  ('F2b', '„＋ Add region“ fügt Regionen hinzu', 'Nach F2: „＋ Add region“ › weitere Wandstücke (andere Seite) antippen › ✓.', 'Jede Region kommt dazu („n regions“), Ø bleibt plausibel; das Element enthält alle Regionen.', ''),
+  ('F3', 'iPhone: Kreis durch Tippen auf die Kante', 'iPhone › Kreis › grob auf die Kante der kleinen Bohrung tippen (etwas auf der Ebene oder etwas an der Wand); mehrfach an verschiedenen Stellen.', 'Jedes Mal ein Kreis mit Wandpunkten (orange) und Hilfsebenenpunkten (blau), Ø ≈ 6.', ''),
+  ('F3b', 'Saat-Rückmeldung beim Tippen', 'iPhone › Kreis oder Ebene › tippen.', 'Die Saat-Dreiecke im Pick-Kreis sind cyan hervorgehoben (auch an der Wand), bis zur Vorschau.', ''),
+ ]),
+ ('0.30', 'Rückmeldung + Erzeugen ohne Filter', [
+  ('F5a', 'Vorschau zeigt nur Punkte, Formabweichung, Std.-Abw.', 'Beliebiges Element per Click & grow (Vorschau).', 'Unten im Panel genau: Punkte · Formabweichung · Std.-Abw. (Maße erst nach ✓ in Baum/Dialog).', ''),
+  ('F5b', 'Maße ohne versteckte Filter', 'Ebene, Zylinder, Kreis, Kegel, Kugel am Beispielteil erzeugen; mit Sollmaßen vergleichen (Ø 12,08 / Ø 6, Bolzen Ø 16, Kugel R 7, Kegel R 10→4).', 'Maße ±0,01 mm, Std.-Abw. ≈ 0,008 mm; alle ausgewählten Punkte im Fit.', ''),
+ ]),
+ ('0.31', 'Berandung + Inseln', [
+  ('F6', 'Geglättete Berandung', 'Load sample › „Islands demo (bolt circle)“ › Ebene oben und Zylinder in einer Bohrung › Vorschau und erzeugtes Element ansehen (auch iPhone).', 'Rand als glatte Kontur (kein Dreiecks-Zickzack), in Vorschau und am Element gleich.', ''),
+  ('F6b', 'Glättung einstellbar (0 = aus, leer = auto)', 'Merkmaldialog › ⚙ Advanced › „Boundary smoothing“ 0 und leer vergleichen.', '0 zeigt den rohen Zickzack, leer = automatisch; Messwerte ändern sich nicht.', ''),
+  ('F7', 'Inseln werden automatisch erkannt', 'Inseldemo › Ebene › Oberseite antippen › „🏝 Islands“ im Panel ansehen.', '◯ Löcher, ◎ Löcher mit Wulst/Spritzern, ▲ Erhebungen erkannt (orange umrandet) und ausgeschlossen.', ''),
+  ('F7b', 'Insel „Refine ±“', 'Eine Insel antippen › „Refine“ +2 mm.', 'Die Aussparung wächst um 2 mm, Punkte sinken; das Element behält die Wahl.', ''),
+ ]),
+ ('0.32', 'Hilfsebene, Anzeige, Panel', [
+  ('F8', 'Hilfsebene ◎ Ring (Kreis)', 'Kreis an der Bohrung Ø12 › „◎ Ring“ › Offset/Breite ändern.', 'Ring als Doppelkontur in der Hilfsebene, folgt Offset/Breite sofort; Ø ≈ 12,08.', ''),
+  ('F8b', 'Hilfsebene ⊂⊃ Band (Langloch)', 'Langloch › „⊂⊃ Band“.', 'Band entlang der Kontur; Langloch 10 × 30.', ''),
+  ('F8c', 'Hilfsebene ▭ zugewiesene Ebene', 'Ebene Oberseite erzeugen › Kreis › „▭ Plane“ (oder 🎯) › nur die Bohrungswand antippen.', 'Wandpunkte auf die gewählte Ebene projiziert; Quelle = Ebenenname.', ''),
+  ('F8d', 'Auto nutzt nie heimlich eine vorhandene Ebene', 'Mit vorhandener Ebene: Kreis mit „▱ Auto“ erzeugen.', 'Quelle „automatic (adjacent face)“, nicht die vorhandene Ebene.', ''),
+  ('F8e', 'Ansicht › „⁘ Used points“', 'Ansicht › Used points an/aus.', 'Zeigt die im Fit verwendeten Punkte aller Elemente in Elementfarbe; Standard aus.', ''),
+  ('F8f', 'Baum-Rechtsklick › „Show used points“', 'Rechtsklick auf ein Element im Baum.', 'Nur dieses Element zeigt seine Punkte.', ''),
+  ('F8g', 'Eine Darstellung (kein „Trimmed“-Schalter)', 'Ansicht ansehen.', 'Kein Trimmed-Schalter; jedes Element mit geglättetem Rand.', ''),
+  ('F9', 'Dialog-Kopfzeile „Used points“', 'Element › Eigenschaften › oben „Used points“.', 'Checkbox neben Geometrie/Beschriftung schaltet die Punkte dieses Elements.', ''),
+  ('F9b', '„Aux-plane points“ in eigener Farbe', 'Kreis mit Hilfsebene › Eigenschaften › „Aux-plane points“.', 'Hilfsebenen-Punkte blau, unabhängig von den Elementpunkten.', ''),
+  ('F9c', 'Ansicht „▱ Aux-plane pts“ + Baum-Rechtsklick', 'Ansicht › Aux-plane pts; Rechtsklick › Show aux-plane points.', 'Alle bzw. ein Element zeigt die Hilfsebenen-Punkte blau.', ''),
+  ('F9d', 'Creation Panel (Desktop) breiter und niedriger', 'Desktop: Vorschau einer Ebene ansehen; iPhone vergleichen.', 'Desktop weniger Zeilen, breiter; iPhone unverändert.', ''),
+  ('F9e', 'Panel-Reihenfolge', 'Vorschau Zylinder: Panel ansehen.', 'Datum direkt nach dem Typ; „Boundary from“ direkt sichtbar; Search distance/Exclude raised unter „⚙ Advanced parameters“.', ''),
+  ('F9f', '„− Remove region“ + „↶ Region“', 'Ebene › „− Remove region“ › einen Bereich bzw. eine Erhebung antippen › „↶ Region“.', 'Der Bereich fällt aus der Auswahl („1 removed“), ↶ stellt ihn wieder her.', ''),
+  ('F10', 'Blocker-Fix: Re-Extract Kreis hält die Hilfsebene', 'Kreis an Bohrung Ø12 › Eigenschaften › ⚙ Advanced · Re-extraction › „✓ Apply extraction“ zweimal (auch mit größerer Search distance).', 'Hilfsebene exakt gleich (Lage, Seite, Normale); Ø 12,08 ±0,01.', ''),
+  ('F10b', 'Re-Extract Langloch hält die Hilfsebene', 'Wie F10 mit dem Langloch.', 'Hilfsebene gleich; 10 × 30 ±0,02.', ''),
+  ('F10c', 'Neuberechnung (Fit-Parameter ändern) hält die Hilfsebene', 'Kreis › Eigenschaften › einen Fit-Parameter ändern.', 'Hilfsebene gleich, Mittelpunkt in der Hilfsebene.', ''),
+ ]),
+ ('0.33', 'Pinsel, schlanke Berandung, ⚙-Menü, Baum', [
+  ('F4', 'Retest: Pinsel in einem Schritt', 'Ebene (oder Auto) › 🖌 Brush › Fläche malen › Werte unten im Panel ansehen › grünes ✓.', 'Punkte/Form/Std. erscheinen nach jedem Strich im Panel; ✓ erzeugt sofort das Element – kein zweites Fenster.', 'Ergebnis 0.32: ❌ Major – zweites Bestätigungsfenster, „Use Auto Contour“'),
+  ('F4b', 'Pinsel: Element auf die gemalte Fläche begrenzt', '🖌 Brush › zwei getrennte Flächen malen › ✓ › Element ansehen; Re-Extract.', 'Kein „Use outer contour“; Element genau auf den gemalten Bereichen (mehrere Inseln möglich); Re-Extract sucht nur darin.', ''),
+  ('F5', 'Retest: Berandung schlank – Kontur automatisch', 'Ebene › Click & grow › Oberseite › Panel ansehen.', 'Kein „All inside boundary“ mehr; die erkannte Kontur gilt automatisch (Click & grow, Add region); deutlich schlankeres Panel.', 'Ergebnis 0.32: ❌ Major – Berandung zu kompliziert'),
+  ('F5c', 'Insel aus der Liste entfernen', 'Inseldemo › Ebene › eine Insel antippen › „Not an island“.', 'Die Insel gehört wieder zur Ebene (Punkte steigen).', ''),
+  ('F5d', 'Insel per Tippen hinzufügen', 'Islands › „＋ Island“ › eine Stelle der Ebene antippen (Pinselgröße = Durchmesser).', 'Ein Kreis mit Pinsel-Durchmesser wird ausgeschlossen (✚ in der Liste, ✕ entfernt ihn wieder).', ''),
+  ('F5e', 'Keine Ausreißer-Entfernung beim Erzeugen', '⚙ Advanced parameters öffnen.', 'Keine „Outlier removal“; alle Punkte im Fit.', ''),
+  ('F5f', '„Growth limit r“ entfernt', 'Click & grow: Panel/Dialog ansehen, Shift+Mausrad probieren; zwei Stellen nacheinander anklicken.', 'Kein Growth limit (auch nicht Shift+Rad); ein neuer Klick entfernt nichts von der vorigen Auswahl.', ''),
+  ('F5g', '„Normal angle“ mit Tooltip und Doku-Bild', '⚙ Advanced parameters › Normal angle › Tooltip lesen › „?“.', 'Klarer Tooltip; Doku-Abschnitt mit Bild (Querschnitt: Wachstum stoppt an Rundung/Fase).', ''),
+  ('F11', 'Eingefrorene Berandung: Re-Extract ohne Lücken', 'Ebene: Click & grow, Lücke mit „＋ Add region“ schließen › ✓ › Re-Extract mehrmals.', 'Keine Lücke; Punktzahl bleibt bei jeder Wiederholung gleich; nur der Ausschlussabstand versetzt den Rand.', ''),
+  ('F12', 'Hilfsebenen-Optionen erst nach erkanntem Kreis', 'Auto bzw. Kreis wählen (noch nicht klicken) › dann Kreis antippen; danach eine Ebene antippen.', 'Vor dem Klick und bei Ebene keine ▱/◎/▭-Schalter; nach erkanntem Kreis/Langloch sichtbar.', ''),
+  ('F13', '⚙-Menü immer vollständig sichtbar', 'Desktop + iPhone: ⚙ über dem Würfel öffnen – auch mit offenem Dialog, Tabelle und Creation Panel.', 'Alle Befehle sichtbar (öffnet sich ggf. seitlich bzw. scrollbar), nichts abgeschnitten.', ''),
+  ('F14', '⚙-Menü: ohne „Center on origin“ und „ISO“', '⚙ öffnen; Rechtsklick auf das KS.', 'Beide Einträge fehlen im ⚙; „Center on origin“ bleibt im KS-Rechtsklick.', ''),
+  ('F15', '⚙ „Transparent“ + Stärke in Optionen', '⚙ › Transparent; Optionen › Display › Transparency [%] ändern.', 'Datenobjekt wird durchsichtig; Stärke wirkt sofort und bleibt nach Neuladen.', ''),
+  ('F16', 'Baum: Klick ins Leere hebt die Auswahl auf', 'Datenobjekt bzw. KS bzw. Element im Baum wählen › unten ins Leere klicken.', 'Nichts mehr ausgewählt, der Dialog folgt.', ''),
+  ('F17', 'Baum: Gruppen „Data“ und „Reference“', 'Baum ansehen.', 'Gruppe Data (Polygonmodell) und neue Gruppe Reference (leer, später CAD).', ''),
+  ('F19', 'Dialog: „Geometric properties ›“ als eine Zeile', 'Desktop: Element › Eigenschaften › unten „Geometric properties ›“ (Tooltip) anklicken.', 'Eine kompakte Zeile statt Text; öffnet das gleiche Info-Fenster wie bisher.', ''),
+  ('F18', 'Baum: Gruppe anheften', 'An Data bzw. Reference 📌 klicken › Baum scrollen › erneut 📌.', 'Angeheftet steht die Gruppe immer oben sichtbar; gelöst wieder an ihrem Platz; bleibt nach Neuladen.', ''),
+ ]),
+]
+RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
+SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'
+def item(rel, i, t, s, e, note):
+    nt = f' <span class="obsn">{html.escape(note)}</span>' if note else ''
+    return (f'<div class="it" data-id="{i}" data-grp="p1" data-from="{rel}"><div class="h"><b>{i}</b> <span class="na">noch nicht verfügbar</span>{nt}</div>'
+            f'<div class="t"><b>{html.escape(t)}</b></div><div class="steps">▶ {html.escape(s)}</div><div class="exp">✔ Erwartet: {html.escape(e)}</div>\n'
+            + RADIO.replace('{id}', i) + SEV + '\n<textarea class="cm" placeholder="Kommentar (Pflicht bei ⚠️/❌)"></textarea>\n'
+            '<details class="bug"><summary>🐞 Fehler melden</summary><textarea class="bt" placeholder="Was passiert? Schritte, Gerät (Desktop/iPhone), erwartet vs. tatsächlich"></textarea></details></div>')
+out = ['<h2>Phase 1 – Merkmalerzeugung (19.–25.10.)</h2><p class="note">Je Release ein Abschnitt; jeder Punkt prüft genau EINE Funktion/Änderung. Punkte mit „noch nicht verfügbar“ kommen mit dem genannten Release.</p>']
+for rel, name, items in R:
+    out.append(f'<h3 class="rel">Release {rel} – {html.escape(name)}</h3>')
+    out += [item(rel, *x) for x in items]
+s = open(P).read()
+a = s.index('<h2>Phase 1'); b = s.index('<details class="sec"', a)
+s = s[:a] + '\n'.join(out) + '\n' + s[b:]
+s = s.replace('details.bug{margin-top:6px;font-size:14px}', 'details.bug{margin-top:6px;font-size:14px}h3.rel{font-size:15px;margin:16px 0 2px;color:#0d47a1;border-bottom:1px solid #c5d3e3}.sevl{font-size:14px;margin-left:4px}', 1) if 'h3.rel' not in s else s
+open(P, 'w').write(s)
+print(sum(len(x[2]) for x in R), 'items')

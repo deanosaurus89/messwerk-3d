@@ -7,6 +7,17 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.33', date: '2026-10-19', items: [
+    'Brush in one step: points, form deviation and std. dev. appear in the panel after every stroke; the green ✓ creates the feature directly (no second confirm window). No outer-contour option for the brush – the feature is the painted area (several patches possible); a re-extraction searches only there.',
+    'Slimmer Creation Panel: “All inside boundary” removed – planes always take every point inside the detected contour of the selected/added regions; islands stay listed (remove one with “Not an island”, add one with “＋ Island” and a tap – a disc of the brush diameter). Outlier removal and “Growth limit r” (incl. Shift+wheel) removed from creation. Normal angle under ⚙ Advanced parameters with tooltip and a documentation section with a picture.',
+    'Frozen boundary: on ✓ the boundary of a plane is frozen (union of all regions after island edits) and stored with the feature. Re-extraction searches exactly inside it, offset by the exclusion distance – no gaps where an added region closed one, the same point count on every run.',
+    'Aux-plane options (Auto / Ring / Plane) appear only after a click actually detected a circle, slot or line.',
+    '⚙ view menu always fully visible (opens beside the button when there is no room above, scrolls as last resort); Center on origin (still on the coordinate-system right-click) and ISO (nav cube) removed; new “Transparent” for the data object, amount under Options › Display.',
+    'Tree: a click on empty space clears the selection; groups Data and Reference (future home of the CAD model) – 📌 pins a group to the top of the tree.',
+    'Feature properties: “Geometric properties ›” – one compact line that opens the read-only info window.',
+    'Test page: one feature per item, grouped by release, severity per item.',
+    'Remove region on planes works with the always-on contour (removes from the whole selection; ↶ Region restores the exact previous state). Model-lock re-baselined: planes now take every point inside the contour and outlier removal is gone at creation, so plane forms/positions of the reference project changed (e.g. top plane 14 702 → 35 435 points, flatness 0.0708 → 0.0625 mm).',
+  ] },
   { version: '2026.0.32', date: '2026-10-19', items: [
     'Fix (blocker): Re-extract and refit of a circle, slot or line with an aux plane keep the feature\'s aux plane – the curve is fitted in that plane (same position, same normal); before, the plane could be re-detected on another face/side and the circle moved down the bore.',
     'Creation Panel (desktop) wider and more compact; Datum directly after the type; “Boundary from” directly visible; Search distance and Exclude raised moved to ⚙ Advanced parameters (Search distance only matters for All inside boundary / Boundary from: fitted geometry, not for plain Create).',

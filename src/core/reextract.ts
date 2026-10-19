@@ -13,6 +13,7 @@ import { FitResult, GeomType, fitType, modelNormal, signedDistance } from './fit
 import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { fillOuterBoundary, insetPlane, rasterTris } from './fillplane';
 import { fitInPlane } from './aux';
+import { FrozenBoundary, frozenCells, frozenTester } from './frozen';
 
 export interface ReexParams {
   /** search distance ± [mm]: normal thickness of the search region (and band for All inside boundary) */
@@ -35,6 +36,8 @@ export interface ReexParams {
   sigmaOn?: boolean;
   /** user trims of the zone: lasso polygons in a stored view (keep inside / remove inside) */
   trims?: ZoneTrim[];
+  /** 0.33: frozen boundary of a plane (set at creation) – the zone is exactly this boundary, offset by −inset */
+  frozen?: FrozenBoundary | null;
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
@@ -87,6 +90,7 @@ export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uin
   if (!current.length && !seedPts.length) throw new Error('No start points');
   switch (fit.type) {
     case 'Ebene': {
+      if (p.frozen) { const F = p.frozen, g = frozenCells(F, m - (p.inset ?? 0)); return { kind: 'prism', o: F.o, n: F.n, u: F.u, v: F.v, ...g, d }; }
       const [u, v] = basis(n);
       if (current.length < 3) { // rectangular box over the anchor/start points
         let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
@@ -147,7 +151,8 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   const fitT = (t: GeomType, Pp: Vec3[], Nn: Vec3[]): FitResult => !inPl ? fitType(t, Pp, Nn, false)
     : t === 'Linie' ? { ...fitType('Linie', Pp.map((q) => sub(q, scale(inPl.normal, dot(sub(q, inPl.center), inPl.normal)))), Nn, false) }
     : fitInPlane(t as 'Kreis' | 'Langloch', Pp, inPl, false);
-  const p = normReex(p0);
+  const p0f = fit0.type === 'Ebene' && p0.frozen ? { ...p0, fill: false } : p0; // frozen boundary: no inner/outer/island questions
+  const p = normReex(p0f);
   const type = fit0.type as GeomType;
   const R0 = buildRegion(fit0, pos, current, p, seedPts, tris);
   // planes: the zone already contains the boundary exclusion distance (inset > 0 shrinks, < 0 grows it). With All inside
@@ -164,8 +169,9 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   // ~27k instead of 14.7k points. Gap filling (All inside boundary) is unchanged – it fills from the contour separately.
   const offR = lateralOf(p) - (Rc === R0 ? (p.inset ?? 0) : 0);
   let own: Uint8Array | null = null;
-  if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
-  const cands: number[] = []; for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if (inRegion(Rc, q) && trimPass(p.trims, q)) cands.push(v); }
+  if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9 && !p.frozen) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
+  const ft = p.frozen && type === 'Ebene' ? frozenTester(p.frozen, p.maxDist, lateralOf(p) - (p.inset ?? 0)) : null; // exact frozen boundary (no raster)
+  const cands: number[] = []; for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if ((ft ? ft(q) : inRegion(Rc, q)) && trimPass(p.trims, q)) cands.push(v); }
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];

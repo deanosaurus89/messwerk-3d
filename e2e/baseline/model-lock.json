@@ -31,8 +31,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.0707954596,
-     "measured": 0.0707954596,
+     "deviation": 0.06254701341,
+     "measured": 0.06254701341,
      "status": "NIO"
     }
    },
@@ -65,8 +65,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.007464545579,
-     "measured": 0.007464545579,
+     "deviation": 0.008054752804,
+     "measured": 0.008054752804,
      "status": "IO"
     }
    },
@@ -92,26 +92,26 @@
      "tolUp": 0.1
     },
     "res": {
-     "detail": "TED suggested from the actual part, not confirmed: [X] 20.024, [Y] 20.023 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01101773727,
+     "detail": "TED suggested from the actual part, not confirmed: [X] 20.023, [Y] 20.024 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.009722902152,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01101773727,
+     "measured": 0.009722902152,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01101773727,
+       "dia": 0.009722902152,
        "dirW": [
-        8.095887876e-7,
-        -0.0000386053524,
+        0.00000723535082,
+        -0.00003598147384,
         0.9999999993
        ],
        "fid": 4,
-       "margin": 0.08898226273,
+       "margin": 0.09027709785,
        "name": "Cylinder 1",
        "nomW": [
-        20.00038518,
-        19.99984233,
-        9.999849928
+        19.99972088,
+        19.99982113,
+        9.999849931
        ],
        "tol": 0.1
       }
@@ -136,8 +136,8 @@
     },
     "res": {
      "detail": "derived median line (16 sections) in floating Ø zone",
-     "deviation": 0.006498368638,
-     "measured": 0.006498368638,
+     "deviation": 0.00646456733,
+     "measured": 0.00646456733,
      "status": "IO"
     }
    },
@@ -178,8 +178,8 @@
     },
     "res": {
      "detail": "Zone ⟂ -0.000 -1.000 -0.000",
-     "deviation": 0.05716079012,
-     "measured": 0.05716079012,
+     "deviation": 0.1045855077,
+     "measured": 0.1045855077,
      "status": "NIO"
     }
    },
@@ -223,25 +223,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 55.073, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (8 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.002279060797,
+     "deviation": 0.002260205441,
      "flag": "Nominal unconfirmed",
-     "measured": 0.002279060797,
+     "measured": 0.002260205441,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.002279060797,
+       "dia": 0.002260205441,
        "dirW": [
-        8.095887876e-7,
-        -0.0000386053524,
+        0.00000723535082,
+        -0.00003598147384,
         0.9999999993
        ],
        "fid": 5,
-       "margin": 0.1977209392,
+       "margin": 0.1977397946,
        "name": "Cylinder 2",
        "nomW": [
-        55.04951337,
-        29.99982079,
-        25.99993712
+        55.04981761,
+        29.99931215,
+        25.9999371
        ],
        "tol": 0.2
       }
@@ -364,8 +364,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -39.99989172,
-     "measured": -19.99989172,
+     "deviation": -39.999799,
+     "measured": -19.999799,
      "status": "NIO"
     }
    },
@@ -381,8 +381,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -19.9980753,
-     "measured": -2.9980753,
+     "deviation": -19.99814434,
+     "measured": -2.998144341,
      "status": "NIO"
     }
    },
@@ -454,25 +454,25 @@
      "frame": {
       "R": [
        [
-        -0.000003963017666,
+        -0.000003493297773,
         -1,
-        0.000004442710903
+        0.00000591995074
        ],
        [
         1,
-        -0.000003963015972,
-        3.812287442e-7
+        -0.000003493304805,
+        -0.000001187695791
        ],
        [
-        -3.812111376e-7,
-        0.000004442712414,
+        0.000001187716472,
+        0.000005919946591,
         1
        ]
       ],
       "o": [
-       -0.000006543124517,
-       0.0002779277392,
-       20.00012947
+       0.00002323879715,
+       0.0003760356988,
+       20.00030446
       ]
      },
      "warnings": []
@@ -487,30 +487,38 @@
     "datum": "A",
     "fit": {
      "center": [
-      51.61512344,
-      26.99488858,
-      20.00002921
+      53.19350801,
+      26.69466786,
+      20.00008325
      ],
-     "form": 0.0707954596,
-     "maxNeg": -0.03865291225,
-     "maxPos": 0.03214254735,
-     "n": 14702,
+     "form": 0.06254701341,
+     "maxNeg": -0.03042858032,
+     "maxPos": 0.03211843309,
+     "n": 35435,
+     "nfRemoved": 0,
      "normal": [
-      -3.812111376e-7,
-      0.000004442712414,
+      0.000001187716472,
+      0.000005919946591,
       1
      ],
-     "outliers": 0,
-     "rms": 0.007464545579,
+     "rms": 0.008054752804,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -521,17 +529,17 @@
     },
     "id": 1,
     "idx": [
-     14702,
-     1211470865
+     35435,
+     3013658728
     ],
     "method": "Klick",
     "name": "Plane 1",
-    "pointCount": 14702,
+    "pointCount": 35435,
     "reex": null,
     "refs": null,
     "src": [
-     14702,
-     1211470865
+     35435,
+     3013658728
     ],
     "type": "Ebene"
    },
@@ -542,30 +550,38 @@
     "datum": "B",
     "fit": {
      "center": [
-      50.0004321,
-      0.00003534777323,
-      10.00007649
+      49.89480949,
+      0.0001430730754,
+      10.09054672
      ],
-     "form": 0.05705051586,
-     "maxNeg": -0.02495023778,
-     "maxPos": 0.03210027808,
-     "n": 2081,
+     "form": 0.103960882,
+     "maxNeg": -0.07197219279,
+     "maxPos": 0.0319886892,
+     "n": 2100,
+     "nfRemoved": 0,
      "normal": [
-      -0.000003963004272,
-      -0.9999999995,
-      -0.00003068435442
+      -0.000003493303172,
+      -1,
+      0.00000137428572
      ],
-     "outliers": 0,
-     "rms": 0.008040996332,
+     "rms": 0.00852731149,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -576,17 +592,17 @@
     },
     "id": 2,
     "idx": [
-     2081,
-     2801340481
+     2100,
+     4105855606
     ],
     "method": "Klick",
     "name": "Plane 2",
-    "pointCount": 2081,
+    "pointCount": 2100,
     "reex": null,
     "refs": null,
     "src": [
-     2081,
-     2801340481
+     2100,
+     4105855606
     ],
     "type": "Ebene"
    },
@@ -605,22 +621,30 @@
      "maxNeg": -0.02643256501,
      "maxPos": 0.02869333017,
      "n": 1505,
+     "nfRemoved": 0,
      "normal": [
       -0.9999999999,
       -0.000003023023268,
       -0.00001554431642
      ],
-     "outliers": 0,
      "rms": 0.008016074943,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -1208,9 +1232,9 @@
     "datum": null,
     "fit": {
      "center": [
-      0.00005139821118,
-      -0.00007334567425,
-      20.00012947
+      0.00005139426872,
+      0.0003309894307,
+      20.00030446
      ],
      "form": 0,
      "maxNeg": 0,
@@ -1315,8 +1339,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.0707954596,
-     "measured": 0.0707954596,
+     "deviation": 0.06254701341,
+     "measured": 0.06254701341,
      "status": "NIO"
     }
    },
@@ -1349,8 +1373,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.007464545579,
-     "measured": 0.007464545579,
+     "deviation": 0.008054752804,
+     "measured": 0.008054752804,
      "status": "IO"
     }
    },
@@ -1376,26 +1400,26 @@
      "tolUp": 0.1
     },
     "res": {
-     "detail": "TED suggested from the actual part, not confirmed: [X] 20.024, [Y] 20.023 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01101773727,
+     "detail": "TED suggested from the actual part, not confirmed: [X] 20.023, [Y] 20.024 – confirm ✓ or enter the drawing values. derived median line (16 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
+     "deviation": 0.009722902152,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01101773727,
+     "measured": 0.009722902152,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01101773727,
+       "dia": 0.009722902152,
        "dirW": [
-        8.095887876e-7,
-        -0.0000386053524,
+        0.00000723535082,
+        -0.00003598147384,
         0.9999999993
        ],
        "fid": 4,
-       "margin": 0.08898226273,
+       "margin": 0.09027709785,
        "name": "Cylinder 1",
        "nomW": [
-        20.00038518,
-        19.99984233,
-        9.999849928
+        19.99972088,
+        19.99982113,
+        9.999849931
        ],
        "tol": 0.1
       }
@@ -1420,8 +1444,8 @@
     },
     "res": {
      "detail": "derived median line (16 sections) in floating Ø zone",
-     "deviation": 0.006498368638,
-     "measured": 0.006498368638,
+     "deviation": 0.00646456733,
+     "measured": 0.00646456733,
      "status": "IO"
     }
    },
@@ -1462,8 +1486,8 @@
     },
     "res": {
      "detail": "Zone ⟂ -0.000 -1.000 -0.000",
-     "deviation": 0.05716079012,
-     "measured": 0.05716079012,
+     "deviation": 0.1045855077,
+     "measured": 0.1045855077,
      "status": "NIO"
     }
    },
@@ -1507,25 +1531,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 55.073, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (8 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.002279060797,
+     "deviation": 0.002260205441,
      "flag": "Nominal unconfirmed",
-     "measured": 0.002279060797,
+     "measured": 0.002260205441,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.002279060797,
+       "dia": 0.002260205441,
        "dirW": [
-        8.095887876e-7,
-        -0.0000386053524,
+        0.00000723535082,
+        -0.00003598147384,
         0.9999999993
        ],
        "fid": 5,
-       "margin": 0.1977209392,
+       "margin": 0.1977397946,
        "name": "Cylinder 2",
        "nomW": [
-        55.04951337,
-        29.99982079,
-        25.99993712
+        55.04981761,
+        29.99931215,
+        25.9999371
        ],
        "tol": 0.2
       }
@@ -1648,8 +1672,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -39.99989172,
-     "measured": -19.99989172,
+     "deviation": -39.999799,
+     "measured": -19.999799,
      "status": "NIO"
     }
    },
@@ -1665,8 +1689,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -19.9980753,
-     "measured": -2.9980753,
+     "deviation": -19.99814434,
+     "measured": -2.998144341,
      "status": "NIO"
     }
    },
@@ -1738,25 +1762,25 @@
      "frame": {
       "R": [
        [
-        -0.000003963017666,
+        -0.000003493297773,
         -1,
-        0.000004442710903
+        0.00000591995074
        ],
        [
         1,
-        -0.000003963015972,
-        3.812287442e-7
+        -0.000003493304805,
+        -0.000001187695791
        ],
        [
-        -3.812111376e-7,
-        0.000004442712414,
+        0.000001187716472,
+        0.000005919946591,
         1
        ]
       ],
       "o": [
-       -0.000006543124517,
-       0.0002779277392,
-       20.00012947
+       0.00002323879715,
+       0.0003760356988,
+       20.00030446
       ]
      },
      "warnings": []
@@ -1771,30 +1795,38 @@
     "datum": "A",
     "fit": {
      "center": [
-      51.61512344,
-      26.99488858,
-      20.00002921
+      53.19350801,
+      26.69466786,
+      20.00008325
      ],
-     "form": 0.0707954596,
-     "maxNeg": -0.03865291225,
-     "maxPos": 0.03214254735,
-     "n": 14702,
+     "form": 0.06254701341,
+     "maxNeg": -0.03042858032,
+     "maxPos": 0.03211843309,
+     "n": 35435,
+     "nfRemoved": 0,
      "normal": [
-      -3.812111376e-7,
-      0.000004442712414,
+      0.000001187716472,
+      0.000005919946591,
       1
      ],
-     "outliers": 0,
-     "rms": 0.007464545579,
+     "rms": 0.008054752804,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -1805,17 +1837,17 @@
     },
     "id": 1,
     "idx": [
-     14702,
-     1211470865
+     35435,
+     3013658728
     ],
     "method": "Klick",
     "name": "Plane 1",
-    "pointCount": 14702,
+    "pointCount": 35435,
     "reex": null,
     "refs": null,
     "src": [
-     14702,
-     1211470865
+     35435,
+     3013658728
     ],
     "type": "Ebene"
    },
@@ -1826,30 +1858,38 @@
     "datum": "B",
     "fit": {
      "center": [
-      50.0004321,
-      0.00003534777323,
-      10.00007649
+      49.89480949,
+      0.0001430730754,
+      10.09054672
      ],
-     "form": 0.05705051586,
-     "maxNeg": -0.02495023778,
-     "maxPos": 0.03210027808,
-     "n": 2081,
+     "form": 0.103960882,
+     "maxNeg": -0.07197219279,
+     "maxPos": 0.0319886892,
+     "n": 2100,
+     "nfRemoved": 0,
      "normal": [
-      -0.000003963004272,
-      -0.9999999995,
-      -0.00003068435442
+      -0.000003493303172,
+      -1,
+      0.00000137428572
      ],
-     "outliers": 0,
-     "rms": 0.008040996332,
+     "rms": 0.00852731149,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -1860,17 +1900,17 @@
     },
     "id": 2,
     "idx": [
-     2081,
-     2801340481
+     2100,
+     4105855606
     ],
     "method": "Klick",
     "name": "Plane 2",
-    "pointCount": 2081,
+    "pointCount": 2100,
     "reex": null,
     "refs": null,
     "src": [
-     2081,
-     2801340481
+     2100,
+     4105855606
     ],
     "type": "Ebene"
    },
@@ -1889,22 +1929,30 @@
      "maxNeg": -0.02643256501,
      "maxPos": 0.02869333017,
      "n": 1505,
+     "nfRemoved": 0,
      "normal": [
       -0.9999999999,
       -0.000003023023268,
       -0.00001554431642
      ],
-     "outliers": 0,
      "rms": 0.008016074943,
      "type": "Ebene"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "fill": {
+      "band": 0,
+      "exRaised": false,
+      "isl": [],
+      "islands": true,
+      "on": false
+     },
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
@@ -2492,9 +2540,9 @@
     "datum": null,
     "fit": {
      "center": [
-      0.00005139821118,
-      -0.00007334567425,
-      20.00012947
+      0.00005139426872,
+      0.0003309894307,
+      20.00030446
      ],
      "form": 0,
      "maxNeg": 0,
