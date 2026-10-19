@@ -452,7 +452,8 @@ canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' &&
 canvas.addEventListener('pointerup', (e) => { if (navPaused) { rdown = null; return; } if (e.button !== 2 || !rdown) return; const d = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y); rdown = null;
   if (d > 6) return; if (pe.tool === 'curve' && curveDraft.length > 1) { curveFinish(); return; } window.dispatchEvent(new CustomEvent('mw-rclick')); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('pointerleave', () => { if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
+canvas.addEventListener('pointerleave', (e) => { if ((e.pointerType !== 'mouse' || state.preview) && state.mode?.kind === 'fit' && state.mode.method === 'Klick') return; // keep the seed feedback of the tap/click (touch; busy overlay over the canvas)
+  if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
 /** Automatic pick radius for display: 6 × median edge length of the mesh (same rule as the worker's seed patch). */
 let autoPick: { uuid: string; r: number } | null = null;
@@ -640,7 +641,8 @@ function ctxSpec(): CtxSpec | null {
   if (m.kind === 'dist') return distSpec(m);
   if (m.kind === 'con') return conSpec(m);
   if (m.kind === 'anchor') return anchorSpec();
-  const seg = `<span class="cp-seg"><button data-a="click" class="${m.method === 'Klick' ? 'on' : ''}">👆 ${tt('Click & grow')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}">🖌 ${tt('Brush')}</button></span>`;
+  // selection method – the user's choice: Click & grow | Add region (same intelligence, every click adds a region) | Brush only
+  const seg = `<span class="cp-seg cp-selm"><button data-a="click" class="${m.method === 'Klick' && !state.opts.multi ? 'on' : ''}" title="${tt('Click & grow: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected or fitted as the chosen type')}">👆 ${tt('Click & grow')}</button><button data-a="addreg" class="${m.method === 'Klick' && state.opts.multi ? 'on' : ''}" title="${tt('Add region: every click grows a further region (same intelligence as Click & grow); the union of all regions is fitted (plane, cylinder, cone, sphere). For split or interrupted faces.')}">＋ ${tt('Add region')}</button><button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}" title="${tt('Brush only: paint exactly the points to use – no region growing')}">🖌 ${tt('Brush')}</button></span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   // aux plane for circle / slot / line (also when Auto detected one): Full plane | Local ring (+ gap/width), All inside boundary
   const AUXT = ['Kreis', 'Langloch', 'Linie'], auxable = m.method === 'Klick' && (p ? !!p.aux && AUXT.includes(p.fit.type) : AUXT.includes(m.type as string) || m.type === 'auto');
@@ -650,7 +652,7 @@ function ctxSpec(): CtxSpec | null {
     + auxPlaneSel(ao) + (ao === 'none' ? `<span class="cp-hint">${tt('None (3D fit)')}</span>` : '') : '';
   const pick = `<span class="cp-pick" title="${tt('Pick radius [mm]: the circle at the cursor is the seed area of Click & grow – the region starts from the surface inside it. For circles/slots/lines place it across the edge between hole wall and plane (the transition must lie inside the circle). Desktop: Alt + mouse wheel. Empty = automatic (6 × mesh edge length).')}">◎ r <button type="button" data-pk="-">−</button><input class="cp-pick-v" data-num="abs" value="${state.opts.pick || ''}" placeholder="${tt('auto')} ${pickR()}" inputmode="decimal"><button type="button" data-pk="+">＋</button></span>`;
   const ctl = m.method === 'Klick'
-    ? `${seg}${type}${p ? '' : pick}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `<button data-a="multi" class="${state.opts.multi ? 'on' : ''}" title="${tt('Add more regions to this feature (plane, cylinder, cone, sphere): click further faces (or Shift+click) – the union of all regions is fitted. Also for split or interrupted areas.')}">＋ ${tt('Add region')}${p.regions ? ` (${p.regions.length})` : ''}</button>${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}`
+    ? `${seg}${type}${p ? '' : pick}${(p ? p.fit.type : m.type) === 'Linie' ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux ? `${p.regions ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${p.regions ? `<button data-a="unregion" title="${tt('Remove the last added region')}">↶ ${tt('Region')}</button>` : ''}` : ''}${auxCtl}${(p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto') ? `<button data-a="fill" class="${state.opts.fill.on ? 'on' : ''}" title="${tt('Capture all points inside outer boundary: region growing only finds the outer contour of the face; then ALL points inside it within the band are taken – bumps, spatter, burrs and craters included (needed for flatness). Real openings, bore walls and the opposite side stay out. Outlier filters are off.')}">⬚ ${tt('All inside boundary')}</button>${state.opts.fill.on ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}` : ''}`
     : `${seg}${type}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -673,7 +675,7 @@ function ctxSpec(): CtxSpec | null {
     controls: ctl + dsel + pars, stats: p ? previewStats(p) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
-        if (a === 'click') setMethod('Klick'); else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'fill') { setContour(!state.opts.fill.on); applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
+        if (a === 'click' || a === 'addreg') { const was = state.opts.multi; state.opts.multi = a === 'addreg'; if (m.method !== 'Klick') setMethod('Klick'); else if (was !== state.opts.multi) { renderModeBar(); renderHint(); } } else if (a === 'brush') setMethod('Pinsel'); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'multi') { state.opts.multi = !state.opts.multi; renderModeBar(); renderHint(); } else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'fill') { setContour(!state.opts.fill.on); applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const pv = state.preview!; const rg = pv.regions!.slice(0, -1); refitRegions(rg, pv.hit).then(() => renderAll()); } }));
       el.querySelectorAll<HTMLButtonElement>('[data-pk]').forEach((b) => (b.onclick = () => setPickR(pickR() * (b.dataset.pk === '+' ? 1.25 : 0.8))));
       el.querySelectorAll<HTMLInputElement>('.cp-pick-v').forEach((i) => (i.onchange = () => { const v = parseNum(i.value); setPickR(v && v > 0 ? v : 0); }));
       el.querySelectorAll<HTMLButtonElement>('[data-side]').forEach((b) => (b.onclick = async () => { state.opts.lineSide = Number(b.dataset.side) as 0 | 1;
@@ -737,6 +739,7 @@ async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: '
   renderAll();
 }
 async function previewByClick(h: Hit, add = false) {
+  seedFeedback(h);
   // phones: the Creation Panel sits at the bottom – close bottom sheets / drawers that would cover it
   if (isPhone()) { togglePanel('dialog', false); togglePanel('table', false); }
   const m = state.mode as FitMode;
@@ -846,6 +849,9 @@ async function refitRegions(regions: Uint32Array[], hit?: Hit, type: GeomType = 
   const r = await busy(engine.call<any>({ op: 'fit', indices: idx, type }));
   state.preview = { fit: r.fit, indices: r.indices, candidates: [], method: 'Klick', hit, regions: regions.length > 1 ? regions : undefined };
 }
+/** Seed area feedback: the triangles inside the pick circle at the click/tap (desktop shows it on hover already; on
+ *  touch devices it is the only feedback where the region starts) – stays until the next hover/tap or the preview ends. */
+function seedFeedback(h: Hit) { if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { lastHit = h; viewer.showCursor(h, pickR(), true); } }
 async function previewByClickAs(h: Hit, t: GeomType | 'auto') {
   const m = state.mode as FitMode; const old = m.type; m.type = t; await previewByClick(h); m.type = old;
 }
@@ -883,6 +889,7 @@ async function refitPreview(t: GeomType | 'auto') {
 
 function commitPreview() {
   const p = state.preview; if (!p) return;
+  viewer.showCursor(null, 1); // seed feedback ends with the preview
   const t = p.fit.type;
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
   const f: FeatureView = {
@@ -894,7 +901,7 @@ function commitPreview() {
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = x.outlierOn ? x.outlierK : 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
     if (p.zone && GEOM_ZONE.includes(t)) { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands }; } }
-  if (p.regions) { f.hit = undefined; state.opts.multi = false; }
+  if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -1977,8 +1984,9 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
       <p class="note">${dk === 'plane' ? tt('Plane as datum: defines a direction (normal) and location.') : dk === 'axis' ? tt('Axis as datum (hole/shaft): defines axis direction and location.') : tt('Center point as datum.')}
         <button class="linkbtn" id="dt-training">🎓 ${tt('Training mode: datums')}</button></p>`, true) : ''}
     ${dsec('sel', '① ' + tt('Point selection'), `${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${selectionParamsHTML(f)}`, true)}
-    ${reexHTML(f) ? dsec('flt', '② ' + tt('Extraction & filters'), reexHTML(f), true) : dsec('flt', '② ' + tt('Filters'), filterParamsHTML(f), true)}
-    ${f.type !== 'Abstand' && !f.cons ? dsec('fit', '③ ' + tt('Fit'), fitParamsHTML(f), true) : ''}
+    ${reexHTML(f) ? '' : dsec('flt', '② ' + tt('Filters'), filterParamsHTML(f), true)}
+    ${f.type !== 'Abstand' && !f.cons ? dsec('fit', (reexHTML(f) ? '② ' : '③ ') + tt('Fit'), fitParamsHTML(f), true) : ''}
+    ${reexHTML(f) ? dsec('adv', '⚙ ' + tt('Advanced · Re-extraction'), `<p class="note">${tt('Rarely needed: re-extract the points of this actual feature with other parameters.')}</p>${reexHTML(f)}`, false) : ''}
     <p class="note">${tt('Geometric properties of the actual feature (points, RMS, flatness, position, direction …):')} <button class="linkbtn" id="d-props">ⓘ ${tt('Actual – read-only info…')}</button></p>
     <div><button class="btn" id="d-center">⌖ ${tt('Center')}</button><button class="btn" id="d-addctrl">＋ ${tt('Control …')}</button><button class="btn" id="d-an">◐ ${tt('Analyze deviation')}</button><button class="btn" id="d-del">${tt('Delete feature')}</button></div>`;
   d.querySelector('#dt-apply')?.addEventListener('click', () => setDatum(f, ($('#dt-letter') as HTMLSelectElement).value));

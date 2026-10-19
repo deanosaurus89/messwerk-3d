@@ -7,7 +7,7 @@ import { MeshTopology, brushSelect, gather } from './core/region';
 import { FitCrit, applyCrit, critSupported, formByCrit } from './core/chebyshev';
 import { autoFit, fitType, FitResult, GeomType, modelNormal, normalFilter, NormalFilter, signedDistance } from './core/fit';
 import type { Vec3 } from './core/linalg';
-import { autoExtract, extractLine, extractWithAuxPlane } from './core/aux';
+import { autoExtract, extractAtRim, extractLine, extractWithAuxPlane } from './core/aux';
 import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
@@ -198,7 +198,8 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       }
     } else if (req.op === 'aux') {
       if (!topo) throw new Error('The auxiliary plane needs a polygon model (triangles).');
-      let r = extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0, seedR: req.seedR }, req.type, req.plane, Infinity, req.ring);
+      let r = req.plane ? extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0, seedR: req.seedR }, req.type, req.plane, Infinity, req.ring)
+        : extractAtRim(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0, seedR: req.seedR }, req.type, bounds(mesh!).diag, req.ring);
       const af = auxFill(r, req);
       if (af) r = { ...extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, af.plane, Infinity), plane: af.plane, planeIdx: af.indices };
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx, raised: af?.raised, contour: af?.contour, filled: af?.added } };

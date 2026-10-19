@@ -20,7 +20,7 @@ const CASES = [
   ['Hole Ø12.08 (cylinder)', 'Zylinder', [20, 26.04, 15], [0, -1, 0], { type: 'Zylinder', size: [['diameter', 12.08, 0.01]], axis: [0, 0, 1], cxy: [20, 20] }],
   ['Boss Ø16 (cylinder)', 'Zylinder', [63.05, 30, 26], [1, 0, 0], { type: 'Zylinder', size: [['diameter', 16, 0.01]], axis: [0, 0, 1], cxy: [55.05, 30] }],
   ['Circle Ø12.08 (tap on plane at rim)', 'Kreis', [20, 26.84, 20], [0, 0, 1], { type: 'Kreis', size: [['diameter', 12.08, 0.01]], axis: [0, 0, 1], cxy: [20, 20], aux: true }],
-  ['Circle Ø6 (tap on plane at rim)', 'Kreis', [85 + 3.8 * Math.cos(3.5), 10 + 3.8 * Math.sin(3.5), 20], [0, 0, 1], { type: 'Kreis', size: [['diameter', 6, 0.01]], axis: [0, 0, 1], cxy: [85, 10], aux: true }],
+  ['Circle Ø6 (tap on wall at rim)', 'Kreis', [85 + 3 * Math.cos(-1), 10 + 3 * Math.sin(-1), 19.2], [-Math.cos(-1), -Math.sin(-1), 0], { type: 'Kreis', size: [['diameter', 6, 0.01]], axis: [0, 0, 1], cxy: [85, 10], aux: true }],
   ['Slot 30×10', 'Langloch', [20, 39.2, 20], [0, 0, 1], { type: 'Langloch', size: [['length', 30, 0.02], ['width', 10, 0.01]], axis: [0, 0, 1], cxy: [20, 45], aux: true }],
   ['Cone R10→4 h10', 'Kegel', [89, 38, 25], nz([10, 0, 6]), { type: 'Kegel', size: [['halfAngleDeg', Math.atan(6 / 10) * 180 / Math.PI, 0.05]], axis: [0, 0, 1], cxy: [82, 38] }],
   ['Sphere R7', 'Kugel', [60, 8, 24], [0, 0, 1], { type: 'Kugel', size: [['radius', 7, 0.01]], c3: [60, 8, 17] }],

@@ -237,6 +237,40 @@ export function segmentedRim(mesh: MeshData, topo: MeshTopology, seedTri: number
   return null;
 }
 
+/** Typed circle/slot Click & grow (0.28): the tap only has to lie roughly at the rim (pick circle across the transition).
+ *  1) aux extraction from the tapped face; 2) restart from triangles on the OTHER side of the edge inside the pick
+ *  circle (e.g. tap on a flat facet strip of the wall → restart on the plane, tap on the plane → restart on the wall);
+ *  3) rim segmentation like Auto. The first plausible result with wall AND aux-plane points wins. */
+export function extractAtRim(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
+  type: 'Kreis' | 'Langloch', diag: number, ring?: AuxRing): AuxResult {
+  const ok = (r: AuxResult | null): r is AuxResult => !!r && r.planeIdx.length >= 20 && r.wallIdx.length >= 20;
+  const go = { ...o, radius: 0 };
+  let err: unknown = null;
+  try { const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, go, type, undefined, Infinity, ring); if (ok(r)) return r; } catch (e) { err = e; }
+  const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag));
+  const R = Math.max(3 * topo.localEdge(seedTri), 1.5 * T); // a little beyond the pick circle: a tap at its edge still counts
+  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true });
+  const fn = mesh.faceNormals!, P = mesh.positions, F = mesh.indices;
+  const sn: Vec3 = [fn[3 * seedTri], fn[3 * seedTri + 1], fn[3 * seedTri + 2]];
+  const cand: [number, number][] = [];
+  for (const t of tris) {
+    if (t === seedTri) continue; // slivers allowed (long facet strips of a coarse hole wall), but tried last
+    if (Math.abs(fn[3 * t] * sn[0] + fn[3 * t + 1] * sn[1] + fn[3 * t + 2] * sn[2]) > 0.5) continue; // same side of the edge
+    let cx = 0, cy = 0, cz = 0; for (let k = 0; k < 3; k++) { const v = F[3 * t + k]; cx += P[3 * v]; cy += P[3 * v + 1]; cz += P[3 * v + 2]; }
+    cand.push([t, Math.hypot(cx / 3 - seedPoint[0], cy / 3 - seedPoint[1], cz / 3 - seedPoint[2]) + (topo.sliver[t] ? 1e3 : 0)]);
+  }
+  cand.sort((a, b) => a[1] - b[1]);
+  // nearest first, then spread out (the triangles right at the edge often grow into a chamfer)
+  const tries = cand.length <= 12 ? cand : [...cand.slice(0, 6), ...[0.15, 0.3, 0.5, 0.7, 0.85, 1].map((q) => cand[Math.floor(q * (cand.length - 1))])];
+  for (const [t] of new Map(tries)) {
+    const v = F[3 * t]; const sp: Vec3 = [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+    // restart seed is a single triangle on the other face: no pick circle there (it would pull in the tapped side again)
+    try { const r = tryExtractWithAuxPlane(mesh, topo, t, sp, { ...go, seedR: 0 }, type, undefined, 2 * R, ring); if (ok(r)) return r; } catch (e) { err ??= e; }
+  }
+  try { const r = segmentedRim(mesh, topo, seedTri, seedPoint, o, T); if (ok(r) && r.fit.type === type) return r; } catch { /* */ }
+  throw err instanceof Error ? err : new Error('No plane/hole transition near the tap – place the pick circle across the edge');
+}
+
 export interface LineResult {
   fit: FitResult; plane: FitResult;
   wallIdx: Uint32Array; planeIdx: Uint32Array;

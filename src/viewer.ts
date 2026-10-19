@@ -423,11 +423,12 @@ export class Viewer {
     const bt = (this.model?.geometry as any)?.boundsTree;
     if (highlight && bt) {
       const c = new THREE.Vector3(...hit.point), n = new THREE.Vector3(...hit.normal), sph = new THREE.Sphere(c, radius); const out: number[] = [];
-      const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fnrm = new THREE.Vector3();
+      const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fnrm = new THREE.Vector3(), cam = this.camera.position.clone();
       bt.shapecast({ intersectsBounds: (box: THREE.Box3) => box.intersectsSphere(sph),
         intersectsTriangle: (t: any) => { if (out.length > 9 * 60000) return true;
           if (t.a.distanceTo(c) > radius && t.b.distanceTo(c) > radius && t.c.distanceTo(c) > radius) return false;
-          fnrm.crossVectors(e1.subVectors(t.b, t.a), e2.subVectors(t.c, t.a)); if (fnrm.dot(n) <= 0) return false;
+          // facing the camera (not only parallel to the tapped face): the hole wall next to a plane is part of the seed area
+          fnrm.crossVectors(e1.subVectors(t.b, t.a), e2.subVectors(t.c, t.a)); if (fnrm.dot(e1.subVectors(cam, t.a)) <= 0 && fnrm.dot(n) <= 0) return false;
           out.push(t.a.x, t.a.y, t.a.z, t.b.x, t.b.y, t.b.z, t.c.x, t.c.y, t.c.z); return false; } });
       if (out.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
         this.brushHi = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
