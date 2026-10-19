@@ -452,8 +452,10 @@ export function robustVertexNormals(m: MeshData, vt: { offsets: Uint32Array; tri
       if (weighted && nb <= W.length) {
         const sc = ROBUST_S * R, s2 = sc * sc; let cxw = cx, cyw = cy, czw = cz;
         let rr = 0; for (let i = 0; i < nb; i++) { const w = q[i]; const d = (p[3 * w] - px - cx) * x + (p[3 * w + 1] - py - cy) * y + (p[3 * w + 2] - pz - cz) * z; rr += d * d; }
-        if (Math.sqrt(rr / nb) > 0.5 * sc) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
-        for (let iter = 0; iter < 3; iter++) {
+        const rms0 = Math.sqrt(rr / nb);
+        // alle Nachbarn liegen schon eng an der Ebene (rms < 0,2·s): Gewichte ≈ 1, Ergebnis = ungewichteter Fit -> Iteration sparen
+        if (rms0 > 0.5 * sc) { cxw = 0; cyw = 0; czw = 0; x = vn[3 * v]; y = vn[3 * v + 1]; z = vn[3 * v + 2]; }
+        for (let iter = 0; iter < (rms0 < 0.2 * sc ? 0 : 3); iter++) {
           let sw = 0, mx = 0, my = 0, mz = 0;
           for (let i = 0; i < nb; i++) { const w = q[i]; const dx = p[3 * w] - px, dy = p[3 * w + 1] - py, dz = p[3 * w + 2] - pz; const d = (dx - cxw) * x + (dy - cyw) * y + (dz - czw) * z;
             const wt = 1 / (1 + (d * d) / s2); W[i] = wt; sw += wt; mx += wt * dx; my += wt * dy; mz += wt * dz; }
