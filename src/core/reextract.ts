@@ -98,7 +98,13 @@ export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uin
       let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity; const uv: number[] = [];
       for (let i = 0; i < current.length; i++) { const w = sub(P3(pos, current[i]), c), a = dot(w, u), b = dot(w, v); uv.push(a, b); a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
       const off = m - (p.inset ?? 0), area = Math.max(1e-6, (a1 - a0) * (b1 - b0));
-      let h = tris ? Math.min(1, Math.max(0.05, 0.7 * Math.sqrt(area / current.length))) : Math.max(0.05, 1.5 * Math.sqrt(area / current.length));
+      // cell size: with triangles, a fraction of the median edge of the region's own triangles (finer contour than the
+      // bounding-box estimate). Exact membership at offset ≤ 0 is decided per vertex in reextract().
+      let h = Math.max(0.05, 1.5 * Math.sqrt(area / current.length));
+      if (tris) { const mk0 = new Uint8Array(pos.length / 3); for (let i = 0; i < current.length; i++) mk0[current[i]] = 1; const E: number[] = [];
+        const step = Math.max(3, 3 * Math.floor(tris.length / 3 / 20000));
+        for (let t = 0; t + 2 < tris.length; t += step) { const a = tris[t], b = tris[t + 1], c2 = tris[t + 2]; if (mk0[a] && mk0[b] && mk0[c2]) E.push(Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2])); }
+        E.sort((x, y) => x - y); const me = E[E.length >> 1]; h = me ? Math.min(1, Math.max(0.02, 0.35 * me)) : Math.min(1, Math.max(0.05, 0.7 * Math.sqrt(area / current.length))); }
       const ext = Math.max(0, off) + 2 * h;
       while (((a1 - a0 + 2 * ext) / h + 4) * ((b1 - b0 + 2 * ext) / h + 4) > 4e6) h *= 1.4;
       const pad = Math.ceil(Math.max(0, off) / h) + 2, i0 = Math.floor(a0 / h) - pad, j0 = Math.floor(b0 / h) - pad, W = Math.ceil(a1 / h) + pad - i0 + 1, H = Math.ceil(b1 / h) + pad - j0 + 1;
@@ -152,7 +158,14 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   let dispR: SearchRegion = R0; // shown zone (with fill + inset: the zone of the final points)
   const cosA = p.angleOn === false ? -2 : Math.cos((p.maxAngleDeg * Math.PI) / 180), N = pos.length / 3, outl = p.sigmaOn !== false && p.sigma > 0;
   // candidates of the region (region fixed from the start geometry; the distance test is part of the region)
-  const cands: number[] = []; for (let v = 0; v < N; v++) { const q = P3(pos, v); if (inRegion(Rc, q) && trimPass(p.trims, q)) cands.push(v); }
+  // Plane zone not grown outward (lateral extension − exclusion ≤ 0): the zone is exactly the grown region, i.e. only the
+  // region's own vertices (eroded by the exclusion distance). The raster alone is not exact on anisotropic scan meshes
+  // (dense along scan lines, ~1 mm between them): an occupied cell also held not-grown neighbours, so the zone collected
+  // ~27k instead of 14.7k points. Gap filling (All inside boundary) is unchanged – it fills from the contour separately.
+  const offR = lateralOf(p) - (Rc === R0 ? (p.inset ?? 0) : 0);
+  let own: Uint8Array | null = null;
+  if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
+  const cands: number[] = []; for (let v = 0; v < N; v++) { if (own && !own[v]) continue; const q = P3(pos, v); if (inRegion(Rc, q) && trimPass(p.trims, q)) cands.push(v); }
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];

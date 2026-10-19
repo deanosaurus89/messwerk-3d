@@ -98,3 +98,17 @@ describe('zone trims (lasso)', () => {
     expect(trimPass(undefined, [0, 0, 0])).toBe(true);
   });
 });
+
+describe('plane zone at offset 0 equals the grown region (anisotropic scan mesh)', () => {
+  it('does not collect not-grown neighbours of a perforated region', () => {
+    // scan-line mesh: 0.05 mm along x, 1 mm between lines; region = every vertex except a pseudo-random 40 %
+    const nx = 200, ny = 30, pos: number[] = [], nrm: number[] = [], tris: number[] = []; let s = 7; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { pos.push(i * 0.05, j, 0); nrm.push(0, 0, 1); }
+    for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) { const a = j * nx + i; tris.push(a, a + 1, a + nx, a + 1, a + nx + 1, a + nx); }
+    const cur = Uint32Array.from(Array.from({ length: nx * ny }, (_, k) => k).filter(() => rnd() > 0.4));
+    const fit0: any = { type: 'Ebene', center: [5, 15, 0], normal: [0, 0, 1], rms: 0, form: 0 };
+    const r = reextract(fit0, pos, nrm, cur, { maxDist: 0.1, sigma: 3, sigmaOn: false, maxAngleDeg: 30, angleOn: false, margin: 0, inset: 0 }, [], tris);
+    expect(r.indices.length).toBe(cur.length);
+    const G = new Set(cur); expect([...r.indices].every((v) => G.has(v))).toBe(true);
+  });
+});
