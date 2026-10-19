@@ -1,3 +1,4 @@
+import { registerPickTool, installPickMode } from './ui/pickmode';
 import { gunzipSync } from 'fflate';
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
@@ -535,7 +536,7 @@ function setPickR(v: number | 0) {
   for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.value = state.opts.pick ? String(state.opts.pick) : '';
   for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.placeholder = `${tt('auto')} ${pickR()}`;
   if (lastHit && areaMode()) viewer.showCursor(lastHit, pickR(), true);
-  status(tt('Pick radius r = {0} mm{1} – seed area of Click & grow (Alt+mouse wheel; empty = automatic).', pickR(), state.opts.pick ? '' : ' (' + tt('auto') + ')'));
+  status(tt('Pick radius r = {0} mm{1} – seed area of Click & grow (mouse wheel; empty = automatic).', pickR(), state.opts.pick ? '' : ' (' + tt('auto') + ')'));
 }
 /** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
 const brushActive = () => pe.tool === 'erase' || (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel');
@@ -545,19 +546,14 @@ function setBrushRadius(v: number) {
   if (pe.tool === 'erase') { pe.radius = v; for (const id of ['#pe-rad-n', '#pe-rad-r']) { const el = document.querySelector<HTMLInputElement>(id); if (el) el.value = String(v); } }
   else { state.opts.brush = v; const el = document.querySelector<HTMLInputElement>('#d-brush'); if (el) el.value = String(v); const mb = document.querySelector('#mb-brush-r'); if (mb) mb.textContent = String(v); }
   if (lastHit) viewer.showCursor(lastHit, v, true);
-  status(`Pinselradius ${v} mm (Mausrad; Strg+Mausrad = Zoom).`);
+  status(tt('Brush radius {0} mm (mouse wheel; Space = navigation).', v));
 }
-canvas.parentElement!.addEventListener('wheel', (e) => {
-  // Click & grow: the wheel ZOOMS (as everywhere); Alt+wheel = pick radius. (Before, the plain wheel
-  // changed the area r – after a zoom the cursor showed a circle like the brush and growing was limited to r.)
-  if (navPaused) return;
-  if (areaMode() && pe.tool !== 'erase' && e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); setPickR(pickR() * Math.pow(1.1, (e.deltaY || e.deltaX) > 0 ? -1 : 1)); return; }
-  if (areaMode() && pe.tool !== 'erase') return; // 0.33: growth limit r removed – Shift+wheel no longer used
-  else if (!brushActive() || e.ctrlKey || e.metaKey) return; // Strg/⌘ + Rad: normal zoomen
-  e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-  const cur = pe.tool === 'erase' ? pe.radius : areaMode() ? state.opts.radius || (state.data?.diag ?? 100) / 30 : state.opts.brush;
-  setBrushRadius(cur * Math.pow(1.1, (e.deltaY || e.deltaX) > 0 ? -1 : 1));
-}, { capture: true, passive: false });
+// 0.38 Pick-Modus: in der Feature-Erstellung (Auto/typisiert, Klick & Wachsen) und bei Pinsel/Radierer ändert die Maus die
+// Ansicht nicht; das Mausrad ändert den Pick-/Pinselradius. Leertaste = Navigation (und zurück).
+registerPickTool({ name: 'erase', active: () => pe.tool === 'erase', wheel: (d) => setBrushRadius(pe.radius * Math.pow(1.1, d)) });
+registerPickTool({ name: 'brush', active: () => state.mode?.kind === 'fit' && state.mode.method === 'Pinsel', wheel: (d) => setBrushRadius(state.opts.brush * Math.pow(1.1, d)) });
+registerPickTool({ name: 'grow', active: () => areaMode(), wheel: (d) => setPickR(pickR() * Math.pow(1.1, d)) });
+installPickMode(canvas.parentElement!, viewer.controls, () => navPaused);
 // Ctrl+Rad soll im Pinselmodus zoomen statt die Seite zu skalieren: OrbitControls übernimmt (preventDefault dort)
 // ---- Live-Vorschau Hilfsebene (Kreis/Langloch per Klick): Ebenenpunkte blau, Wandpunkte orange
 let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
@@ -1926,7 +1922,7 @@ function renderHint() {
   if (m.kind === 'dist') return hint(m.slot === 0 ? tt('Distance: pick the first feature in the 3D view or the tree.') : tt('Distance: pick the second feature in the 3D view or the tree.'));
   if (state.preview && state.opts.multi && MULTI_TYPES.includes(state.preview.fit.type)) return hint(tt('Add region: click further faces of the {0} (Shift+click also works), then ✓ create.', typeName(state.preview.fit.type)));
   if (state.preview) return hint(tt('Preview – check the values, then ✓ create or ✕ discard.'));
-  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface – the circle is the pick radius (seed area; for circles place it across the hole edge). Wheel = zoom · Alt+wheel = pick radius.', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
+  if (m.method === 'Klick') return hint(tt('{0}: click/tap on the surface – the circle is the pick radius (seed area; for circles place it across the hole edge). Pick mode: the mouse does not move the view – wheel = pick radius, Space = navigation.', m.type === 'auto' ? tt('Auto detection') : typeName(m.type)));
   hint('');
 }
 
@@ -2938,7 +2934,7 @@ $('#btn-help').onclick = () => {
   ($('#hv-train') as HTMLButtonElement).onclick = () => { el.classList.add('hidden'); startTraining(); };
 };
 const HELP_HTML = `<h3>Navigation (mouse)</h3><ul><li>Drag with the <b>left button</b>: rotate · <b>middle button</b> (wheel pressed) or right button: pan · <b>mouse wheel</b>: zoom.</li>
-<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li>Click & grow: the circle at the cursor is the <b>pick radius</b> (seed area). <b>Alt + wheel</b> resizes it and the plain wheel zooms. On phones use the ◎ r − / ＋ stepper in the Creation Panel.</li><li>Brush tools: the <b>mouse wheel changes the brush radius</b> (shown live), <b>Ctrl+wheel</b> zooms. Click &amp; grow: the wheel zooms, <b>Shift+wheel</b> changes the growth limit r.</li>
+<li><b>Space</b> (desktop): navigation pause – in any tool the mouse only rotates/pans/zooms; Space again continues with exactly the same tool, panel and selection. Ignored while typing in a field.</li><li><b>Pick mode</b> (desktop, 0.38): while creating a feature (Auto, typed Click & grow, brush, eraser) the mouse does <b>not</b> change the view – clicks pick, the <b>mouse wheel changes the pick/brush radius</b>. Press <b>Space</b> for navigation (rotate/pan/zoom) and Space again to continue picking. On phones use the ◎ r − / ＋ stepper in the Creation Panel.</li>
 <li>Circle/slot/line by click with auxiliary plane: hover preview – <b style="color:#2f7de1">blue</b> auxiliary plane, <b style="color:#ff8c1a">orange</b> wall points.</li><li>Touch: one finger rotates, two fingers zoom/pan.</li>
 <li>Every tool shows its controls and ↶ ↷ ✕ ✓ in the Action Bar (bottom of the 3D view). The Dialog shows the object selected in the tree or 3D view.</li></ul>
 <h3>Assign a datum (ISO 5459)</h3><ol><li>Select a feature (plane, cylinder/hole, circle, cone, slot, torus, sphere, line).</li>
