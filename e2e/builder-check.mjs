@@ -37,6 +37,27 @@ for (const [name, vp, mob] of [['desktop', { width: 1400, height: 900 }, false],
     const ba = await p.evaluate(() => ({ m: window.__app.state.mode.method, t: window.__app.state.mode.type, c: window.__app.state.brushCount }));
     ok(ba.m === 'Pinsel' && ba.t === pv.t && ba.c === pv.n, `${name}: Brush add keeps selection + type ${JSON.stringify(ba)}`);
   }
+  // Hilfsebenen-Optionen für eine von Smart Detect erkannte Bohrung (Kreis) – auch ohne vorher gewählten Typ
+  await p.evaluate(() => { const A = window.__app; A.state.preview = null; A.startFitMode('auto'); }); await p.waitForTimeout(400);
+  const hole = [-99.2, 205.5, 8]; let auxOk = null; // Rundung bei (−99, 205) – Auto erkennt Kreis in Hilfsebene
+  // Wandpunkte der Bohrung (Normale waagerecht, nahe der Achse) aus der Geometrie; Blick schräg auf die Wand
+  const cands = await p.evaluate((C) => { const g = window.__app.viewer.model.geometry, P = g.attributes.position.array, N = g.attributes.normal.array, out = [];
+    for (let i = 0; i < P.length / 3 && out.length < 400; i += 1) { const dx = P[3*i] - C[0], dy = P[3*i+1] - C[1], r = Math.hypot(dx, dy);
+      if (r > 1.5 && r < 9 && Math.abs(N[3*i+2]) < 0.1 && Math.abs(N[3*i] * dx + N[3*i+1] * dy) > 0.9 * r) out.push([P[3*i], P[3*i+1], P[3*i+2], N[3*i], N[3*i+1]]); }
+    return out.filter((_, k) => k % 40 === 0); }, hole);
+  console.log('  hole wall candidates', cands.length);
+  for (const c of cands) {
+    const xy = await p.evaluate((c) => { const { viewer } = window.__app; viewer.viewDir([c[3], c[4], 1.2]); viewer.focus([c[0], c[1], c[2]], 30);
+      const v = viewer.camera.position.clone().set(c[0], c[1], c[2]).project(viewer.camera); const r = viewer.renderer.domElement.getBoundingClientRect();
+      const x = Math.floor(r.left + (v.x + 1) / 2 * r.width), y = Math.floor(r.top + (1 - v.y) / 2 * r.height); const h = viewer.pick(x, y);
+      return h && document.elementFromPoint(x, y) === viewer.renderer.domElement && Math.hypot(h.point[0] - c[0], h.point[1] - c[1], h.point[2] - c[2]) < 0.6 ? [x, y] : null; }, c);
+    if (!xy) continue;
+    mob ? await p.touchscreen.tap(xy[0], xy[1]) : await p.mouse.click(xy[0], xy[1]); await p.waitForTimeout(6000);
+    auxOk = await p.evaluate(() => { const v = window.__app.state.preview; return v ? { t: v.fit.type, aux: !!document.querySelector('.cp-aux') } : null; });
+    if (auxOk && ['Kreis', 'Langloch'].includes(auxOk.t)) break;
+    await p.evaluate(() => { window.__app.state.preview = null; });
+  }
+  ok(auxOk && ['Kreis', 'Langloch'].includes(auxOk.t) && auxOk.aux, `${name}: aux-plane options for a detected circle ${JSON.stringify(auxOk)}`);
   await p.screenshot({ path: `/tmp/builder-${name}.png` });
 }
 await b.close(); console.log(fail ? `FAILED ${fail}` : 'ALL PASS'); process.exit(fail ? 1 : 0);
