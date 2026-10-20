@@ -269,13 +269,15 @@ export class MeshTopology {
       for (const ty of ['Zylinder', 'Kugel', 'Kegel'] as GeomType[]) { try { const c = fitType(ty, P, N); if (c.rms < lim) return c.rms; } catch { /* weiter */ } }
       const r = autoFit(P, N); const c = [r.best, ...r.candidates].filter((x) => x && x.type !== 'Freiformfläche' && isFinite(x.rms)).map((x) => x.rms); return c.length ? Math.min(...c) : null; } catch { return null; }
   }
+  /** Normale für das fit-geführte Wachsen: die einheitliche kantenbewusste Dreiecksnormale (0.38.1; vorher NF = geglättet) */
+  GN(t: number): Float32Array { return GNF ? this.NF(t) : this.N(t); }
   growFit(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
     const m = this.mesh, f = m.indices, p = m.positions, nt = f.length / 3, fa = m.faceAreas!, fn = m.faceNormals!;
     const cosA = Math.cos((Math.max(1, o.maxAngleDeg) * Math.PI) / 180);
     const r2 = o.radius > 0 ? o.radius * o.radius : Infinity;
     const vpos = (v: number): Vec3 => [p[3 * v], p[3 * v + 1], p[3 * v + 2]];
     const inRad = (t: number) => { if (r2 === Infinity) return true; const a = 3 * f[3 * t]; return (p[a] - seedPoint[0]) ** 2 + (p[a + 1] - seedPoint[1]) ** 2 + (p[a + 2] - seedPoint[2]) ** 2 <= r2; };
-    const dotS = (a: number, b: number) => { this.NF(a); const N = this.NF(b); return N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2]; };
+    const dotS = (a: number, b: number) => { this.GN(a); const N = this.GN(b); return N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2]; };
     const dotN = (N: Float32Array, a: number, b: number) => N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2];
     // 1) lokale Kantenlänge
     const near: number[] = []; { const seen = new Set([seedTri]), q = [seedTri]; while (q.length && near.length < 150) { const t = q.shift()!; near.push(t); for (const u of this.neighbors(t)) if (!seen.has(u)) { seen.add(u); q.push(u); } } }
@@ -286,7 +288,7 @@ export class MeshTopology {
     { const q = [seedTri]; sMark[seedTri] = 1; while (q.length) { const t = q.shift()!; seed.push(t); for (const u of this.neighbors(t)) { if (sMark[u]) continue; const c = this.cen(u);
       if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R0 * R0) continue; if (dotS(seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
     const ptsOf = (tris: ArrayLike<number>, max = 3000) => { const seenV = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = []; const step = Math.max(1, Math.floor(tris.length / max));
-      for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seenV.has(v)) continue; seenV.add(v); P.push(vpos(v)); } N.push([this.NF(t)[3 * t], this.NF(t)[3 * t + 1], this.NF(t)[3 * t + 2]]); }
+      for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seenV.has(v)) continue; seenV.add(v); P.push(vpos(v)); } N.push([this.GN(t)[3 * t], this.GN(t)[3 * t + 1], this.GN(t)[3 * t + 2]]); }
       // Normalen je Punkt: Dreiecksnormale genügt für Achs-/Typbestimmung (Länge kann von P abweichen)
       return { P, N }; };
     const fitOf = (tris: ArrayLike<number>, type: GeomType | 'auto'): FitResult | null => {
@@ -311,8 +313,13 @@ export class MeshTopology {
     // Sinnprüfung des Saatmodells: Krümmungsradius nicht viel kleiner als der Fleck (sonst Rauschen/Kante)
     if (model && (model.type === 'Zylinder' || model.type === 'Kugel') && (model.radius ?? 0) > 400 * R0) model = fitOf(seed, 'Ebene');
     const resid = (mdl: FitResult, tris: ArrayLike<number>) => { const { P } = ptsOf(tris, 1500); const a = P.map((q) => Math.abs(modelDist(mdl, q))).sort((x, y) => x - y); return 1.4826 * (a[a.length >> 1] ?? 0); };
-    const angOf = (mdl: FitResult, tris: ArrayLike<number>) => { const a: number[] = []; for (let i = 0; i < tris.length; i += Math.max(1, Math.floor(tris.length / 800))) { const t = tris[i]; const c = this.cen(t); const mn = modelNormal(mdl, c);
-      a.push(Math.acos(Math.min(1, Math.abs(mn[0] * this.NF(t)[3 * t] + mn[1] * this.NF(t)[3 * t + 1] + mn[2] * this.NF(t)[3 * t + 2])))); } a.sort((x, y) => x - y); return a[Math.floor(a.length * 0.9)] ?? 0; };
+    // 0.38.1: Winkelstreuung FLÄCHENgewichtet – auf adaptiven Scans liegen viele kleine Dreiecke in den Verrundungen,
+    // eine Stückzahl-Quantile misst dann die Verrundung statt der Fläche (Toleranz lief auf 30°).
+    const angQ = (mdl: FitResult, tris: ArrayLike<number>, q: number) => { const a: [number, number][] = []; let W = 0; for (let i = 0; i < tris.length; i += Math.max(1, Math.floor(tris.length / 1500))) { const t = tris[i]; const mn = modelNormal(mdl, this.cen(t)); const n = this.GN(t);
+      const w = AW ? fa[t] : 1; W += w; a.push([Math.acos(Math.min(1, Math.abs(mn[0] * n[3 * t] + mn[1] * n[3 * t + 1] + mn[2] * n[3 * t + 2]))), w]); } a.sort((x, y) => x[0] - y[0]);
+      let c = 0; for (const [v, w] of a) { c += w; if (c >= q * W) return v; } return a.length ? a[a.length - 1][0] : 0; };
+    const angOf = (mdl: FitResult, tris: ArrayLike<number>) => angQ(mdl, tris, 0.9);
+    const angRob = (mdl: FitResult, tris: ArrayLike<number>) => 1.4826 * angQ(mdl, tris, 0.5);
     let pax: Vec3 | null = o.prismAxis ?? null;
     if (prism && !pax) { const N = ptsOf(seed).N; const a = axisFromNormals(N); // ebener Saat-Fleck: Achse unbestimmt -> Ebene wachsen
       let spread = 0; for (const q of N) spread = Math.max(spread, 1 - Math.abs(q[0] * N[0][0] + q[1] * N[0][1] + q[2] * N[0][2]));
@@ -320,14 +327,15 @@ export class MeshTopology {
     let sigma = model ? resid(model, seed) : 0; let tol0 = Math.min(Math.max(3 * sigma, 0.05 * h), 0.5 * h); let tol = tol0; // 0.36: 3σ (vorher 4σ), geprüft am Dreiecksschwerpunkt
     let angTol = model ? Math.min(Math.max(2.5 * angOf(model, seed), (10 * Math.PI) / 180), (30 * Math.PI) / 180) : (25 * Math.PI) / 180;
     if (prism) angTol = (12 * Math.PI) / 180;
+    const angTol0 = angTol;
     const info: GrowInfo = { model: prism ? 'Prisma' : model ? model.type : 'keins', h, sigma, tol, angDeg: (angTol * 180) / Math.PI, seedTris: seed.length, refits: 0, capped: false };
     const accept = (u: number): boolean => {
-      if (prism && pax) { const d = Math.abs(this.NF(u)[3 * u] * pax[0] + this.NF(u)[3 * u + 1] * pax[1] + this.NF(u)[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
+      if (prism && pax) { const d = Math.abs(this.GN(u)[3 * u] * pax[0] + this.GN(u)[3 * u + 1] * pax[1] + this.GN(u)[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
       if (!model) return true;
       // 0.36: Abstand zum mitwachsenden Fit < 3σ am Schwerpunkt (Rauschen /√3), jeder Knoten < 1,5 × Toleranz
       for (let k = 0; k < 3; k++) if (Math.abs(modelDist(model, vpos(f[3 * u + k]))) > 1.5 * tol) return false;
       if (Math.abs(modelDist(model, this.cen(u))) > tol) return false;
-      const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * this.NF(u)[3 * u] + mn[1] * this.NF(u)[3 * u + 1] + mn[2] * this.NF(u)[3 * u + 2]) > Math.cos(angTol);
+      const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * this.GN(u)[3 * u] + mn[1] * this.GN(u)[3 * u + 1] + mn[2] * this.GN(u)[3 * u + 2]) > Math.cos(angTol);
     };
     const inR = new Uint8Array(nt); const out: number[] = [seedTri]; inR[seedTri] = 1; let area = fa[seedTri];
     const cap = 0.6 * this.totalArea; let next = Math.max(40, seed.length * 1.6);
@@ -344,7 +352,10 @@ export class MeshTopology {
         if (area > cap) { info.capped = true; head = out.length; break; }
         if (out.length >= next && model && !prism) {
           // Neu-Fit auf der gewachsenen Region (folgt leichter Formabweichung), Toleranz bleibt am Saat-Rauschen verankert
-          const nm = fitOf(out, autoType && info.refits < 2 ? 'auto' : model.type); if (nm) { model = nm; info.refits++; const s2 = resid(nm, out); tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
+          const nm = fitOf(out, autoType && info.refits < 2 ? 'auto' : model.type); if (nm) { model = nm; info.refits++; const s2 = resid(nm, out);
+            if (TIGHT) { // 0.38.1: Toleranzen aus der gewachsenen Region robust neu schätzen (Median statt 90 %) – nie weiter als die Saat
+              tol = Math.min(tol0, Math.max(TFLOOR * h, 3 * s2)); angTol = Math.min(angTol0, Math.max((3 * Math.PI) / 180, TK * angRob(nm, out)));
+            } else tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
           next = out.length * 1.6;
           // abgelehnte Nachbarn mit neuem Modell erneut prüfen
           for (const i of rej) inR[i] = 0; rej.length = 0;
@@ -352,6 +363,14 @@ export class MeshTopology {
         }
       }
     }
+    if (TIGHT && model && !prism && info.refits > 0) {
+      // 0.38.1: Endprüfung gegen die zuletzt gefittete Geometrie – zusammenhängend ab der Saat, ohne weiteres Nachfitten.
+      // (Über eine Verrundung wandert die Normale schrittweise; der Vergleich mit dem Endmodell schneidet diesen Ausläufer ab.)
+      const keep = new Uint8Array(nt); const q = [seedTri]; keep[seedTri] = 1;
+      for (let i = 0; i < q.length; i++) for (const u of this.neighbors(q[i])) if (inR[u] === 1 && !keep[u]) { keep[u] = 1; if (accept(u)) q.push(u); else keep[u] = 2; }
+      for (let t = 0; t < nt; t++) if (inR[t] === 1 && keep[t] !== 1) inR[t] = 0;
+    }
+    info.angDeg = (angTol * 180) / Math.PI;
     info.tol = tol; info.model = prism ? 'Prisma' : model ? model.type : 'keins'; this.lastGrow = info;
     const res: number[] = []; for (let t = 0; t < nt; t++) if (inR[t] === 1) res.push(t);
     return new Uint32Array(res);
@@ -436,6 +455,10 @@ export const ROBUST_HARD = +((globalThis as any).process?.env?.RHARD ?? 2);
 export const ROBUST_HA = +((globalThis as any).process?.env?.RHA ?? 15);
 export const ROBUST_CT = +((globalThis as any).process?.env?.RCT ?? 0.5);
 export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== '0';
+const _env = (globalThis as any).process?.env ?? {};
+export const GNF = (_env.GNF ?? '0') === '1';
+export const AW = (_env.AW ?? '1') !== '0';
+export const TIGHT = (_env.TIGHT ?? '0') === '1'; const TFLOOR = +(_env.TFLOOR ?? 0.05); const TK = +(_env.TK ?? 4);
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
 export let ROBUST_VSTART = !!(globalThis as any).process?.env?.RVS, ROBUST_IT = +((globalThis as any).process?.env?.RIT ?? 3);
