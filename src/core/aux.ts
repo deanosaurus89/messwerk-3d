@@ -138,6 +138,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     const ok = (u: number) => { const n = topo.N(u); return Math.abs(n[3 * u] * axis[0] + n[3 * u + 1] * axis[1] + n[3 * u + 2] * axis[2]) < lim; };
     for (const t of seeds) if (!inW[t] && ok(t)) { inW[t] = 1; q.push(t); }
     for (let i = 0; i < q.length && q.length < 0.3 * nt; i++) for (const u of topo.neighbors(q[i])) if (!inW[u]) { inW[u] = 1; if (ok(u)) q.push(u); else inW[u] = 2; }
+    if (_env.DBGW) { const h = [0, 0, 0, 0, 0]; for (let t = 0; t < nt; t++) if (inW[t] === 2) { const n = topo.N(t); const d = Math.abs(n[3 * t] * axis[0] + n[3 * t + 1] * axis[1] + n[3 * t + 2] * axis[2]); h[d < 0.3 ? 0 : d < 0.4 ? 1 : d < 0.6 ? 2 : d < 0.9 ? 3 : 4]++; } console.log('CW', q.length, axis.map((x) => x.toFixed(2)).join(','), 'rej', h.join(' ')); }
     if (q.length < 8) return undefined; const r = mk(Uint32Array.from(q.sort((a, b) => a - b))); return r.verts.length >= 8 ? r : undefined;
   };
   /** 0.39: Klick auf die Wand, keine Ebene direkt daneben (breite Verrundung dazwischen): in der Umgebung die flächengrößte
@@ -154,9 +155,12 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       if (!c) cl.push((c = { n, a: 0, t: [] })); c.a += fa[u]; c.t.push(u); }
     cl.sort((a, b) => b.a - a.a);
     if (_env.DBGW) console.log('PNW', D.toFixed(1), cand.length, cl.slice(0, 4).map((c) => c.n.map((x) => x.toFixed(2)).join(',') + ':' + c.a.toFixed(0)).join(' | '));
-    for (const c of cl.slice(0, 3)) { c.t.sort((a, b) => fa[b] - fa[a]); // große Dreiecke = Inneres der Planfläche (nicht der Verrundungsrand)
-      for (const u of c.t.slice(0, 5)) { const v = F[3 * u]; const g = mk(topo.growRegion(u, [P[3 * v], P[3 * v + 1], P[3 * v + 2]], { ...o, radius: 0, seedR: 0, type: 'Ebene' }));
-        const q = isPlanar(g); if (_env.DBGW) console.log('PNWtry', u, g.verts.length, q.ok, (topo.lastGrow as any)?.model); if (q.ok && g.verts.length >= minV) return g; } }
+    // die größte gewachsene Planfläche gewinnt (kleine Fasen-/Verrundungsfacetten am Rand verlieren)
+    let best: Region | undefined;
+    for (const c of cl.slice(0, 3)) { c.t.sort((a, b) => fa[b] - fa[a]);
+      for (const u of c.t.slice(0, 3)) { const v = F[3 * u]; const g = mk(topo.growRegion(u, [P[3 * v], P[3 * v + 1], P[3 * v + 2]], { ...o, radius: 0, seedR: 0, type: 'Ebene' }));
+        const q = isPlanar(g); if (_env.DBGW) console.log('PNWtry', u, g.verts.length, q.ok); if (q.ok && g.verts.length >= minV && (!best || g.verts.length > best.verts.length)) best = g; } }
+    if (best) return best;
     return undefined;
   };
 
@@ -172,6 +176,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   if (p1.ok && !givenPlane) {
     planeReg = r1;
     wall = wallByWalk(p1.normal) ?? findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
+    // 0.39: angeklickte ebene Fläche ist selbst die gerade Wand eines Langlochs (kein Wandstück daneben) -> Ebene dazu suchen
+    if (!wall && CONTOUR) { const pl = planeNearWall(60); if (pl && Math.abs(dot(isPlanar(pl).normal, p1.normal)) < 0.2) { wall = r1; planeReg = pl; } }
     if (!wall) { if (isFinite(maxDist)) return null; throw new Error('No wall (hole/slot) found next to the clicked plane'); }
   } else if (p1.ok && givenPlane) {
     wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist, { prismAxis: givenPlane.normal });
@@ -182,8 +188,11 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       const ax = axisFromNormals(r1.n).axis;
       // ausreichend große Planfläche verlangen (kleine Splitter-Fragmente am Kantenübergang überspringen)
       const minV = Math.max(60, Math.min(2000, 0.1 * r1.verts.length));
-      if (!(axisFromNormals(r1.n).ratio < 0.05)) { if (isFinite(maxDist)) return null; throw new Error('Clicked face is neither a plane nor a prismatic wall'); }
-      planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
+      const prismOk = axisFromNormals(r1.n).ratio < 0.05;
+      // 0.39: Wandregion über Fase/Verrundung ausgelaufen (nicht prismatisch): Ebene in der Nähe suchen, Wand folgt der Kontur
+      if (!prismOk && CONTOUR) planeReg = planeNearWall(60);
+      if (!prismOk && !planeReg) { if (isFinite(maxDist)) return null; throw new Error('Clicked face is neither a plane nor a prismatic wall'); }
+      if (!planeReg) planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
       if (!planeReg && CONTOUR) planeReg = planeNearWall(Math.min(minV, 60));
       if (!planeReg && isFinite(maxDist)) return null;
       if (!planeReg) throw new Error('No adjacent plane found for the auxiliary plane – choose an existing plane');
@@ -193,7 +202,10 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   // Normale aus dem Material heraus (Richtung der Flächennormalen der Ebenenpunkte)
   if (planeReg) { const pn = isPlanar(planeReg).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
   // 0.39: Wand immer entlang der Kontur vervollständigen (Klick auf Gerade, Bogen oder Teilstück -> ganze Wand)
-  if (CONTOUR) { const full = contourWall(wall.tris, plane.normal); if (full && full.verts.length > wall.verts.length) wall = full; }
+  if (CONTOUR) { const full = contourWall(wall.tris, plane.normal);
+    if (full && full !== wall) { // größere Kontur-Wand gewinnt; ist die bisherige Wand ausgelaufen (Fase/Verrundung), die besser passende
+      const t2 = type === 'auto' ? 'Kreis' : type; const rms = (r: Region) => { try { return fitInPlane(t2, r.p, plane).rms; } catch { return Infinity; } };
+      if (full.verts.length > wall.verts.length || rms(full) < 0.5 * rms(wall)) wall = full; } }
   let fit: FitResult;
   if (type === 'auto') {
     const fc = fitInPlane('Kreis', wall.p, plane);
@@ -286,7 +298,7 @@ export function extractAtRim(mesh: MeshData, topo: MeshTopology, seedTri: number
   const ok = (r: AuxResult | null): r is AuxResult => !!r && r.planeIdx.length >= 20 && r.wallIdx.length >= 20 && sane(r.fit);
   const go = { ...o, radius: 0 };
   let err: unknown = null;
-  try { const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, go, type, undefined, Infinity, ring); if (ok(r)) return r; } catch (e) { err = e; }
+  try { const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, go, type, undefined, Infinity, ring); if (_env.DBGW) console.log('RIM1', r?.fit.type, r?.fit.length, r?.fit.width, r?.planeIdx.length, r?.wallIdx.length); if (ok(r)) return r; } catch (e) { err = e; if (_env.DBGW) console.log('RIM1 err', String(e)); }
   const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag));
   const R = Math.max(3 * topo.localEdge(seedTri), 1.5 * T); // a little beyond the pick circle: a tap at its edge still counts
   const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: R, legacy: true, noCurv: true });

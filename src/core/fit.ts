@@ -421,6 +421,10 @@ export function modelNormal(f: FitResult, p: Vec3): Vec3 {
       return unit(sub(p, add(f.center, scale(r, f.radius ?? 0))));
     }
     case 'Linie': { const d = sub(p, f.center); return unit(sub(d, scale(a, dot(d, a)))); }
+    case 'Langloch': { // 0.39: Wandnormale ⟂ zur Wand (radial zur Mittelstrecke), nicht die Ebenennormale
+      const d = sub(p, f.center), u = unit(f.direction ?? [1, 0, 0]), r0 = f.width != null ? f.width / 2 : (f.radius ?? 0), h = Math.max(0, (f.length ?? 0) / 2 - r0);
+      const t = Math.max(-h, Math.min(h, dot(d, u))); const q = sub(sub(d, scale(u, t)), scale(a, dot(d, a))); return norm(q) > 1e-12 ? unit(q) : a;
+    }
     default: return a;
   }
 }
