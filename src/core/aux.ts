@@ -42,6 +42,8 @@ export interface AuxResult {
 interface Region { tris: Uint32Array; verts: Uint32Array; p: Vec3[]; n: Vec3[] }
 
 /** Planar, wenn die Ausgleichsebene die Punkte eng beschreibt (RMS klein im Verhältnis zur Ausdehnung). */
+const _env = (globalThis as any).process?.env ?? {};
+export const CONTOUR = (_env.CONTOUR ?? '1') !== '0'; const WALL_DEG = +(_env.WALL_DEG ?? 15);
 let H = 0; // mittlere Kantenlänge des Netzes (Rausch-/Auflösungsmaßstab)
 function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
   let x = 0, y = 0, z = 0; for (const q of r.n) { x += q[0]; y += q[1]; z += q[2]; }
@@ -128,6 +130,35 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     return undefined;
   };
   const prismatic = (r: Region, axis: Vec3) => { const a = axisFromNormals(r.n); return a.ratio < 0.05 && Math.abs(dot(a.axis, axis)) > 0.95; };
+  /** 0.39 (Martin, Langloch auf Multi-Feature): Wand entlang ihrer Kontur ganz herum verfolgen – alle zusammenhängenden
+   *  Dreiecke, deren (kantenbewusste) Normale ⟂ zur Ebenennormale steht. Läuft über Bögen und Geraden gleichermaßen,
+   *  stoppt an Verrundung/Kante zur Ebene (Normale kippt Richtung Achse). Für Kreis und Langloch gleich. */
+  const contourWall = (seeds: Uint32Array, axis: Vec3): Region | undefined => {
+    const lim = Math.sin((WALL_DEG * Math.PI) / 180), inW = new Uint8Array(nt), q: number[] = [];
+    const ok = (u: number) => { const n = topo.N(u); return Math.abs(n[3 * u] * axis[0] + n[3 * u + 1] * axis[1] + n[3 * u + 2] * axis[2]) < lim; };
+    for (const t of seeds) if (!inW[t] && ok(t)) { inW[t] = 1; q.push(t); }
+    for (let i = 0; i < q.length && q.length < 0.3 * nt; i++) for (const u of topo.neighbors(q[i])) if (!inW[u]) { inW[u] = 1; if (ok(u)) q.push(u); else inW[u] = 2; }
+    if (q.length < 8) return undefined; const r = mk(Uint32Array.from(q.sort((a, b) => a - b))); return r.verts.length >= 8 ? r : undefined;
+  };
+  /** 0.39: Klick auf die Wand, keine Ebene direkt daneben (breite Verrundung dazwischen): in der Umgebung die flächengrößte
+   *  Richtung ⟂ zur Wandnormale suchen und dort als Ebene wachsen. */
+  const planeNearWall = (minV: number): Region | undefined => {
+    const n0 = topo.N(seedTri), sn: Vec3 = [n0[3 * seedTri], n0[3 * seedTri + 1], n0[3 * seedTri + 2]];
+    const D = Math.max(8 * topo.medianEdge(), 6 * topo.localEdge(seedTri), 3 * (o.seedR ?? 0), 10);
+    const fa = mesh.faceAreas!, fnn = mesh.faceNormals!; const seen = new Uint8Array(nt); const qq = [seedTri]; seen[seedTri] = 1; const cand: number[] = [];
+    for (let i = 0; i < qq.length; i++) for (const u of topo.neighbors(qq[i])) { if (seen[u]) continue; seen[u] = 1; if (triDist(u) > D) continue; qq.push(u);
+      const d = Math.abs(fnn[3 * u] * sn[0] + fnn[3 * u + 1] * sn[1] + fnn[3 * u + 2] * sn[2]); if (d < 0.2 && !topo.sliver[u]) cand.push(u); }
+    // Richtungscluster (±n) nach Fläche
+    const cl: { n: Vec3; a: number; t: number[] }[] = [];
+    for (const u of cand) { const n: Vec3 = [fnn[3 * u], fnn[3 * u + 1], fnn[3 * u + 2]]; let c = cl.find((k) => Math.abs(dot(k.n, n)) > 0.996);
+      if (!c) cl.push((c = { n, a: 0, t: [] })); c.a += fa[u]; c.t.push(u); }
+    cl.sort((a, b) => b.a - a.a);
+    if (_env.DBGW) console.log('PNW', D.toFixed(1), cand.length, cl.slice(0, 4).map((c) => c.n.map((x) => x.toFixed(2)).join(',') + ':' + c.a.toFixed(0)).join(' | '));
+    for (const c of cl.slice(0, 3)) { c.t.sort((a, b) => triDist(a) - triDist(b));
+      for (const u of c.t.slice(0, 5)) { const v = F[3 * u]; const g = mk(topo.growRegion(u, [P[3 * v], P[3 * v + 1], P[3 * v + 2]], { ...o, radius: 0, type: 'Ebene' }));
+        const q = isPlanar(g); if (_env.DBGW) console.log('PNWtry', u, g.verts.length, q.ok, (topo.lastGrow as any)?.model); if (q.ok && g.verts.length >= minV) return g; } }
+    return undefined;
+  };
 
   let p1 = isPlanar(r1);
   // Kleines ebenes Fragment am Kantenübergang getroffen: zur großen, parallelen Nachbarfläche wechseln
@@ -153,6 +184,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       const minV = Math.max(60, Math.min(2000, 0.1 * r1.verts.length));
       if (!(axisFromNormals(r1.n).ratio < 0.05)) { if (isFinite(maxDist)) return null; throw new Error('Clicked face is neither a plane nor a prismatic wall'); }
       planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
+      if (!planeReg && CONTOUR) planeReg = planeNearWall(Math.min(minV, 60));
       if (!planeReg && isFinite(maxDist)) return null;
       if (!planeReg) throw new Error('No adjacent plane found for the auxiliary plane – choose an existing plane');
     }
@@ -160,6 +192,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   let plane = givenPlane ?? fitType('Ebene', planeReg!.p, planeReg!.n);
   // Normale aus dem Material heraus (Richtung der Flächennormalen der Ebenenpunkte)
   if (planeReg) { const pn = isPlanar(planeReg).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
+  // 0.39: Wand immer entlang der Kontur vervollständigen (Klick auf Gerade, Bogen oder Teilstück -> ganze Wand)
+  if (CONTOUR) { const full = contourWall(wall.tris, plane.normal); if (full && full.verts.length > wall.verts.length) wall = full; }
   let fit: FitResult;
   if (type === 'auto') {
     const fc = fitInPlane('Kreis', wall.p, plane);
