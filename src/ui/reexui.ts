@@ -41,6 +41,8 @@ function paramsFor(f: RxFeature): ReexParams {
   return normReex(q);
 }
 let cur: ReexParams = { ...REEX_DEFAULT };
+/** Optionen › Extraktion › Suchabstand: neuer Standard für alle folgenden Extraktionen */
+export function setSearchDistDefault(v: number) { REEX_DEFAULT.maxDist = v; reexP.maxDist = v; cur.maxDist = v; }
 const raisedTipText = () => tt('Exclude raised: raised regions inside the outer contour that belong to another feature (boss, sphere, step – surface rising above the search distance with steep walls, a flat top or higher than 2.5 mm) are shown in magenta. OFF (default) = they count to the plane (e.g. flatness incl. bumps and spatter). ON = they are excluded as a whole. ? = documentation with a picture.');
 const exclTipText = () => tt('Boundary exclusion distance ± [mm]: positive = the zone shrinks inward by this distance (points near the outer contour and holes are excluded – edge roundings, burrs, chamfer starts); negative = the zone grows outward by this distance. 0 = exactly the original contour. The preview (zone + points) updates immediately.');
 export function reexHTML(f: RxFeature): string {

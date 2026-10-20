@@ -43,7 +43,8 @@ export interface ReexParams {
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
-export const REEX_DEFAULT: ReexParams = { maxDist: 0.1, sigma: 3, maxAngleDeg: 30, margin: 0, iterations: 3 };
+/** 0.39 (Martin): Suchabstand 1 mm als Standard für die Extraktion (Optionen › Extraktion) */
+export const REEX_DEFAULT: ReexParams = { maxDist: 1, sigma: 3, maxAngleDeg: 30, margin: 0, iterations: 3 };
 /** default lateral extension: 0 – the zone follows the original contour exactly (no hidden margin) */
 export const lateralAuto = (_p: { maxDist: number }) => 0;
 export const lateralOf = (p: ReexParams) => (p.margin != null && isFinite(p.margin) ? p.margin : lateralAuto(p));

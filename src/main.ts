@@ -17,7 +17,8 @@ import { normReex, lateralOf } from './core/reextract';
 import { freezeBoundary, type FrozenBoundary } from './core/frozen';
 import { installNumFields, parseNum } from './ui/numfield';
 import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
-import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts } from './ui/reexui';
+import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts, setSearchDistDefault } from './ui/reexui';
+import { REEX_DEFAULT } from './core/reextract';
 import { OverlayManager } from './ui/overlays';
 import { initRibbonSections, installFitRibbon } from './ui/ribbonsec';
 import { GENTOL_DEFAULT, GenTol, TolKind, generalTol, iso286 } from './core/tolerances';
@@ -955,7 +956,7 @@ async function applyExtract() {
  *  extent of the points, full 360°; sphere/torus shell), the exclusion distance shortens (+) / extends (−) it at its ends.
  *  All mesh points of that surface inside the zone are taken – not only the grown/selected triangles. */
 async function geomZoneExtract(fit: FitResult, indices: Uint32Array, seed: Vec3 | undefined, band: number | undefined, x: { k: number; angleOn: boolean; angleDeg: number; inset: number }, crit?: FitCrit) {
-  const b = band ?? Math.max(0.1, Math.round(3 * (fit.rms || 0) * 100) / 100);
+  const b = band ?? REEX_DEFAULT.maxDist; // 0.39: Standard-Suchabstand (Optionen › Extraktion, 1 mm)
   const g = await busy(engine.call<any>({ op: 'reex', fit, indices, seedPts: seed ? [seed] : [],
     params: { maxDist: b, sigma: x.k > 0 ? x.k : 3, sigmaOn: x.k > 0, angleOn: x.angleOn, maxAngleDeg: x.angleDeg, margin: -x.inset, iterations: 3 }, ...(crit ? { crit, formBy: true } : {}) }));
   return { fit: g.fit as FitResult, indices: g.indices as Uint32Array, band: b, zone: g.region as import('./core/reextract').SearchRegion };
@@ -2696,6 +2697,8 @@ function openOptions() {
     <h4>${tt('Display')}</h4>
     <div class="row" title="${tt('Decimal places of all displayed values: annotations, panels, tree properties, report and CSV (lengths in mm, deviations and angles). Internal precision and input fields are not rounded; unit direction vectors keep at least 5 places. Also View ▸ Decimals.')}"><label>${tt('Decimal places')}</label> <span class="od-dec"><button class="btn" type="button" data-dec="-1" title="${tt('One decimal place less')}">−</button><input id="od-dec" type="number" min="${DEC_MIN}" max="${DEC_MAX}" step="1" value="${getDec()}" inputmode="numeric"><button class="btn" type="button" data-dec="1" title="${tt('One decimal place more')}">+</button></span> <span class="note">(${tt('default')} 2)</span></div>
     <div class="row" title="${tt('How transparent the data object is when ⚙ › Transparent is on (5–95 %)')}"><label>${tt('Transparency [%]')}</label> <input type="number" id="od-trans" min="5" max="95" step="5" value="${viewTrans.amt}" style="width:5em"> <label><input type="checkbox" id="od-trans-on" ${viewTrans.on ? 'checked' : ''}> ${tt('Data object transparent')}</label></div>
+    <h4>${tt('Extraction')}</h4>
+    <div class="row" title="${tt('Default search distance for extraction and re-extraction: points within ± this distance of the fitted geometry are collected. Applies to new extractions; per feature it can still be changed in the extraction parameters.')}"><label>${tt('Search distance [mm]')}</label> <input type="number" id="od-sdist" min="0.01" max="20" step="0.1" value="${REEX_DEFAULT.maxDist}" style="width:5em"></div>
     <h4>${tt('Tolerances')}</h4>
     <div class="row" title="${tt('On: new controls get their tolerance from the project general tolerance (ISO 2768-1/-2) or an ISO 286 fit code (e.g. H7); the source is shown and reported. Off (default): tolerances are entered by hand as before 0.24. Values already in a project are kept either way.')}"><label><input type="checkbox" id="od-tol" ${prefs.tolTables ? 'checked' : ''}> ${tt('Use general tolerance tables (ISO 2768 / ISO 286)')}</label></div>
     <div class="row"><button class="btn primary" data-ok>${tt('Close')}</button></div></div>`;
@@ -2708,6 +2711,7 @@ function openOptions() {
   el.querySelector<HTMLInputElement>('#od-dec')!.onchange = (e) => { const v = parseInt((e.target as HTMLInputElement).value, 10); setDecimals(isFinite(v) ? v : 2); };
   el.querySelector<HTMLInputElement>('#od-trans')!.onchange = (e) => { const v = Number((e.target as HTMLInputElement).value); if (isFinite(v)) viewTrans.amt = Math.min(95, Math.max(5, v)); saveViewPrefs(); renderScene(); };
   el.querySelector<HTMLInputElement>('#od-trans-on')!.onchange = (e) => { viewTrans.on = (e.target as HTMLInputElement).checked; saveViewPrefs(); document.querySelector('#view-gear [data-vg="trans"]')?.classList.toggle('on', viewTrans.on); renderScene(); };
+  el.querySelector<HTMLInputElement>('#od-sdist')!.onchange = (e) => { const v = Number((e.target as HTMLInputElement).value); if (isFinite(v) && v > 0) { setSearchDistDefault(Math.min(20, Math.max(0.01, v))); saveViewPrefs(); } };
   el.querySelector<HTMLInputElement>('#od-tol')!.onchange = (e) => { prefs.tolTables = (e.target as HTMLInputElement).checked; saveViewPrefs(); syncPrefsUI(); renderAll(); };
   el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => el.remove();
   el.addEventListener('pointerdown', (e) => { if (e.target === el) el.remove(); });
@@ -2718,8 +2722,8 @@ function applyColorMode() {
   state.features.forEach((f, i) => { if (!f.colorSet) f.color = state.colorMode === 'uniform' ? state.uniformColor : PALETTE[i % PALETTE.length]; });
 }
 const PREF_KEY = 'mw-view-prefs';
-function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec(), dataTrans: viewTrans.on, transAmt: viewTrans.amt })); } catch { /* */ } }
-try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); viewTrans.on = !!pr.dataTrans; if (pr.transAmt != null && isFinite(+pr.transAmt)) viewTrans.amt = Math.min(95, Math.max(5, +pr.transAmt)); } } catch { /* */ }
+function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec(), dataTrans: viewTrans.on, transAmt: viewTrans.amt, searchDist: REEX_DEFAULT.maxDist })); } catch { /* */ } }
+try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { if (pr.searchDist > 0) setSearchDistDefault(pr.searchDist); state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); viewTrans.on = !!pr.dataTrans; if (pr.transAmt != null && isFinite(+pr.transAmt)) viewTrans.amt = Math.min(95, Math.max(5, +pr.transAmt)); } } catch { /* */ }
 syncPrefsUI();
 /** Options ▸ Decimal places / View ▸ Decimals: display only (fmt), internal values untouched */
 function setDecimals(n: number) { setDec(n); saveViewPrefs(); syncPrefsUI(); renderAll(); if (state.openReport != null) renderReport(); }

@@ -31,9 +31,12 @@ const r = await page.evaluate(async () => { const A = window.__app, S = A.state,
   A.renderAll(); await w(300); r.badgeOn = !!document.querySelector('.tsrc'); r.gentolOn = getComputedStyle(document.querySelector('.gentol')).display !== 'none';
   document.getElementById('btn-annot-pts').click(); await w(300); r.apts = [S.annot.pts, document.getElementById('btn-annot-pts').classList.contains('on'), /pts/.test(lbl())];
   document.getElementById('btn-options').click(); await w(300); r.optPts = document.getElementById('od-pts').checked; document.querySelector('#opts-dlg [data-ok]').click();
+  // 0.39: Options › Extraction › Search distance (default 1 mm, persistent)
+  document.getElementById('btn-options').click(); await w(300); const sd = document.getElementById('od-sdist'); r.sdist0 = sd?.value; r.extrHead = [...document.querySelectorAll('#opts-dlg h4')].some((h) => /Extraction|Extraktion/.test(h.textContent));
+  if (sd) { sd.value = '2.5'; sd.dispatchEvent(new Event('change')); } document.querySelector('#opts-dlg [data-ok]').click();
   r.exact = f.measured.diameter; return r; });
 await page.reload(); await sleep(2500);
-const r2 = await page.evaluate(() => ({ apts: document.getElementById('btn-annot-pts').classList.contains('on'), dec: document.getElementById('dec-val').textContent, tol: document.body.classList.contains('tol-tables') }));
+const r2 = await page.evaluate(async () => { document.getElementById('btn-options').click(); await new Promise((z) => setTimeout(z, 300)); const v = document.getElementById('od-sdist')?.value; document.querySelector('#opts-dlg [data-ok]').click(); return { sdist: v, apts: document.getElementById('btn-annot-pts').classList.contains('on'), dec: document.getElementById('dec-val').textContent, tol: document.body.classList.contains('tol-tables') }; }));
 console.log(JSON.stringify({ r, r2 }));
 if (r.dec0 !== '2') fail(`default decimals ${r.dec0} ≠ 2`);
 if (r.tolOff.src || r.badge || r.fitField || r.gentolVisible) fail(`tolerance tables off but active: ${JSON.stringify(r)}`);
@@ -44,6 +47,7 @@ if (r.optTol) fail('tolerance tables on by default');
 if (!r.tolOn.src || !r.badgeOn || !r.gentolOn) fail(`tolerance tables on but inactive: ${JSON.stringify(r.tolOn)}`);
 if (r2.dec !== '3' || !r2.tol) fail(`preferences not persistent: ${JSON.stringify(r2)}`);
 if (!r.apts.every(Boolean) || !r.optPts || !r2.apts) fail(`View ▸ Annotations ▸ Point count not synced/persistent: ${JSON.stringify([r.apts, r.optPts, r2.apts])}`);
+if (r.sdist0 !== '1' || !r.extrHead || r2.sdist !== '2.5') fail(`Options › Extraction › Search distance: default ${r.sdist0}, heading ${r.extrHead}, after reload ${r2.sdist}`);
 if (errors.length) fail(`page errors ${errors.join(' | ')}`);
 await browser.close(); srv?.kill();
 if (!process.exitCode) console.log('OK: decimal places, annotation content toggles + optional tolerance tables');
