@@ -584,7 +584,7 @@ body:not(.tol-tables) .gentol { display:none !important; }
 .rb-s.more { color:#1f4f8f; font-weight:600; }
 .rb-ghost { height:20px; }
 .rb-split { display:flex; align-items:center; height:20px; } .rb-split > .rb-s { flex:1; } .rb-split .split-dd { height:20px; line-height:18px; padding:0 3px; }
-.big.rb-auto { min-width:66px; background:#e3edf9; border-color:#a9c3e4; font-weight:600; } .big.rb-auto svg { width:30px; height:30px; }
+.big.rb-auto { min-width:66px; font-weight:600; } .big.rb-auto svg { width:30px; height:30px; }
 .big.rb-auto.on { background:#d4e4f7; border-color:var(--acc); }
 .rb-pop { position:fixed; z-index:70; background:#fff; border:1px solid #9fb2c8; border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.25); padding:4px; display:flex; flex-direction:column; min-width:210px; }
 .rb-ph { font-size:10.5px; color:#5b6875; padding:3px 10px 1px; font-weight:600; }
