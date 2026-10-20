@@ -7,8 +7,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
-  { version: '2026.0.39', date: '2026-10-19', items: [
-    'Fix (BLOCKER): Click & grow “Plane” on adaptively meshed scans (e.g. Multi-Feature demo) no longer runs over fillets/radii onto the whole part – the allowed normal deviation from the fitted surface is now estimated area-weighted (many small fillet triangles no longer widen it). Applies the same way to all geometry types.',
+  { version: '2026.0.39', date: '2026-10-20', items: [
+    'Fix (BLOCKER): Click & grow no longer runs over fillets/radii on adaptively meshed scans (e.g. the Multi-Feature demo). The growth is measured against the geometry fitted from the pick circle at the click: refits are only taken if they still describe the seed area, and the allowed normal deviation is estimated weighted by area. The same rule applies to all types.',
+    'Slot/circle: a click on a straight wall, an arc or a corner gives the whole wall (the contour is followed all the way round, including across a wide fillet to the face). Add Region on a slot/circle merges the new wall piece and refits.',
+    'Fix: re-extraction of a slot with the normal angle on now checks wall points against the wall normal, not the aux-plane normal, so the wall points stay.',
+    'Options › Extraction (new): default search distance 1 mm, kept after reload.',
+    'Analyze: every value label (zone, envelope, nominal, deviation) can be dragged like a feature label (mouse and touch). Its position is saved; 🔒 brings back automatic placement.',
   ] },
   { version: '2026.0.38', date: '2026-10-20', items: [
     'Click & grow / Auto: one edge-aware normal for every triangle (neighbourhood plane fit that keeps to the face the point lies on) – computed only where growing reaches, so loading is as fast as before; edge coverage and nominals as in 0.37.',

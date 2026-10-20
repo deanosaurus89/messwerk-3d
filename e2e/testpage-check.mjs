@@ -9,7 +9,7 @@ const browser = await chromium.launch({ channel: 'chrome' });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
 for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { name: 'iphone', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }]) {
   const ctx = await browser.newContext(v), page = await ctx.newPage(), errors = []; page.on('pageerror', (e) => errors.push(String(e)));
-  await page.route('**/version.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: '2026.0.38', rev: 'test' }) }));
+  await page.route('**/version.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: '2026.0.39', rev: 'test' }) }));
   await page.goto(BASE + 'test.html'); await sleep(800);
   const r = await page.evaluate(async () => { const w = (ms) => new Promise((r) => setTimeout(r, ms)); localStorage.clear();
     const p1 = [...document.querySelectorAll('.it[data-grp="p1"]')], av = p1.filter((e) => !e.classList.contains('unavail')).map((e) => e.dataset.id);
@@ -23,9 +23,9 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     return { n: p1.length, rels, f4, av, closed, out1, out: document.querySelector('#out').value, steps: !!f3.querySelector('.steps') && !!f3.querySelector('.exp') }; });
   console.log(v.name, JSON.stringify(r));
   if (r.n !== 75 || !r.steps) fail(`${v.name}: Phase-1 items ${r.n}`);
-  if (r.rels.join() !== '0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38') fail(`${v.name}: release groups ${r.rels}`);
+  if (r.rels.join() !== '0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39') fail(`${v.name}: release groups ${r.rels}`);
   if (!/0\.32: ❌ Major/.test(r.f4)) fail(`${v.name}: F4 retest note ${r.f4}`);
-  if (r.av.length !== 75 || !['F4', 'F5', 'F11', 'F18', 'F10c', 'R2', 'R2k', 'F20', 'F20b', 'F21', 'F21f', 'A37', 'A37b', 'N38', 'P38', 'I38', 'I38b', 'D38', 'F11b', 'F13b', 'F15b'].every((i) => r.av.includes(i))) fail(`${v.name}: available at 0.38: ${r.av}`);
+  if (r.av.length !== 81 || !['F4', 'F5', 'F11', 'F18', 'F10c', 'R2', 'R2k', 'F20', 'F20b', 'F21', 'F21f', 'A37', 'A37b', 'N38', 'P38', 'I38', 'I38b', 'D38', 'F11b', 'F13b', 'F15b', 'G39', 'S39', 'S39b', 'R39', 'O39', 'L39'].every((i) => r.av.includes(i))) fail(`${v.name}: available at 0.38: ${r.av}`);
   if (!r.closed) fail(`${v.name}: archive/tolerance sections not collapsed`);
   if (r.out1) fail(`${v.name}: bug without severity was accepted`);
   const L = r.out.split('\n');

@@ -100,6 +100,14 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('F13b', 'Retest F13: ⚙ über dem Navigationswürfel bleibt sichtbar', 'Desktop und iPhone › Merkmal erzeugen (Auto/Ebene) › ⚙ links über dem Würfel suchen und anklicken.', '⚙ ist während der Merkmalerzeugung sichtbar und bedienbar (nicht vom Panel verdeckt).', ''),
   ('F15b', 'Retest F15: Datenobjekt standardmäßig undurchsichtig, Transparent schaltet', 'Desktop › App neu laden › Modell ansehen › ⚙ › Transparent an/aus (auch Options › Display).', 'Modell ist beim Start undurchsichtig; Transparent macht es durchscheinend, nochmals aus wieder undurchsichtig.', ''),
  ]),
+ ('0.39', 'Robustes Wachsen, Langloch-Kontur, Extraktion, Analyse-Labels', [
+  ('G39', 'Ebene auf Multi-Feature bleibt in ihrer Fläche', 'Multi-Feature plate › Ebene › Click & grow auf mehrere Planflächen (oben, beide Schrägen, vorne), Desktop und iPhone.', 'Region endet an den Verrundungen, läuft nicht über das ganze Teil; Ebenheit plausibel (nicht > 0,5 mm).', ''),
+  ('S39', 'Langloch: Klick auf gerade Wand, Bogen oder Ecke gibt das ganze Langloch', 'Multi-Feature plate › Langloch › Click & grow je einmal auf gerade Wand, auf einen Bogen und an die Ecke der beiden Langlöcher in den Schrägen.', 'Immer vollständiges Langloch (Länge ≈ 57, Breite ≈ 23–25 mm), beide Bögen orange.', ''),
+  ('S39b', 'Langloch: Region hinzufügen vereinigt Teilstücke', 'Langloch-Vorschau aus einem Bogen › „+ Add region“ › gegenüberliegenden Bogen antippen.', 'Eine Region, ein vollständiges Langloch neu gefittet.', ''),
+  ('R39', 'Re-Extraktion Kreis/Langloch mit Normalenwinkel 30°', 'Langloch bzw. Kreis (Bohrung) erzeugen › Eigenschaften › Re-extraction mit Normal angle an (30°).', 'Wandpunkte bleiben erhalten (nicht nur Hilfsebenen-Punkte); Geometrie unverändert plausibel.', ''),
+  ('O39', 'Optionen › Extraktion › Suchabstand (Standard 1 mm)', 'Options öffnen › Abschnitt „Extraction“ › Search distance ansehen, ändern, App neu laden.', 'Standard 1 mm, Änderung bleibt nach Neuladen, neue Extraktionen nutzen den Wert.', ''),
+  ('L39', 'Analyse: alle Labels verschiebbar', 'Analyze › Rechtwinkligkeit/Position einer Bohrung › Labels (Zone, Hülle, Nennachse) ziehen (Maus und Finger), Ansicht drehen, Projekt speichern/laden.', 'Jedes Label lässt sich ziehen, bleibt an der Stelle (🔒), Klick auf 🔒 = automatisch.', ''),
+ ]),
 ]
 RADIO = '<div class="s">' + ''.join(f'<label><input type="radio" name="{{id}}" value="{v}"{" checked" if v == "skip" else ""}>{t}</label>' for v, t in [('ok', '✅ Vollständig'), ('warn', '⚠️ Eingeschränkt'), ('fail', '❌ Geht nicht'), ('skip', '⏸ Nicht getestet')]) + '</div>'
 SEV = '<label class="sevl">Schweregrad <select class="sev"><option value="">–</option><option>Blocker</option><option>Major</option><option>Minor</option></select></label>'
