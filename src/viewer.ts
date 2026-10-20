@@ -300,13 +300,12 @@ export class Viewer {
       if (offLabel) this.addText(from.clone().lerp(to, 0.5).addScaledVector(d, an.length * 0.08).toArray(), offLabel, '#1565c0');
     }
   }
-  /** Text label (screen-sized sprite) at a point. */
+  /** 0.39 (Martin): Wert-Labels der Analyse (Zone, Hülle, Nennachse, Geometrie …) sind HTML-Labels wie die Merkmalslabels –
+   *  verschiebbar (Maus + Touch), Position bleibt (Projekt). Hier nur gesammelt; main.ts gibt sie an die Label-Schicht. */
+  texts: { key: string; anchor: [number, number, number]; text: string; color: string }[] = [];
   addText(p: number[], text: string, color = '#22303f') {
-    const c = document.createElement('canvas'), x = c.getContext('2d')!; x.font = 'bold 30px sans-serif'; const w = Math.ceil(x.measureText(text).width) + 20; c.width = w; c.height = 46;
-    x.fillStyle = 'rgba(255,255,255,0.88)'; x.fillRect(0, 0, w, 46); x.strokeStyle = color; x.lineWidth = 3; x.strokeRect(1.5, 1.5, w - 3, 43);
-    x.font = 'bold 30px sans-serif'; x.fillStyle = color; x.textBaseline = 'middle'; x.fillText(text, 10, 24);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, sizeAttenuation: false }));
-    sp.scale.set(0.022 * w / 46, 0.022, 1); sp.center.set(0, 0); sp.position.set(p[0], p[1], p[2]); sp.renderOrder = 11; sp.raycast = () => {}; this.prims.add(sp);
+    const n = this.texts.filter((t) => t.color === color).length;
+    this.texts.push({ key: color + '#' + n, anchor: [p[0], p[1], p[2]], text, color });
   }
   /** Toleranz-/Formzone (ISO 1101): Grenzflächen bei Abweichung lo und hi entlang der Normalen des Ausgleichselements. */
   addZone(f: FitResult, lo: number, hi: number) {
@@ -451,7 +450,7 @@ export class Viewer {
       pts.renderOrder = 8; this.scene.add(pts); this.hoverPts.push(pts); }
   }
 
-  clearPrims() { for (const c of [...this.prims.children]) { this.prims.remove(c); (c as any).geometry?.dispose?.(); } }
+  clearPrims() { this.texts = []; for (const c of [...this.prims.children]) { this.prims.remove(c); (c as any).geometry?.dispose?.(); } }
 
   /** Gefittete Geometrie als Drahtmodell/halbtransparent zeichnen. */
   addPrimitive(f: FitResult, color: number, selected: boolean) {

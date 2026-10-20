@@ -617,3 +617,4 @@ body:not(.tol-tables) .gentol { display:none !important; }
 .group.compact .big.decbig { font-size:0; gap:0; } .group.compact .big.decbig .dec-row { font-size:13px; } /* label hidden at 1024 px, tooltip stays */
 /* 0.38 F13: ⚙ above the nav cube stays visible + clickable during feature creation (above the Creation Panel) */
 body.ctx-on #view-gear { z-index:40; }
+.lbl .lbl-an { font-weight: 700; white-space: nowrap; }

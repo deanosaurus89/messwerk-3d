@@ -2570,8 +2570,14 @@ function renderScene() {
     specs.push({ id: -1, anchor: m.p1!.map((v, i) => (v + m.p2![i]) / 2) as V3, color: hex(PREVIEW_COLOR), offset: state.labelOffsets.get(-1) ?? null, selected: true,
       html: `<div class="lh"><i></i>${tt('Distance')} ${comp}</div><table><tr><td>↔ ${comp}</td><td>${fmt(distValue(m, comp), 3)}</td></tr></table>` });
   }
+  // 0.39: Analyse-Wertlabels (Zone, Hülle, Nennachse, Geometrie) – verschiebbar wie Merkmalslabels, Position gespeichert
+  for (const t of viewer.texts) { const id = textLabelId(t.key);
+    specs.push({ id, anchor: t.anchor, color: t.color, offset: state.labelOffsets.get(id) ?? null, selected: false, html: `<div class="lbl-an" style="color:${t.color}">${esc(t.text)}</div>` }); }
   viewer.labels.set(specs);
 }
+/** stabile Label-ID (≤ −1000) für ein Analyse-Wertlabel aus Farbe + laufender Nummer */
+const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
+function textLabelId(key: string): number { let h = 7; for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 1e8; return -1000 - h; }
 viewer.labels.onMoved = (id, off) => { state.labelOffsets.set(id, off); const f = id < 0 ? null : state.features.find((x) => x.id === id);
   if (id < 0 || f?.dim) renderScene(); else scheduleAutosave(); };
 viewer.labels.onSelect = (id) => { if (id >= 0) selectFeature(id); };

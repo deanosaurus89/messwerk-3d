@@ -175,7 +175,7 @@ export class Labels {
     this.lastKey = '';
     this.update();
   }
-  private pinHtml(s: LabelSpec) { return s.offset && s.id >= 0 ? `<button class="lbl-pin" title="${this.pinTitle.replace(/"/g, '&quot;')}">🔒</button>` : ''; }
+  private pinHtml(s: LabelSpec) { return s.offset && (s.id >= 0 || s.id <= -1000) ? `<button class="lbl-pin" title="${this.pinTitle.replace(/"/g, '&quot;')}">🔒</button>` : ''; }
   private toScreen(p: THREE.Vector3): { x: number; y: number; ok: boolean } {
     const q = p.clone().project(this.v.camera);
     const W = this.v.el.clientWidth, H = this.v.el.clientHeight;
@@ -192,7 +192,7 @@ export class Labels {
     const w = new THREE.Vector3((sx / r.width) * 2 - 1, -(sy / r.height) * 2 + 1, z).unproject(this.v.camera);
     const off: V3 = [w.x - a.x, w.y - a.y, w.z - a.z];
     it.spec.offset = off;
-    if (!it.el.querySelector('.lbl-pin') && d.id >= 0) { it.el.insertAdjacentHTML('beforeend', this.pinHtml(it.spec)); it.el.classList.add('pinned'); }
+    if (!it.el.querySelector('.lbl-pin') && (d.id >= 0 || d.id <= -1000)) { it.el.insertAdjacentHTML('beforeend', this.pinHtml(it.spec)); it.el.classList.add('pinned'); }
     this.onMoved(d.id, off); this.lastKey = ''; this.update();
   }
   /** Pro Frame: bei Kamera-/Größenänderung neu projizieren und platzieren. */
