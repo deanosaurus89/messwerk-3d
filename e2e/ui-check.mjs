@@ -36,7 +36,10 @@ async function addCtrl(feat, kind, nominal, up, lo) {
 }
 try {
   await page.goto(URL);
-  await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]');
+  await page.evaluate(() => document.querySelector('#whatsnew')?.remove()); // 0.40: Dialog fing Klicks ab
+  // 0.40: „beispielteil“ ist keine Beispielkarte mehr (neuer Satz) – Datei direkt importieren
+  await page.setInputFiles('#file', 'public/samples/beispielteil.stl');
+  if (await page.waitForSelector('#unit-dlg', { timeout: 20000 }).then(() => true, () => false)) await page.click('#unit-dlg [data-ok]');
   await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 });
   console.log('Geladen:', await page.textContent('#stats'));
   await page.click('.tab[data-tab="merkmale"]');

@@ -254,12 +254,14 @@ export function showWhatsNew() {
   bindEscClose(el, close); bindSwipeClose(el.querySelector('.wn-box')!, close, el.querySelector('.wn-box'));
   document.body.appendChild(el);
 }
+// 0.40: snapshot at module load – the app writes its own mw-* keys during start-up, which made first-time visitors look like returning users
+const HAD_DATA = (() => { try { return Object.keys(localStorage).some((k) => k.startsWith('mw-') && k !== KEY); } catch { return false; } })();
 /** Show the changelog once per new revision (only for returning users). */
 export function maybeShowWhatsNew() {
   try {
     const seen = localStorage.getItem(KEY);
     // returning user = stored revision differs, or app data from an earlier version without the key
-    const returning = seen ? seen !== BUILD.version : Object.keys(localStorage).some((k) => k.startsWith('mw-') && k !== KEY);
+    const returning = seen ? seen !== BUILD.version : HAD_DATA;
     localStorage.setItem(KEY, BUILD.version);
     if (returning && BUILD.version !== 'dev') showWhatsNew();
   } catch { /* ignore */ }
