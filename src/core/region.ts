@@ -35,7 +35,7 @@ export function modelDist(f: FitResult, q: Vec3): number {
   }
 }
 /** Diagnose des letzten fit-geführten Wachsens (für Tests/Bericht). */
-export interface GrowInfo { model: GeomType | 'Prisma' | 'keins'; h: number; sigma: number; tol: number; angDeg: number; seedTris: number; refits: number; capped: boolean; legacy?: boolean; }
+export interface GrowInfo { model: GeomType | 'Prisma' | 'keins'; h: number; sigma: number; tol: number; angDeg: number; seedTris: number; refits: number; capped: boolean; legacy?: boolean; rejectedRefits?: number; }
 
 export class MeshTopology {
   vt: { offsets: Uint32Array; tris: Uint32Array };
@@ -271,6 +271,12 @@ export class MeshTopology {
   }
   /** Normale für das fit-geführte Wachsen: die einheitliche kantenbewusste Dreiecksnormale (0.38.1; vorher NF = geglättet) */
   GN(t: number): Float32Array { return GNF ? this.NF(t) : this.N(t); }
+  /** Neu-Fit verträglich mit dem Saat-Fit? Saat-Restabstand höchstens wenig größer, Normalenstreuung auf der Saat ≤ +2° */
+  consistent(nm: FitResult, sm: FitResult, seed: number[], resid: (m: FitResult, t: ArrayLike<number>) => number, angQ: (m: FitResult, t: ArrayLike<number>, q: number) => number, tol0: number): boolean {
+    if (nm.type !== sm.type) return true; // Typwechsel (Auto) folgt dem Typtest
+    if (resid(nm, seed) > Math.max(1.5 * resid(sm, seed), tol0 / 3)) return false;
+    return angQ(nm, seed, 0.5) <= angQ(sm, seed, 0.5) + (2 * Math.PI) / 180;
+  }
   growFit(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
     const m = this.mesh, f = m.indices, p = m.positions, nt = f.length / 3, fa = m.faceAreas!, fn = m.faceNormals!;
     const cosA = Math.cos((Math.max(1, o.maxAngleDeg) * Math.PI) / 180);
@@ -284,9 +290,16 @@ export class MeshTopology {
     const el: number[] = []; for (const t of near) { const a = f[3 * t], b = f[3 * t + 1]; el.push(Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2])); }
     el.sort((x, y) => x - y); const h = el[el.length >> 1] || 1;
     // 2) Saat-Fleck: glatte Nachbarn (Winkel zur Saat < 25°) im Radius 8h um den Klickpunkt
-    const R0 = o.seedR && o.seedR > 0 ? o.seedR : 6 * h, cos0 = Math.cos((15 * Math.PI) / 180); const seed: number[] = []; const sMark = new Uint8Array(nt);
+    const R0 = o.seedR && o.seedR > 0 ? o.seedR : SEEDG ? 6 * this.medianEdge() : 6 * h, cos0 = Math.cos((15 * Math.PI) / 180); const seed: number[] = []; const sMark = new Uint8Array(nt);
+    // 0.39 (Martin): Saat = Fläche im Pick-Kreis (wie angezeigt: Pick-Radius bzw. 6 × Median-Kantenlänge des Netzes).
+    // Große Dreiecke zählen, sobald eine Ecke im Kreis liegt; reicht das nicht für einen Fit (< 12 Punkte), wird der Kreis
+    // minimal erweitert – nie wird ohne Saat-Fit gewachsen.
+    let Rp = R0; const d2 = (q: ArrayLike<number>) => (q[0] - seedPoint[0]) ** 2 + (q[1] - seedPoint[1]) ** 2 + (q[2] - seedPoint[2]) ** 2;
+    const inPick = (u: number, c: ArrayLike<number>) => { if (d2(c) <= Rp * Rp) return true; if (!SEEDG) return false; for (let k = 0; k < 3; k++) if (d2(vpos(f[3 * u + k])) <= Rp * Rp) return true; return false; };
+    for (let pass = 0; pass < 6; pass++) { seed.length = 0; sMark.fill(0);
     { const q = [seedTri]; sMark[seedTri] = 1; while (q.length) { const t = q.shift()!; seed.push(t); for (const u of this.neighbors(t)) { if (sMark[u]) continue; const c = this.cen(u);
-      if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R0 * R0) continue; if (dotS(seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
+      if (!inPick(u, c)) continue; if (dotS(seedTri, u) < cos0) continue; sMark[u] = 1; q.push(u); } } }
+    if (!SEEDG || seed.length * 0.5 + 3 >= 12) break; Rp *= 1.5; }
     const ptsOf = (tris: ArrayLike<number>, max = 3000) => { const seenV = new Set<number>(); const P: Vec3[] = [], N: Vec3[] = []; const step = Math.max(1, Math.floor(tris.length / max));
       for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seenV.has(v)) continue; seenV.add(v); P.push(vpos(v)); } N.push([this.GN(t)[3 * t], this.GN(t)[3 * t + 1], this.GN(t)[3 * t + 2]]); }
       // Normalen je Punkt: Dreiecksnormale genügt für Achs-/Typbestimmung (Länge kann von P abweichen)
@@ -327,7 +340,7 @@ export class MeshTopology {
     let sigma = model ? resid(model, seed) : 0; let tol0 = Math.min(Math.max(3 * sigma, 0.05 * h), 0.5 * h); let tol = tol0; // 0.36: 3σ (vorher 4σ), geprüft am Dreiecksschwerpunkt
     let angTol = model ? Math.min(Math.max(2.5 * angOf(model, seed), (10 * Math.PI) / 180), (30 * Math.PI) / 180) : (25 * Math.PI) / 180;
     if (prism) angTol = (12 * Math.PI) / 180;
-    const angTol0 = angTol;
+    const angTol0 = angTol; const seedModel = model;
     const info: GrowInfo = { model: prism ? 'Prisma' : model ? model.type : 'keins', h, sigma, tol, angDeg: (angTol * 180) / Math.PI, seedTris: seed.length, refits: 0, capped: false };
     const accept = (u: number): boolean => {
       if (prism && pax) { const d = Math.abs(this.GN(u)[3 * u] * pax[0] + this.GN(u)[3 * u + 1] * pax[1] + this.GN(u)[3 * u + 2] * pax[2]); return d < Math.sin(angTol); }
@@ -352,7 +365,11 @@ export class MeshTopology {
         if (area > cap) { info.capped = true; head = out.length; break; }
         if (out.length >= next && model && !prism) {
           // Neu-Fit auf der gewachsenen Region (folgt leichter Formabweichung), Toleranz bleibt am Saat-Rauschen verankert
-          const nm = fitOf(out, autoType && info.refits < 2 ? 'auto' : model.type); if (nm) { model = nm; info.refits++; const s2 = resid(nm, out);
+          const nm0 = fitOf(out, autoType && info.refits < 2 ? 'auto' : model.type);
+          // 0.39 (Martin): Bezug ist der Saat-Fit aus dem Pick-Kreis. Ein Neu-Fit wird nur übernommen, wenn er die Saat
+          // weiterhin so gut beschreibt wie der Saat-Fit (Abstand + Normalenwinkel) – eine ausgelaufene Region kann den
+          // Bezug so nie verkippen. Für alle Typen gleich.
+          const nm = nm0 && (!GUARD || this.consistent(nm0, seedModel!, seed, resid, angQ, tol0)) ? nm0 : null; if (nm0 && !nm) info.rejectedRefits = (info.rejectedRefits ?? 0) + 1; if (nm) { model = nm; info.refits++; const s2 = resid(nm, out);
             if (TIGHT) { // 0.38.1: Toleranzen aus der gewachsenen Region robust neu schätzen (Median statt 90 %) – nie weiter als die Saat
               tol = Math.min(tol0, Math.max(TFLOOR * h, 3 * s2)); angTol = Math.min(angTol0, Math.max((3 * Math.PI) / 180, TK * angRob(nm, out)));
             } else tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
@@ -458,6 +475,8 @@ export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== 
 const _env = (globalThis as any).process?.env ?? {};
 export const GNF = (_env.GNF ?? '0') === '1';
 export const AW = (_env.AW ?? '1') !== '0';
+export const SEEDG = (_env.SEEDG ?? '1') !== '0';
+export const GUARD = (_env.GUARD ?? '1') !== '0';
 export const TIGHT = (_env.TIGHT ?? '0') === '1'; const TFLOOR = +(_env.TFLOOR ?? 0.05); const TK = +(_env.TK ?? 4);
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
 export function setNormalMode(m: typeof NORMAL_MODE) { NORMAL_MODE = m; }
