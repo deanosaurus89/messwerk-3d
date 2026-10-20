@@ -1,0 +1,326 @@
+{
+ "name": "Flansch/Welle",
+ "file": "flansch.stl.gz",
+ "units": "mm",
+ "description": "Rotationsteil: Flansch Ø110 × 16 mit Teilkreis 6 × Ø10 auf Ø85, Welle Ø50 mit Torus-Einstich, Absatz Ø36, Kegel 53,13°, Zapfen Ø24, Bohrung Ø16 – alle koaxial zur Z-Achse.",
+ "features": [
+  {
+   "id": "Flansch Oberseite",
+   "type": "Ebene",
+   "point": [
+    0,
+    0,
+    16
+   ],
+   "normal": [
+    0,
+    0,
+    1
+   ],
+   "probe": [
+    38,
+    -14,
+    16
+   ]
+  },
+  {
+   "id": "Flansch Unterseite",
+   "type": "Ebene",
+   "point": [
+    0,
+    0,
+    0
+   ],
+   "normal": [
+    0,
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "Flansch Umfang",
+   "type": "Zylinder",
+   "center": [
+    0,
+    0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 110,
+   "probe": [
+    0,
+    -55,
+    8
+   ]
+  },
+  {
+   "id": "Welle Ø50",
+   "type": "Zylinder",
+   "center": [
+    0,
+    0,
+    36
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 50,
+   "range_z": [
+    16,
+    56
+   ],
+   "probe": [
+    0,
+    -25,
+    48
+   ]
+  },
+  {
+   "id": "Absatz Ø36",
+   "type": "Zylinder",
+   "center": [
+    0,
+    0,
+    68
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 36,
+   "probe": [
+    0,
+    -18,
+    68
+   ]
+  },
+  {
+   "id": "Kegel",
+   "type": "Kegel",
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "fromZ": 80,
+   "toZ": 92,
+   "fromDiameter": 36,
+   "toDiameter": 24,
+   "includedAngleDeg": 53.1301,
+   "probe": [
+    0,
+    -15,
+    86
+   ]
+  },
+  {
+   "id": "Zapfen Ø24",
+   "type": "Zylinder",
+   "center": [
+    0,
+    0,
+    98.5
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 24,
+   "probe": [
+    0,
+    -12,
+    99
+   ]
+  },
+  {
+   "id": "Stirnfläche",
+   "type": "Ebene",
+   "point": [
+    0,
+    0,
+    105
+   ],
+   "normal": [
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "id": "Torus-Einstich",
+   "type": "Torus",
+   "center": [
+    0,
+    0,
+    38
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "majorRadius": 25,
+   "minorRadius": 2.5,
+   "probe": [
+    0,
+    -22.5,
+    38
+   ]
+  },
+  {
+   "id": "Bohrung Ø16",
+   "type": "Zylinder",
+   "center": [
+    0,
+    0,
+    52.5
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 16
+  },
+  {
+   "id": "Teilkreis-Bohrung 1",
+   "type": "Zylinder",
+   "center": [
+    42.5,
+    0.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10,
+   "probe": [
+    42.5,
+    -5,
+    8
+   ]
+  },
+  {
+   "id": "Teilkreis-Bohrung 2",
+   "type": "Zylinder",
+   "center": [
+    21.25,
+    36.8061,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10
+  },
+  {
+   "id": "Teilkreis-Bohrung 3",
+   "type": "Zylinder",
+   "center": [
+    -21.25,
+    36.8061,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10
+  },
+  {
+   "id": "Teilkreis-Bohrung 4",
+   "type": "Zylinder",
+   "center": [
+    -42.5,
+    0.0,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10
+  },
+  {
+   "id": "Teilkreis-Bohrung 5",
+   "type": "Zylinder",
+   "center": [
+    -21.25,
+    -36.8061,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10
+  },
+  {
+   "id": "Teilkreis-Bohrung 6",
+   "type": "Zylinder",
+   "center": [
+    21.25,
+    -36.8061,
+    8
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "diameter": 10
+  },
+  {
+   "id": "Teilkreis",
+   "type": "Teilkreis",
+   "center": [
+    0,
+    0
+   ],
+   "diameter": 85,
+   "count": 6,
+   "startAngleDeg": 0
+  },
+  {
+   "id": "Flanschkanten",
+   "type": "Rundung",
+   "radius": 1.5
+  }
+ ],
+ "mesh": {
+  "triangles": 304374,
+  "vertices": 152202,
+  "edge_mm": {
+   "mean": 0.57,
+   "p5": 0.447,
+   "p95": 0.692,
+   "max": 1.037
+  },
+  "quality": {
+   "mean": 0.966,
+   "p1": 0.814,
+   "min": 0.253
+  },
+  "stl_bytes": 15218784,
+  "noise_sigma_mm": 0.008,
+  "waviness_mm": 0.003,
+  "target_edge_mm": 0.55,
+  "scan_holes": 6,
+  "generator": "scripts/make_scan_parts.py"
+ }
+}

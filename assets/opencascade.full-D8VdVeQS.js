@@ -1,0 +1,1 @@
+var e=`/messwerk-3d/assets/opencascade.full-BROZOezB.wasm`;export{e as default};
