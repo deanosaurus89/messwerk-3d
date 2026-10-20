@@ -886,6 +886,7 @@ async function previewByClick(h: Hit, add = false) {
   const pv = state.preview;
   if (state.opts.addIsl && pv && pv.fit.type === 'Ebene' && !pv.aux) { state.opts.fill.man.push({ c: [...h.point] as Vec3, r: state.opts.brush }); state.opts.addIsl = false; await applyExtract(); renderAll(); status(tt('Island added (Ø {0} mm = brush diameter).', fmt(2 * state.opts.brush, 1))); return; }
   if (state.opts.sub && pv && !pv.aux) { await removeRegion(h); return; }
+  if ((add || state.opts.multi) && pv?.aux && (pv.fit.type === 'Kreis' || pv.fit.type === 'Langloch') && (m.type === pv.fit.type || m.type === 'auto')) { await addAuxRegion(h); return; }
   if ((add || state.opts.multi) && pv && MULTI_TYPES.includes(pv.fit.type) && !pv.aux && (m.type === pv.fit.type || m.type === 'auto')) { await addPlaneRegion(h); return; }
   resetIslands(); // a new selection: island choices start from the automatic detection
   if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
@@ -982,6 +983,17 @@ async function addPlaneRegion(h: Hit) {
     await refitRegions(regions, pv.hit, type); regionOps.push('add'); regionSnaps.push(pv);
     if (extractActive()) await applyExtract();
     status(tt('{0} from {1} regions: {2} points, form {3} mm.', typeName(type), regions.length, state.preview!.indices.length, fmt(state.preview!.fit.form, 4)));
+  } catch (e: any) { status(tt('No geometry found: {0}', e.message)); }
+  renderAll();
+}
+/** 0.39: Add Region bei Kreis/Langloch – neue Wand in der bestehenden Hilfsebene, vereinigt, neu gefittet */
+async function addAuxRegion(h: Hit) {
+  const pv = state.preview!; const type = pv.fit.type as 'Kreis' | 'Langloch';
+  try {
+    const r = await busy(engine.call<any>({ op: 'auxMerge', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, seedR: state.opts.pick, type, plane: pv.aux!.plane, indices: pv.indices } as any));
+    regionOps.push('add'); regionSnaps.push(pv);
+    state.preview = { ...pv, fit: r.fit, indices: r.indices };
+    status(tt('{0} from {1} regions: {2} points, form {3} mm.', typeName(type), regionOps.filter((x) => x === 'add').length + 1, r.indices.length, fmt(r.fit.form, 4)));
   } catch (e: any) { status(tt('No geometry found: {0}', e.message)); }
   renderAll();
 }

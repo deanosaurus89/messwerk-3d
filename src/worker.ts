@@ -7,7 +7,7 @@ import { MeshTopology, brushSelect, gather } from './core/region';
 import { FitCrit, applyCrit, critSupported, formByCrit } from './core/chebyshev';
 import { autoFit, fitType, FitResult, GeomType, modelNormal, normalFilter, NormalFilter, signedDistance } from './core/fit';
 import type { Vec3 } from './core/linalg';
-import { autoExtract, extractAtRim, extractLine, extractWithAuxPlane, fitInPlane } from './core/aux';
+import { autoExtract, extractAtRim, extractLine, extractWithAuxPlane, fitInPlane , mergeAuxWall } from './core/aux';
 import { computeNormals } from './core/mesh';
 import { NurbsParams, boundaryLoop, evalSurface, fitFreeform } from './core/nurbs';
 import { buildBVH, compareToOriginal } from './core/polyedit';
@@ -81,6 +81,7 @@ export type Req =
   | { op: 'nurbs'; indices?: Uint32Array; seed?: { tri: number; point: Vec3; maxAngleDeg: number; radius: number }; params: NurbsParams }
   | { op: 'fit'; indices: Uint32Array; type: GeomType | 'auto'; params?: FitParams; crit?: FitCrit; formBy?: boolean }
   | { op: 'aux'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null; seedR?: number }
+  | { op: 'auxMerge'; tri: number; point: Vec3; maxAngleDeg: number; type: 'Kreis' | 'Langloch'; plane: FitResult; indices: Uint32Array; seedR?: number }
   | { op: 'dev'; indices: Uint32Array; fit: FitResult }
   | { op: 'reex'; fit: FitResult; indices: Uint32Array; params: ReexParams; seedPts?: Vec3[]; auxPlane?: FitResult | null }
   | { op: 'auxLine'; tri: number; point: Vec3; maxAngleDeg: number; side: 0 | 1; plane?: FitResult; ring?: { gap: number; width: number }; fill?: FillParams | null };
@@ -219,6 +220,9 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
       const af = auxFill(r, req);
       if (af) r = { ...extractWithAuxPlane(mesh!, topo, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0 }, req.type, af.plane, Infinity), plane: af.plane, planeIdx: af.indices };
       result = { indices: r.wallIdx, fit: r.fit, candidates: [], aux: { plane: r.plane, indices: r.planeIdx, raised: af?.raised, contour: af?.contour, filled: af?.added } };
+    } else if (req.op === 'auxMerge') {
+      const r = mergeAuxWall(mesh!, topo!, req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: 0, seedR: req.seedR }, req.type, req.plane, req.indices);
+      result = { indices: r.wallIdx, fit: r.fit, candidates: [] };
     } else if (req.op === 'dev') {
       // Abweichungen der Merkmalspunkte zum Ausgleichselement (Farbkarte/Whisker der Analyse)
       const idx = req.indices, P = mesh!.positions, n = idx.length, dev = new Float32Array(n), dir = new Float32Array(3 * n), pos = new Float32Array(3 * n);

@@ -154,8 +154,8 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       if (!c) cl.push((c = { n, a: 0, t: [] })); c.a += fa[u]; c.t.push(u); }
     cl.sort((a, b) => b.a - a.a);
     if (_env.DBGW) console.log('PNW', D.toFixed(1), cand.length, cl.slice(0, 4).map((c) => c.n.map((x) => x.toFixed(2)).join(',') + ':' + c.a.toFixed(0)).join(' | '));
-    for (const c of cl.slice(0, 3)) { c.t.sort((a, b) => triDist(a) - triDist(b));
-      for (const u of c.t.slice(0, 5)) { const v = F[3 * u]; const g = mk(topo.growRegion(u, [P[3 * v], P[3 * v + 1], P[3 * v + 2]], { ...o, radius: 0, type: 'Ebene' }));
+    for (const c of cl.slice(0, 3)) { c.t.sort((a, b) => fa[b] - fa[a]); // große Dreiecke = Inneres der Planfläche (nicht der Verrundungsrand)
+      for (const u of c.t.slice(0, 5)) { const v = F[3 * u]; const g = mk(topo.growRegion(u, [P[3 * v], P[3 * v + 1], P[3 * v + 2]], { ...o, radius: 0, seedR: 0, type: 'Ebene' }));
         const q = isPlanar(g); if (_env.DBGW) console.log('PNWtry', u, g.verts.length, q.ok, (topo.lastGrow as any)?.model); if (q.ok && g.verts.length >= minV) return g; } }
     return undefined;
   };
@@ -281,7 +281,9 @@ export function segmentedRim(mesh: MeshData, topo: MeshTopology, seedTri: number
  *  3) rim segmentation like Auto. The first plausible result with wall AND aux-plane points wins. */
 export function extractAtRim(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
   type: 'Kreis' | 'Langloch', diag: number, ring?: AuxRing): AuxResult {
-  const ok = (r: AuxResult | null): r is AuxResult => !!r && r.planeIdx.length >= 20 && r.wallIdx.length >= 20;
+  // 0.39: plausibel = Wand- und Ebenenpunkte vorhanden UND keine entartete Form (Langloch mit Breite ≈ 0 = nur ein Wandstreifen)
+  const sane = (f: FitResult) => f.type !== 'Langloch' || (f.width ?? 0) > Math.max(4 * topo.medianEdge(), 0.1 * (f.length ?? 0));
+  const ok = (r: AuxResult | null): r is AuxResult => !!r && r.planeIdx.length >= 20 && r.wallIdx.length >= 20 && sane(r.fit);
   const go = { ...o, radius: 0 };
   let err: unknown = null;
   try { const r = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, go, type, undefined, Infinity, ring); if (ok(r)) return r; } catch (e) { err = e; }
@@ -374,4 +376,19 @@ export function extractLine(mesh: MeshData, topo: MeshTopology, seedTri: number,
   fit.outliers = wallR.p.length - pts.length; fit.n = wallR.verts.length;
   delete fit.residuals; delete plane.residuals;
   return { fit, plane, wallIdx: wallR.verts, planeIdx, faces: [r1.verts, r2 ? r2.verts : new Uint32Array(0)] };
+}
+
+/** 0.39 Add Region für Kreis/Langloch: Wand an der neuen Klickstelle (in der bestehenden Hilfsebene) bestimmen, mit der
+ *  bisherigen Wand vereinigen und in der Ebene neu fitten – z. B. zweiter Bogen eines Langlochs -> ein vollständiges Langloch. */
+export function mergeAuxWall(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
+  type: 'Kreis' | 'Langloch', plane: FitResult, wallIdx: Uint32Array): AuxResult {
+  let add: Uint32Array;
+  try { add = extractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, type, plane).wallIdx; }
+  catch { // Klick direkt auf die Wand ohne erkennbare Ebene daneben: Wand an der Klickstelle prismatisch (Achse = Ebenennormale)
+    const tr = topo.growFit(seedTri, seedPoint, { ...o, radius: 0, prismAxis: plane.normal }); add = topo.regionVertices(tr).all; }
+  const set = new Set<number>(wallIdx); for (const v of add) set.add(v);
+  const idx = Uint32Array.from(set).sort(); const P = mesh.positions;
+  const pts = Array.from(idx, (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3);
+  const fit = fitInPlane(type, pts, plane); fit.n = idx.length; delete fit.residuals;
+  return { fit, plane, wallIdx: idx, planeIdx: new Uint32Array(0) };
 }
