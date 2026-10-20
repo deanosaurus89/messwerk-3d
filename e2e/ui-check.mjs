@@ -1,3 +1,6 @@
+// OBSOLETE (0.40 investigation): written for the v4 UI (Oct 12) – #preview-card, #pc-create/#pc-type, #catalog/#cat-feat, #d-a/#d-b,
+// #btn-report2/#report-view and German labels no longer exist (replaced by the Creation Panel, Controls and Report redesigns).
+// Its checks are covered by builder-check, samples-check, model-lock, prefs/anlabels/testpage checks. Kept for reference only.
 // Headless-Prüfung (Desktop) der dist/-Version oder einer URL: node e2e/ui-check.mjs [URL]
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
