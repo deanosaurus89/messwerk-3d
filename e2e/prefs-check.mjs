@@ -36,7 +36,7 @@ const r = await page.evaluate(async () => { const A = window.__app, S = A.state,
   if (sd) { sd.value = '2.5'; sd.dispatchEvent(new Event('change')); } document.querySelector('#opts-dlg [data-ok]').click();
   r.exact = f.measured.diameter; return r; });
 await page.reload(); await sleep(2500);
-const r2 = await page.evaluate(async () => { document.getElementById('btn-options').click(); await new Promise((z) => setTimeout(z, 300)); const v = document.getElementById('od-sdist')?.value; document.querySelector('#opts-dlg [data-ok]').click(); return { sdist: v, apts: document.getElementById('btn-annot-pts').classList.contains('on'), dec: document.getElementById('dec-val').textContent, tol: document.body.classList.contains('tol-tables') }; }));
+const r2 = await page.evaluate(async () => { document.getElementById('btn-options').click(); await new Promise((z) => setTimeout(z, 300)); const v = document.getElementById('od-sdist')?.value; document.querySelector('#opts-dlg [data-ok]').click(); return { sdist: v, apts: document.getElementById('btn-annot-pts').classList.contains('on'), dec: document.getElementById('dec-val').textContent, tol: document.body.classList.contains('tol-tables') }; });
 console.log(JSON.stringify({ r, r2 }));
 if (r.dec0 !== '2') fail(`default decimals ${r.dec0} ≠ 2`);
 if (r.tolOff.src || r.badge || r.fitField || r.gentolVisible) fail(`tolerance tables off but active: ${JSON.stringify(r)}`);
