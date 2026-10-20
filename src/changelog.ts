@@ -7,6 +7,9 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.39', date: '2026-10-19', items: [
+    'Fix (BLOCKER): Click & grow “Plane” on adaptively meshed scans (e.g. Multi-Feature demo) no longer runs over fillets/radii onto the whole part – the allowed normal deviation from the fitted surface is now estimated area-weighted (many small fillet triangles no longer widen it). Applies the same way to all geometry types.',
+  ] },
   { version: '2026.0.38', date: '2026-10-20', items: [
     'Click & grow / Auto: one edge-aware normal for every triangle (neighbourhood plane fit that keeps to the face the point lies on) – computed only where growing reaches, so loading is as fast as before; edge coverage and nominals as in 0.37.',
     'Desktop pick mode: while creating a feature (Auto, typed Click & grow, brush, eraser) the mouse no longer moves the view – clicks pick and the mouse wheel changes the pick/brush radius; Space switches to navigation and back.',
