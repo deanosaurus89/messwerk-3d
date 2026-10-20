@@ -115,7 +115,7 @@ R = [  # (release, [(id, title, steps, expected, note)])
   ('B40c', 'Begrenzung standardmäßig aus der Ausgleichsgeometrie', 'Frisches Profil (privates Fenster) › Zylinder per Smart Detect › Parameter „Boundary from“ ansehen.', 'Standard „Fitted geometry“; Umschalten auf Punkte möglich.', ''),
   ('B40d', '＋ Region hinzufügen behält die ursprüngliche Region', 'Smart Detect auf eine geteilte Fläche › „＋ Add region“ › zweite Teilfläche antippen.', 'Beide Regionen bleiben markiert, Fit aus der Vereinigung; ↶ Region nimmt die zweite zurück.', ''),
   ('B40e', '🖌＋ Pinsel-Ergänzung zum selben Merkmal', 'Smart Detect auf eine Fläche › „🖌＋ Brush add“ › weitere Punkte malen › ✓.', 'Auswahl bleibt erhalten, Typ bleibt; gemalte Punkte kommen dazu; ✓ erzeugt EIN Merkmal aus beidem.', ''),
-  ('B40f', 'Feature Builder auf dem iPhone ohne Scrollen, Tooltips', 'iPhone hochkant › Smart Detect › Vorschau › Panel ansehen; am Desktop über die Knöpfe fahren.', 'Panel passt ohne Scrollen; alle Knöpfe haben Tooltips; Texte in Deutsch und Englisch.', ''),
+  ('B40f', 'Feature Builder auf dem iPhone ohne Scrollen, Tooltips', 'iPhone hochkant › Smart Detect › Vorschau › Panel ansehen; am Desktop über die Knöpfe fahren.', 'Panel passt ohne Scrollen; alle Knöpfe haben Tooltips; alle Texte laufen über die Übersetzung (i18n).', ''),
   ('N40', '„Neu in dieser Version“ nicht beim ersten Besuch', 'Frisches Profil (privates Fenster) › App öffnen; danach Versionswechsel simulieren ist nicht nötig.', 'Beim ersten Besuch kein Dialog „What’s new“, der Klicks abfängt; für wiederkehrende Nutzer nach einem Update weiterhin.', ''),
  ]),
 ]
