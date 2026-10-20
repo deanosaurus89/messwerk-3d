@@ -7,6 +7,14 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.40', date: '2026-10-20', items: [
+    'Feature Builder (new creation panel): one main action “✨ Smart Detect” – tap a face and the feature is detected (or fitted as the chosen type). Type, pick radius and the Brush path are under “Advanced parameters”. The Auto icon is no longer pre-highlighted.',
+    'After detection: “＋ Add region” adds a further region and keeps the original, “🖌＋ Brush add” paints further points onto the same feature (selection and type stay), “− Remove region” as before.',
+    'Auxiliary-plane options (Auto / ring / plane) now also appear when Smart Detect found a circle, slot or line.',
+    'Boundary from: the default is now the fitted geometry.',
+    'Slot whose wall is not square to the face (e.g. milled vertically into an inclined face, Multi-Feature plate top left): a click on wall, arc or corner gives the whole slot; small gaps in the wall are bridged only if the fit stays plausible, so nothing leaks into the outer wall.',
+    'Fix: “What’s new” no longer opens on the very first visit (it covered the buttons).',
+  ] },
   { version: '2026.0.39', date: '2026-10-20', items: [
     'Fix (BLOCKER): Click & grow no longer runs over fillets/radii on adaptively meshed scans (e.g. the Multi-Feature demo). The growth is measured against the geometry fitted from the pick circle at the click: refits are only taken if they still describe the seed area, and the allowed normal deviation is estimated weighted by area. The same rule applies to all types.',
     'Slot/circle: a click on a straight wall, an arc or a corner gives the whole wall (the contour is followed all the way round, including across a wide fillet to the face). Add Region on a slot/circle merges the new wall piece and refits.',
