@@ -14,8 +14,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": 0.07925415208,
-     "measured": 12.07925415,
+     "deviation": 0.07926793164,
+     "measured": 12.07926793,
      "status": "IO"
     }
    },
@@ -48,8 +48,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.05492288181,
-     "measured": 0.05492288181,
+     "deviation": 0.05474354117,
+     "measured": 0.05474354117,
      "status": "NIO"
     }
    },
@@ -93,25 +93,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 20.023, [Y] 20.025 – confirm ✓ or enter the drawing values. derived median line (40 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01002369947,
+     "deviation": 0.0100234207,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01002369947,
+     "measured": 0.0100234207,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01002369947,
+       "dia": 0.0100234207,
        "dirW": [
         -0.000004422248787,
         -0.00003472187006,
         0.9999999994
        ],
        "fid": 4,
-       "margin": 0.08997630053,
+       "margin": 0.0899765793,
        "name": "Cylinder 1",
        "nomW": [
         19.99883692,
-        19.99995477,
-        10.01746062
+        19.99995478,
+        10.01736561
        ],
        "tol": 0.1
       }
@@ -136,8 +136,8 @@
     },
     "res": {
      "detail": "derived median line (40 sections) in floating Ø zone",
-     "deviation": 0.008853331618,
-     "measured": 0.008853331618,
+     "deviation": 0.008447399996,
+     "measured": 0.008447399996,
      "status": "IO"
     }
    },
@@ -195,8 +195,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": -0.002090033948,
-     "measured": 15.99790997,
+     "deviation": -0.002070378437,
+     "measured": 15.99792962,
      "status": "IO"
     }
    },
@@ -223,25 +223,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 55.075, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (35 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01020916162,
+     "deviation": 0.01020931206,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01020916162,
+     "measured": 0.01020931206,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01020916162,
+       "dia": 0.01020931206,
        "dirW": [
         -0.000004422248787,
         -0.00003472187006,
         0.9999999994
        ],
        "fid": 5,
-       "margin": 0.1897908384,
+       "margin": 0.1897906879,
        "name": "Cylinder 2",
        "nomW": [
         55.05058767,
         29.99902706,
-        25.975573
+        25.97554499
        ],
        "tol": 0.2
       }
@@ -314,7 +314,7 @@
     },
     "res": {
      "deviation": null,
-     "measured": 61.92190267,
+     "measured": 61.921458,
      "status": "—"
     }
    },
@@ -330,9 +330,9 @@
      "tolUp": 0.02
     },
     "res": {
-     "deviation": 0.002303883662,
-     "measured": 7.002303884,
-     "status": "IO"
+     "deviation": 0.6865441371,
+     "measured": 7.686544137,
+     "status": "NIO"
     }
    },
    {
@@ -347,9 +347,9 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": -0.003655647368,
-     "measured": 3.996344353,
-     "status": "IO"
+     "deviation": 0.3737187633,
+     "measured": 4.373718763,
+     "status": "NIO"
     }
    },
    {
@@ -364,8 +364,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -40.00014328,
-     "measured": -20.00014328,
+     "deviation": -40.00015003,
+     "measured": -20.00015003,
      "status": "NIO"
     }
    },
@@ -381,8 +381,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -20.00406452,
-     "measured": -3.004064521,
+     "deviation": -20.84989395,
+     "measured": -3.849893952,
      "status": "NIO"
     }
    },
@@ -676,49 +676,51 @@
     "datum": null,
     "fit": {
      "center": [
-      19.99908574,
-      19.99998299,
-      10.01746062
+      19.9991294,
+      19.99998974,
+      10.01736561
      ],
-     "diameter": 12.07925415,
-     "form": 0.05492288181,
-     "length": 18.04150326,
-     "maxNeg": -0.02784426912,
-     "maxPos": 0.02707861268,
-     "n": 3035,
+     "diameter": 12.07926793,
+     "form": 0.05474354117,
+     "length": 18.04159831,
+     "maxNeg": -0.02775081796,
+     "maxPos": 0.02699272321,
+     "n": 3180,
      "normal": [
-      0.00002433667318,
-      -0.00003933310364,
-      0.9999999989
+      -4.860156126e-7,
+      -0.00005157507602,
+      0.9999999987
      ],
-     "outliers": 0,
-     "radius": 6.039627076,
-     "rms": 0.007948156468,
+     "radius": 6.039633966,
+     "rms": 0.007931474838,
      "type": "Zylinder"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 4,
     "idx": [
-     3035,
-     1645297027
+     3180,
+     986020064
     ],
     "method": "Klick",
     "name": "Cylinder 1",
-    "pointCount": 3035,
+    "pointCount": 3180,
     "reex": null,
     "refs": null,
     "src": [
@@ -734,49 +736,51 @@
     "datum": null,
     "fit": {
      "center": [
-      55.0505104,
-      29.99946274,
-      25.97557301
+      55.050513,
+      29.99947349,
+      25.975545
      ],
-     "diameter": 15.99790997,
-     "form": 0.05426463385,
-     "length": 10.11398693,
-     "maxNeg": -0.02896347288,
-     "maxPos": 0.02530116097,
-     "n": 2137,
+     "diameter": 15.99792962,
+     "form": 0.05423720674,
+     "length": 10.11397915,
+     "maxNeg": -0.02895437413,
+     "maxPos": 0.02528283261,
+     "n": 2144,
      "normal": [
-      -0.00006405174012,
-      -0.0001007878994,
-      0.9999999929
+      -0.00006816398203,
+      -0.0001024850598,
+      0.9999999924
      ],
-     "outliers": 0,
-     "radius": 7.998954983,
-     "rms": 0.008122386019,
+     "radius": 7.998964811,
+     "rms": 0.008116143129,
      "type": "Zylinder"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 5,
     "idx": [
-     2137,
-     1009708343
+     2144,
+     2560265811
     ],
     "method": "Klick",
     "name": "Cylinder 2",
-    "pointCount": 2137,
+    "pointCount": 2144,
     "reex": null,
     "refs": null,
     "src": [
@@ -962,55 +966,57 @@
     "datum": null,
     "fit": {
      "apex": [
-      82.00220337,
-      38.00595992,
-      36.66549375
+      82.00184032,
+      38.0055569,
+      36.66565937
      ],
      "center": [
-      82.00003611,
-      38.00232835,
-      24.95300735
+      81.99990343,
+      38.00220427,
+      24.95295845
      ],
-     "diameter": 14.05342488,
-     "form": 0.05837307412,
-     "halfAngle": 0.5403705404,
-     "length": 8.711926044,
-     "maxNeg": -0.02632311968,
-     "maxPos": 0.03204995444,
-     "n": 1963,
+     "diameter": 14.05355851,
+     "form": 0.05835394617,
+     "halfAngle": 0.5403666598,
+     "length": 8.712100601,
+     "maxNeg": -0.026391493,
+     "maxPos": 0.03196245317,
+     "n": 1977,
      "normal": [
-      -0.0001850384891,
-      -0.0003100601909,
-      -0.9999999348
+      -0.0001653670505,
+      -0.0002862390851,
+      -0.9999999454
      ],
-     "outliers": 0,
-     "radius": 7.02671244,
-     "rms": 0.00799588962,
+     "radius": 7.026779257,
+     "rms": 0.007996639172,
      "type": "Kegel"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 8,
     "idx": [
-     1963,
-     225024829
+     1977,
+     2632978905
     ],
     "method": "Klick",
     "name": "Cone 1",
-    "pointCount": 1963,
+    "pointCount": 1977,
     "reex": null,
     "refs": null,
     "src": [
@@ -1026,48 +1032,50 @@
     "datum": null,
     "fit": {
      "center": [
-      59.9998805,
-      8.002794559,
-      16.99579106
+      60.00587956,
+      8.013007838,
+      16.14996171
      ],
-     "diameter": 14.00460777,
-     "form": 0.04750341641,
-     "maxNeg": -0.02638778682,
-     "maxPos": 0.02111562959,
-     "n": 648,
+     "diameter": 15.37308827,
+     "form": 0.9870255135,
+     "maxNeg": -0.3152332389,
+     "maxPos": 0.6717922746,
+     "n": 982,
      "normal": [
-      0.001203228623,
-      0.01420343539,
-      0.9998984022
+      -0.00535665747,
+      0.006187899298,
+      0.9999665075
      ],
-     "outliers": 0,
-     "radius": 7.002303884,
-     "rms": 0.008032177196,
+     "radius": 7.686544137,
+     "rms": 0.2132185589,
      "type": "Kugel"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 9,
     "idx": [
-     648,
-     115989713
+     982,
+     4282007421
     ],
     "method": "Klick",
     "name": "Sphere 1",
-    "pointCount": 648,
+    "pointCount": 982,
     "reex": null,
     "refs": null,
     "src": [
@@ -1083,50 +1091,52 @@
     "datum": null,
     "fit": {
      "center": [
-      39.99932379,
-      10.00016564,
-      20.80091046
+      39.98720004,
+      9.992327329,
+      20.5417829
      ],
-     "diameter": 12.00071011,
-     "form": 0.05985839953,
-     "length": 3.996344353,
-     "maxNeg": -0.02689741951,
-     "maxPos": 0.03296098002,
-     "minorRadius": 1.998172176,
-     "n": 1007,
+     "diameter": 12.0150823,
+     "form": 1.053191631,
+     "length": 4.373718763,
+     "maxNeg": -0.3127082152,
+     "maxPos": 0.740483416,
+     "minorRadius": 2.186859382,
+     "n": 1682,
      "normal": [
-      0.00020368974,
-      -0.0001070590794,
-      0.9999999735
+      -0.0003178893435,
+      -0.001018501426,
+      0.9999994308
      ],
-     "outliers": 0,
-     "radius": 6.000355054,
-     "rms": 0.007876043685,
+     "radius": 6.007541149,
+     "rms": 0.2165625226,
      "type": "Torus"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 10,
     "idx": [
-     1007,
-     1057187312
+     1682,
+     736685706
     ],
     "method": "Klick",
     "name": "Torus 1",
-    "pointCount": 1007,
+    "pointCount": 1682,
     "reex": null,
     "refs": null,
     "src": [
@@ -1322,8 +1332,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": 0.07925415208,
-     "measured": 12.07925415,
+     "deviation": 0.07926793164,
+     "measured": 12.07926793,
      "status": "IO"
     }
    },
@@ -1356,8 +1366,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.05492288181,
-     "measured": 0.05492288181,
+     "deviation": 0.05474354117,
+     "measured": 0.05474354117,
      "status": "NIO"
     }
    },
@@ -1401,25 +1411,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 20.023, [Y] 20.025 – confirm ✓ or enter the drawing values. derived median line (40 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01002369947,
+     "deviation": 0.0100234207,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01002369947,
+     "measured": 0.0100234207,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01002369947,
+       "dia": 0.0100234207,
        "dirW": [
         -0.000004422248787,
         -0.00003472187006,
         0.9999999994
        ],
        "fid": 4,
-       "margin": 0.08997630053,
+       "margin": 0.0899765793,
        "name": "Cylinder 1",
        "nomW": [
         19.99883692,
-        19.99995477,
-        10.01746062
+        19.99995478,
+        10.01736561
        ],
        "tol": 0.1
       }
@@ -1444,8 +1454,8 @@
     },
     "res": {
      "detail": "derived median line (40 sections) in floating Ø zone",
-     "deviation": 0.008853331618,
-     "measured": 0.008853331618,
+     "deviation": 0.008447399996,
+     "measured": 0.008447399996,
      "status": "IO"
     }
    },
@@ -1503,8 +1513,8 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": -0.002090033948,
-     "measured": 15.99790997,
+     "deviation": -0.002070378437,
+     "measured": 15.99792962,
      "status": "IO"
     }
    },
@@ -1531,25 +1541,25 @@
     },
     "res": {
      "detail": "TED suggested from the actual part, not confirmed: [X] 55.075, [Y] 30.024 – confirm ✓ or enter the drawing values. derived median line (35 sections) in Ø zone around the nominal ∥ Z (DRF A|B|C)",
-     "deviation": 0.01020916162,
+     "deviation": 0.01020931206,
      "flag": "Nominal unconfirmed",
-     "measured": 0.01020916162,
+     "measured": 0.01020931206,
      "members": [
       {
        "bonus": 0,
-       "dia": 0.01020916162,
+       "dia": 0.01020931206,
        "dirW": [
         -0.000004422248787,
         -0.00003472187006,
         0.9999999994
        ],
        "fid": 5,
-       "margin": 0.1897908384,
+       "margin": 0.1897906879,
        "name": "Cylinder 2",
        "nomW": [
         55.05058767,
         29.99902706,
-        25.975573
+        25.97554499
        ],
        "tol": 0.2
       }
@@ -1622,7 +1632,7 @@
     },
     "res": {
      "deviation": null,
-     "measured": 61.92190267,
+     "measured": 61.921458,
      "status": "—"
     }
    },
@@ -1638,9 +1648,9 @@
      "tolUp": 0.02
     },
     "res": {
-     "deviation": 0.002303883662,
-     "measured": 7.002303884,
-     "status": "IO"
+     "deviation": 0.6865441371,
+     "measured": 7.686544137,
+     "status": "NIO"
     }
    },
    {
@@ -1655,9 +1665,9 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": -0.003655647368,
-     "measured": 3.996344353,
-     "status": "IO"
+     "deviation": 0.3737187633,
+     "measured": 4.373718763,
+     "status": "NIO"
     }
    },
    {
@@ -1672,8 +1682,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -40.00014328,
-     "measured": -20.00014328,
+     "deviation": -40.00015003,
+     "measured": -20.00015003,
      "status": "NIO"
     }
    },
@@ -1689,8 +1699,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -20.00406452,
-     "measured": -3.004064521,
+     "deviation": -20.84989395,
+     "measured": -3.849893952,
      "status": "NIO"
     }
    },
@@ -1984,49 +1994,51 @@
     "datum": null,
     "fit": {
      "center": [
-      19.99908574,
-      19.99998299,
-      10.01746062
+      19.9991294,
+      19.99998974,
+      10.01736561
      ],
-     "diameter": 12.07925415,
-     "form": 0.05492288181,
-     "length": 18.04150326,
-     "maxNeg": -0.02784426912,
-     "maxPos": 0.02707861268,
-     "n": 3035,
+     "diameter": 12.07926793,
+     "form": 0.05474354117,
+     "length": 18.04159831,
+     "maxNeg": -0.02775081796,
+     "maxPos": 0.02699272321,
+     "n": 3180,
      "normal": [
-      0.00002433667318,
-      -0.00003933310364,
-      0.9999999989
+      -4.860156126e-7,
+      -0.00005157507602,
+      0.9999999987
      ],
-     "outliers": 0,
-     "radius": 6.039627076,
-     "rms": 0.007948156468,
+     "radius": 6.039633966,
+     "rms": 0.007931474838,
      "type": "Zylinder"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 4,
     "idx": [
-     3035,
-     1645297027
+     3180,
+     986020064
     ],
     "method": "Klick",
     "name": "Cylinder 1",
-    "pointCount": 3035,
+    "pointCount": 3180,
     "reex": null,
     "refs": null,
     "src": [
@@ -2042,49 +2054,51 @@
     "datum": null,
     "fit": {
      "center": [
-      55.0505104,
-      29.99946274,
-      25.97557301
+      55.050513,
+      29.99947349,
+      25.975545
      ],
-     "diameter": 15.99790997,
-     "form": 0.05426463385,
-     "length": 10.11398693,
-     "maxNeg": -0.02896347288,
-     "maxPos": 0.02530116097,
-     "n": 2137,
+     "diameter": 15.99792962,
+     "form": 0.05423720674,
+     "length": 10.11397915,
+     "maxNeg": -0.02895437413,
+     "maxPos": 0.02528283261,
+     "n": 2144,
      "normal": [
-      -0.00006405174012,
-      -0.0001007878994,
-      0.9999999929
+      -0.00006816398203,
+      -0.0001024850598,
+      0.9999999924
      ],
-     "outliers": 0,
-     "radius": 7.998954983,
-     "rms": 0.008122386019,
+     "radius": 7.998964811,
+     "rms": 0.008116143129,
      "type": "Zylinder"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 5,
     "idx": [
-     2137,
-     1009708343
+     2144,
+     2560265811
     ],
     "method": "Klick",
     "name": "Cylinder 2",
-    "pointCount": 2137,
+    "pointCount": 2144,
     "reex": null,
     "refs": null,
     "src": [
@@ -2270,55 +2284,57 @@
     "datum": null,
     "fit": {
      "apex": [
-      82.00220337,
-      38.00595992,
-      36.66549375
+      82.00184032,
+      38.0055569,
+      36.66565937
      ],
      "center": [
-      82.00003611,
-      38.00232835,
-      24.95300735
+      81.99990343,
+      38.00220427,
+      24.95295845
      ],
-     "diameter": 14.05342488,
-     "form": 0.05837307412,
-     "halfAngle": 0.5403705404,
-     "length": 8.711926044,
-     "maxNeg": -0.02632311968,
-     "maxPos": 0.03204995444,
-     "n": 1963,
+     "diameter": 14.05355851,
+     "form": 0.05835394617,
+     "halfAngle": 0.5403666598,
+     "length": 8.712100601,
+     "maxNeg": -0.026391493,
+     "maxPos": 0.03196245317,
+     "n": 1977,
      "normal": [
-      -0.0001850384891,
-      -0.0003100601909,
-      -0.9999999348
+      -0.0001653670505,
+      -0.0002862390851,
+      -0.9999999454
      ],
-     "outliers": 0,
-     "radius": 7.02671244,
-     "rms": 0.00799588962,
+     "radius": 7.026779257,
+     "rms": 0.007996639172,
      "type": "Kegel"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 8,
     "idx": [
-     1963,
-     225024829
+     1977,
+     2632978905
     ],
     "method": "Klick",
     "name": "Cone 1",
-    "pointCount": 1963,
+    "pointCount": 1977,
     "reex": null,
     "refs": null,
     "src": [
@@ -2334,48 +2350,50 @@
     "datum": null,
     "fit": {
      "center": [
-      59.9998805,
-      8.002794559,
-      16.99579106
+      60.00587956,
+      8.013007838,
+      16.14996171
      ],
-     "diameter": 14.00460777,
-     "form": 0.04750341641,
-     "maxNeg": -0.02638778682,
-     "maxPos": 0.02111562959,
-     "n": 648,
+     "diameter": 15.37308827,
+     "form": 0.9870255135,
+     "maxNeg": -0.3152332389,
+     "maxPos": 0.6717922746,
+     "n": 982,
      "normal": [
-      0.001203228623,
-      0.01420343539,
-      0.9998984022
+      -0.00535665747,
+      0.006187899298,
+      0.9999665075
      ],
-     "outliers": 0,
-     "radius": 7.002303884,
-     "rms": 0.008032177196,
+     "radius": 7.686544137,
+     "rms": 0.2132185589,
      "type": "Kugel"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 9,
     "idx": [
-     648,
-     115989713
+     982,
+     4282007421
     ],
     "method": "Klick",
     "name": "Sphere 1",
-    "pointCount": 648,
+    "pointCount": 982,
     "reex": null,
     "refs": null,
     "src": [
@@ -2391,50 +2409,52 @@
     "datum": null,
     "fit": {
      "center": [
-      39.99932379,
-      10.00016564,
-      20.80091046
+      39.98720004,
+      9.992327329,
+      20.5417829
      ],
-     "diameter": 12.00071011,
-     "form": 0.05985839953,
-     "length": 3.996344353,
-     "maxNeg": -0.02689741951,
-     "maxPos": 0.03296098002,
-     "minorRadius": 1.998172176,
-     "n": 1007,
+     "diameter": 12.0150823,
+     "form": 1.053191631,
+     "length": 4.373718763,
+     "maxNeg": -0.3127082152,
+     "maxPos": 0.740483416,
+     "minorRadius": 2.186859382,
+     "n": 1682,
      "normal": [
-      0.00020368974,
-      -0.0001070590794,
-      0.9999999735
+      -0.0003178893435,
+      -0.001018501426,
+      0.9999994308
      ],
-     "outliers": 0,
-     "radius": 6.000355054,
-     "rms": 0.007876043685,
+     "radius": 6.007541149,
+     "rms": 0.2165625226,
      "type": "Torus"
     },
     "fp": {
      "aux": "auto",
-     "k": 3,
+     "inset": 0,
+     "k": 0,
      "maxAngleDeg": 20,
      "nf": {
       "angleDeg": 30,
-      "maxPct": 10,
+      "maxPct": 100,
       "on": false
      },
      "radius": 0,
      "ring": {
       "gap": 0.5,
       "width": 3
-     }
+     },
+     "zoneBand": 1,
+     "zoneSrc": "geom"
     },
     "id": 10,
     "idx": [
-     1007,
-     1057187312
+     1682,
+     736685706
     ],
     "method": "Klick",
     "name": "Torus 1",
-    "pointCount": 1007,
+    "pointCount": 1682,
     "reex": null,
     "refs": null,
     "src": [
