@@ -177,7 +177,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     planeReg = r1;
     wall = wallByWalk(p1.normal) ?? findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, p1.normal), maxDist, { prismAxis: p1.normal });
     // 0.39: angeklickte ebene Fläche ist selbst die gerade Wand eines Langlochs (kein Wandstück daneben) -> Ebene dazu suchen
-    if (!wall && CONTOUR) { const pl = planeNearWall(60); if (pl && Math.abs(dot(isPlanar(pl).normal, p1.normal)) < 0.2) { wall = r1; planeReg = pl; } }
+    if (!wall && CONTOUR && type === 'Langloch') { const pl = planeNearWall(60); if (pl && Math.abs(dot(isPlanar(pl).normal, p1.normal)) < 0.2) { wall = r1; planeReg = pl; } }
     if (!wall) { if (isFinite(maxDist)) return null; throw new Error('No wall (hole/slot) found next to the clicked plane'); }
   } else if (p1.ok && givenPlane) {
     wall = findAround(r1, (r) => !isPlanar(r).ok && prismatic(r, givenPlane.normal), maxDist, { prismAxis: givenPlane.normal });
@@ -190,7 +190,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
       const minV = Math.max(60, Math.min(2000, 0.1 * r1.verts.length));
       const prismOk = axisFromNormals(r1.n).ratio < 0.05;
       // 0.39: Wandregion über Fase/Verrundung ausgelaufen (nicht prismatisch): Ebene in der Nähe suchen, Wand folgt der Kontur
-      if (!prismOk && CONTOUR) planeReg = planeNearWall(60);
+      if (!prismOk && CONTOUR && type !== 'auto') planeReg = planeNearWall(60);
       if (!prismOk && !planeReg) { if (isFinite(maxDist)) return null; throw new Error('Clicked face is neither a plane nor a prismatic wall'); }
       if (!planeReg) planeReg = findAround(r1, (r) => { const q = isPlanar(r); return q.ok && r.verts.length >= minV && Math.abs(dot(q.normal, ax)) > 0.95; }, maxDist);
       if (!planeReg && CONTOUR) planeReg = planeNearWall(Math.min(minV, 60));

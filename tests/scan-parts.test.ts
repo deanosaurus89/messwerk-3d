@@ -39,7 +39,9 @@ for (const key of ['pruefplatte', 'flansch', 'freiform']) {
       it(`${f.id} (${f.type}) automatisch`, () => {
         const r = autoExtract(mesh, topo, nearestTri(mesh, f.probe), f.probe, { maxAngleDeg: 20, radius: 0 }, diag);
         const m: any = r.fit;
-        if (f.type === 'Freiform') { expect(m.form).toBeGreaterThan(0.2); return; }
+        // 0.39: Wachsen bleibt am Saat-Fit verankert (kein Mitwandern über die Freiform) -> kleinere Region, Form 0.17 statt > 0.2;
+        // weiterhin ≫ Formabweichung der Regelgeometrien (≈ 0.01)
+        if (f.type === 'Freiform') { expect(m.form).toBeGreaterThan(0.15); return; }
         expect(ACCEPT[f.type]).toContain(m.type);
         if (f.type === 'Ebene') { expect(ang(m.normal, f.normal)).toBeLessThan(0.05); const d = [0, 1, 2].reduce((s, k) => s + (m.center[k] - f.point[k]) * f.normal[k], 0); expect(Math.abs(d)).toBeLessThan(0.01); }
         if (f.type === 'Zylinder') { expect(Math.abs(m.diameter - f.diameter)).toBeLessThan(0.03); expect(Math.hypot(m.center[0] - f.center[0], m.center[1] - f.center[1])).toBeLessThan(0.02); expect(ang(m.normal, f.axis)).toBeLessThan(0.2); }

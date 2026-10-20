@@ -274,8 +274,8 @@ export class MeshTopology {
   /** Neu-Fit verträglich mit dem Saat-Fit? Saat-Restabstand höchstens wenig größer, Normalenstreuung auf der Saat ≤ +2° */
   consistent(nm: FitResult, sm: FitResult, seed: number[], resid: (m: FitResult, t: ArrayLike<number>) => number, angQ: (m: FitResult, t: ArrayLike<number>, q: number) => number, tol0: number): boolean {
     if (nm.type !== sm.type) return true; // Typwechsel (Auto) folgt dem Typtest
-    if (resid(nm, seed) > Math.max(1.5 * resid(sm, seed), tol0 / 3)) return false;
-    return angQ(nm, seed, 0.5) <= angQ(sm, seed, 0.5) + (2 * Math.PI) / 180;
+    if (resid(nm, seed) > Math.max(1.5 * resid(sm, seed), tol0 / GDIV)) return false;
+    return angQ(nm, seed, 0.5) <= angQ(sm, seed, 0.5) + (GANG * Math.PI) / 180;
   }
   growFit(seedTri: number, seedPoint: Vec3, o: GrowOptions): Uint32Array {
     const m = this.mesh, f = m.indices, p = m.positions, nt = f.length / 3, fa = m.faceAreas!, fn = m.faceNormals!;
@@ -476,6 +476,8 @@ const _env = (globalThis as any).process?.env ?? {};
 export const GNF = (_env.GNF ?? '0') === '1';
 export const AW = (_env.AW ?? '1') !== '0';
 export const SEEDG = (_env.SEEDG ?? '1') !== '0';
+const GANG = +(_env.GANG ?? 2);
+const GDIV = +(_env.GDIV ?? 3);
 export const GUARD = (_env.GUARD ?? '1') !== '0';
 export const TIGHT = (_env.TIGHT ?? '0') === '1'; const TFLOOR = +(_env.TFLOOR ?? 0.05); const TK = +(_env.TK ?? 4);
 export let NORMAL_MODE: 'robust' | 'plain' | 'needle036' = 'robust';
