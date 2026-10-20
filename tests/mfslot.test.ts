@@ -9,7 +9,8 @@ const mesh = parseSTL(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) 
 const P = mesh.positions, F = mesh.indices, nt = F.length / 3, fn = mesh.faceNormals!; const topo = new MeshTopology(mesh);
 // [Name, Ebenennormale, Mitte, halbe Breite (Saat), erwartete Länge, Breite] – Länge/Breite aus dem Wandverlauf im Scan
 const SLOTS: [string, Vec3, Vec3, number, number, number][] = [['left', [-0.5, 0, 0.866], [-45.4, 50.6, 27.5], 11.5, 57.5, 23.5], ['right', [0.516, -0.018, 0.857], [43, 50.6, 27], 11.5, 57.5, 23.5]]
-// offen (0.39): Langloch bei (−65, 168) – Wand nicht ⟂ zur Fläche (Verrundung/Schräge), siehe research/backlog.md;
+// 0.40: Langloch bei (−65, 168): Wand senkrecht (⟂ Z) in die Schräge gefräst, nicht ⟂ zur Fläche
+SLOTS.push(['upper', [0, 0, 1], [-64.5, 167.9, 15], 9.5, 51.4, 22.8]);;
 const frame = (N: Vec3) => { const u = [N[2], 0, -N[0]]; const l = Math.hypot(u[0], u[2]); return [u[0] / l, 0, u[2] / l]; };
 const at = (N: Vec3, C: Vec3, uu: number, ww: number) => { const u = frame(N); let best = -1, bd = 1e9; for (let t = 0; t < nt; t++) { if (Math.abs(fn[3*t]*N[0]+fn[3*t+1]*N[1]+fn[3*t+2]*N[2]) > 0.05) continue;
   const v = F[3*t]; const q = [P[3*v]-C[0], P[3*v+1]-C[1], P[3*v+2]-C[2]]; if (Math.abs(q[0]*N[0]+q[1]*N[1]+q[2]*N[2]) > 5) continue; const a = q[0]*u[0]+q[2]*u[2], c = q[1]; const d = (a-uu)**2+(c-ww)**2; if (d < bd) { bd = d; best = t; } } return best; };

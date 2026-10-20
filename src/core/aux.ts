@@ -43,6 +43,8 @@ interface Region { tris: Uint32Array; verts: Uint32Array; p: Vec3[]; n: Vec3[] }
 
 /** Planar, wenn die Ausgleichsebene die Punkte eng beschreibt (RMS klein im Verhältnis zur Ausdehnung). */
 const _env = (globalThis as any).process?.env ?? {};
+const WALL_GAP = +(_env.WALL_GAP ?? 3), WALL_RB = +(_env.WALL_RB ?? 80);
+export const AXIS_TRACK = (_env.AXIS_TRACK ?? '1') !== '0';
 export const CONTOUR = (_env.CONTOUR ?? '1') !== '0'; const WALL_DEG = +(_env.WALL_DEG ?? 15);
 let H = 0; // mittlere Kantenlänge des Netzes (Rausch-/Auflösungsmaßstab)
 function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
@@ -133,11 +135,21 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   /** 0.39 (Martin, Langloch auf Multi-Feature): Wand entlang ihrer Kontur ganz herum verfolgen – alle zusammenhängenden
    *  Dreiecke, deren (kantenbewusste) Normale ⟂ zur Ebenennormale steht. Läuft über Bögen und Geraden gleichermaßen,
    *  stoppt an Verrundung/Kante zur Ebene (Normale kippt Richtung Achse). Für Kreis und Langloch gleich. */
-  const contourWall = (seeds: Uint32Array, axis: Vec3): Region | undefined => {
+  const contourWall = (seeds: Uint32Array, axis: Vec3, useGap = false): Region | undefined => {
     const lim = Math.sin((WALL_DEG * Math.PI) / 180), inW = new Uint8Array(nt), q: number[] = [];
     const ok = (u: number) => { const n = topo.N(u); return Math.abs(n[3 * u] * axis[0] + n[3 * u + 1] * axis[1] + n[3 * u + 2] * axis[2]) < lim; };
     for (const t of seeds) if (!inW[t] && ok(t)) { inW[t] = 1; q.push(t); }
-    for (let i = 0; i < q.length && q.length < 0.3 * nt; i++) for (const u of topo.neighbors(q[i])) if (!inW[u]) { inW[u] = 1; if (ok(u)) q.push(u); else inW[u] = 2; }
+    // 0.40: zusätzlich über kleine Lücken springen (räumliche Nachbarn ≤ gap): schmale, von Verrundungen unterbrochene
+    // Wandbänder (Wand nicht ⟂ zur Fläche, kurze senkrechte Wand) bleiben zusammenhängend. Kandidaten nur nahe der Saat.
+    const gap = useGap && WALL_GAP > 0 ? Math.max(2 * topo.medianEdge(), WALL_GAP) : 0, Pp = mesh.positions, Ff = mesh.indices;
+    const cen = (t: number): Vec3 => { const a = 3 * Ff[3 * t], b = 3 * Ff[3 * t + 1], c = 3 * Ff[3 * t + 2]; return [(Pp[a] + Pp[b] + Pp[c]) / 3, (Pp[a + 1] + Pp[b + 1] + Pp[c + 1]) / 3, (Pp[a + 2] + Pp[b + 2] + Pp[c + 2]) / 3]; };
+    let grid: Map<string, number[]> | null = null; const key = (x: number, y: number, z: number) => `${Math.floor(x / gap)},${Math.floor(y / gap)},${Math.floor(z / gap)}`;
+    if (gap > 0) { grid = new Map(); const R2 = WALL_RB * WALL_RB;
+      for (let t = 0; t < nt; t++) { const c = cen(t); if ((c[0] - seedPoint[0]) ** 2 + (c[1] - seedPoint[1]) ** 2 + (c[2] - seedPoint[2]) ** 2 > R2 || !ok(t)) continue; const k = key(c[0], c[1], c[2]); let a = grid.get(k); if (!a) grid.set(k, (a = [])); a.push(t); } }
+    for (let i = 0; i < q.length && q.length < 0.3 * nt; i++) { for (const u of topo.neighbors(q[i])) if (!inW[u]) { inW[u] = 1; if (ok(u)) q.push(u); else inW[u] = 2; }
+      if (grid) { const c = cen(q[i]); const gx = Math.floor(c[0] / gap), gy = Math.floor(c[1] / gap), gz = Math.floor(c[2] / gap);
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (const u of grid.get(`${gx + dx},${gy + dy},${gz + dz}`) ?? []) {
+          if (inW[u] === 1) continue; const d = cen(u); if ((d[0] - c[0]) ** 2 + (d[1] - c[1]) ** 2 + (d[2] - c[2]) ** 2 > gap * gap) continue; inW[u] = 1; q.push(u); } } }
     if (_env.DBGW) { const h = [0, 0, 0, 0, 0]; for (let t = 0; t < nt; t++) if (inW[t] === 2) { const n = topo.N(t); const d = Math.abs(n[3 * t] * axis[0] + n[3 * t + 1] * axis[1] + n[3 * t + 2] * axis[2]); h[d < 0.3 ? 0 : d < 0.4 ? 1 : d < 0.6 ? 2 : d < 0.9 ? 3 : 4]++; } console.log('CW', q.length, axis.map((x) => x.toFixed(2)).join(','), 'rej', h.join(' ')); }
     if (q.length < 8) return undefined; const r = mk(Uint32Array.from(q.sort((a, b) => a - b))); return r.verts.length >= 8 ? r : undefined;
   };
@@ -202,10 +214,26 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   // Normale aus dem Material heraus (Richtung der Flächennormalen der Ebenenpunkte)
   if (planeReg) { const pn = isPlanar(planeReg).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
   // 0.39: Wand immer entlang der Kontur vervollständigen (Klick auf Gerade, Bogen oder Teilstück -> ganze Wand)
-  if (CONTOUR) { const full = contourWall(wall.tris, plane.normal);
+  const t2f = type === 'auto' ? 'Kreis' : type, limF = Math.max(0.05, 0.5 * topo.localEdge(seedTri));
+  const fitOk = (r: Region) => { try { const f = fitInPlane(t2f, r.p, plane); return f.rms < limF && (t2f !== 'Langloch' || (f.width ?? 0) > 0.1 * (f.length ?? 0)) ? f : null; } catch { return null; } };
+  /** Kontur-Wand; mit Lückensprung nur, wenn der Fit damit plausibel bleibt (sonst z. B. Stufe/zweiter Ring mitgenommen) */
+  const contourBest = (seeds: Uint32Array, axis: Vec3) => { const a = contourWall(seeds, axis); if (!WALL_GAP) return a; const g = contourWall(seeds, axis, true);
+    return g && (!a || g.verts.length > a.verts.length) && fitOk(g) ? g : a; };
+  if (CONTOUR) { const full = contourBest(wall.tris, plane.normal);
     if (full && full !== wall) { // größere Kontur-Wand gewinnt; ist die bisherige Wand ausgelaufen (Fase/Verrundung), die besser passende
       const t2 = type === 'auto' ? 'Kreis' : type; const rms = (r: Region) => { try { return fitInPlane(t2, r.p, plane).rms; } catch { return Infinity; } };
-      if (full.verts.length > wall.verts.length || rms(full) < 0.5 * rms(wall)) wall = full; } }
+      if (full.verts.length > wall.verts.length || rms(full) < 0.5 * rms(wall)) wall = full; }
+    // 0.40: Wand nicht ⟂ zur Fläche (z. B. senkrecht in eine Schräge gefräst): Prismenachse aus den Normalen der gefundenen
+    // Wand schätzen (nur wenn sie gekrümmt genug ist, Achse ≤ 45° von der Ebenennormale) und mit dieser Achse erneut der
+    // Kontur folgen. Gewählt wird die vollständigste Wand, deren Kreis/Langloch-Fit plausibel bleibt – ein Auslaufen in
+    // andere Wände (schlechter Fit) wird so verworfen. Für Kreis und Langloch gleich.
+    if (AXIS_TRACK) {
+      let cur = wall, ax = plane.normal;
+      for (let it = 0; it < 3; it++) { const a = axisFromNormals(cur.n); if (!(a.ratio < 0.05)) break;
+        const na = dot(a.axis, ax) < 0 ? scale(a.axis, -1) : a.axis; if (Math.abs(dot(na, plane.normal)) < Math.cos(Math.PI / 4) || dot(na, ax) > 0.9998) break;
+        const c = contourBest(cur.tris, na); if (!c || c.verts.length <= cur.verts.length || c.verts.length > 20 * wall.verts.length || !fitOk(c)) break;
+        cur = c; ax = na; }
+      if (cur !== wall) wall = cur; } }
   let fit: FitResult;
   if (type === 'auto') {
     const fc = fitInPlane('Kreis', wall.p, plane);
