@@ -472,7 +472,7 @@ export const ROBUST_HARD = +((globalThis as any).process?.env?.RHARD ?? 2);
 export const ROBUST_HA = +((globalThis as any).process?.env?.RHA ?? 15);
 export const ROBUST_CT = +((globalThis as any).process?.env?.RCT ?? 0.5);
 export const ROBUST_CAND = ((globalThis as any).process?.env?.RCAND ?? '1') !== '0';
-const _env = (globalThis as any).process?.env ?? {};
+const _env: any = Object.assign(((globalThis as any).__mwEnv ??= {}), (globalThis as any).process?.env); // Browser: Debug-Schalter über Worker-Op 'env'
 export const GNF = (_env.GNF ?? '0') === '1';
 export const AW = (_env.AW ?? '1') !== '0';
 export const SEEDG = (_env.SEEDG ?? '1') !== '0';

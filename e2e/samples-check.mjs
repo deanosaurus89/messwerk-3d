@@ -9,6 +9,7 @@ const MODE = process.argv[3] || 'desktop';
 if (!URL) { URL = 'http://localhost:8765/'; srv = spawn('npx', ['serve', '-l', '8765', 'dist'], { stdio: 'ignore' }); await sleep(2500); }
 const browser = MODE === 'desktop' ? await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] }) : await webkit.launch();
 const ctx = await browser.newContext(MODE === 'desktop' ? { viewport: { width: 1600, height: 950 } } : { ...devices['iPhone 14 Pro'] });
+await ctx.addInitScript(() => addEventListener('DOMContentLoaded', () => new MutationObserver(() => document.querySelector('#whatsnew')?.remove()).observe(document.body, { childList: true, subtree: true })));
 const page = await ctx.newPage(); const touch = MODE !== 'desktop';
 const errors = []; page.on('pageerror', (e) => errors.push(String(e))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
@@ -75,6 +76,7 @@ try {
       tried++;
       if (!(await clickWorld(f.probe, VIEWS))) { console.log(`  ${f.id}: Prüfpunkt nicht sichtbar – übersprungen`); tried--; continue; }
       await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 60000 });
+      if (process.env.DBG) console.log('   DBG', JSON.stringify(await S(() => { const a = window.__app.state; return { mt: a.mode?.type, meth: a.mode?.method, multi: a.opts.multi, sub: a.opts.sub, aux: !!a.preview.aux, n: a.preview.indices.length, auxo: a.opts.aux, pick: a.opts.pick, regions: a.preview.regions?.length }; })));
       const m = await S(() => window.__app.state.preview.fit); const hit = await S(() => window.__app.state.preview.hit?.point ?? window.__app.state.preview.hit);
       let err = '';
       if (!ACCEPT[f.type].includes(m.type)) err = `Typ ${m.type}`;

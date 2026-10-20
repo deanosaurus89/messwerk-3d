@@ -201,6 +201,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
     } else if (req.op === 'getOriginal') {
       if (!orig) throw new Error('No original');
       result = { positions: orig.positions.slice(), indices: orig.indices.slice() };
+    } else if ((req as any).op === 'env') { Object.assign(((globalThis as any).__mwEnv ??= {}), (req as any).env); const L: string[] = ((globalThis as any).__mwLog ??= []); if ((req as any).env.DBGW) console.log = (...a: any[]) => { L.push(a.join(' ')); }; result = { ok: true, log: L.splice(0) };
     } else if (req.op === 'grow') {
       if (!topo) throw new Error('Region growing needs a polygon model (triangles). Use the brush for point clouds.');
       if (req.type === 'auto') {

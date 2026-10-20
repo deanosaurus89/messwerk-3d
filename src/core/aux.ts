@@ -42,7 +42,7 @@ export interface AuxResult {
 interface Region { tris: Uint32Array; verts: Uint32Array; p: Vec3[]; n: Vec3[] }
 
 /** Planar, wenn die Ausgleichsebene die Punkte eng beschreibt (RMS klein im Verhältnis zur Ausdehnung). */
-const _env = (globalThis as any).process?.env ?? {};
+const _env: any = Object.assign(((globalThis as any).__mwEnv ??= {}), (globalThis as any).process?.env); // Browser: Debug-Schalter über Worker-Op 'env'
 const WALL_GAP = +(_env.WALL_GAP ?? 3), WALL_RB = +(_env.WALL_RB ?? 80);
 export const AXIS_TRACK = (_env.AXIS_TRACK ?? '1') !== '0';
 export const CONTOUR = (_env.CONTOUR ?? '1') !== '0'; const WALL_DEG = +(_env.WALL_DEG ?? 15);
@@ -215,11 +215,13 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   if (planeReg) { const pn = isPlanar(planeReg).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }
   // 0.39: Wand immer entlang der Kontur vervollständigen (Klick auf Gerade, Bogen oder Teilstück -> ganze Wand)
   const t2f = type === 'auto' ? 'Kreis' : type, limF = Math.max(0.05, 0.5 * topo.localEdge(seedTri));
-  const fitOk = (r: Region) => { try { const f = fitInPlane(t2f, r.p, plane); return f.rms < limF && (t2f !== 'Langloch' || (f.width ?? 0) > 0.1 * (f.length ?? 0)) ? f : null; } catch { return null; } };
+  // 0.40: Rohfit (ohne Ausreißerunterdrückung) – das fertige Merkmal wird roh gefittet (rawFinal); ein robuster Fit übersah mitgenommene Fremdpunkte (Welle Ø50: Einstichring)
+  const fitOk = (r: Region) => { try { const f = fitInPlane(t2f, r.p, plane, false); return f.rms < limF && (t2f !== 'Langloch' || (f.width ?? 0) > 0.1 * (f.length ?? 0)) ? f : null; } catch { return null; } };
   /** Kontur-Wand; mit Lückensprung nur, wenn der Fit damit plausibel bleibt (sonst z. B. Stufe/zweiter Ring mitgenommen) */
   const contourBest = (seeds: Uint32Array, axis: Vec3) => { const a = contourWall(seeds, axis); if (!WALL_GAP) return a; const g = contourWall(seeds, axis, true);
     return g && (!a || g.verts.length > a.verts.length) && fitOk(g) ? g : a; };
-  if (CONTOUR) { const full = contourBest(wall.tris, plane.normal);
+  if (_env.DBGW) console.log('AX0', wall.verts.length, plane.normal.map((x) => x.toFixed(5)).join(','), planeReg?.verts.length, limF);
+  if (CONTOUR) { const full = contourBest(wall.tris, plane.normal); if (_env.DBGW) console.log('AX1', full?.verts.length);
     if (full && full !== wall) { // größere Kontur-Wand gewinnt; ist die bisherige Wand ausgelaufen (Fase/Verrundung), die besser passende
       const t2 = type === 'auto' ? 'Kreis' : type; const rms = (r: Region) => { try { return fitInPlane(t2, r.p, plane).rms; } catch { return Infinity; } };
       if (full.verts.length > wall.verts.length || rms(full) < 0.5 * rms(wall)) wall = full; }
@@ -233,6 +235,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
         const na = dot(a.axis, ax) < 0 ? scale(a.axis, -1) : a.axis; if (Math.abs(dot(na, plane.normal)) < Math.cos(Math.PI / 4) || dot(na, ax) > 0.9998) break;
         const c = contourBest(cur.tris, na); if (!c || c.verts.length <= cur.verts.length || c.verts.length > 20 * wall.verts.length || !fitOk(c)) break;
         cur = c; ax = na; }
+      if (_env.DBGW) console.log('AX2', cur.verts.length, ax.map((x) => x.toFixed(4)).join(','));
       if (cur !== wall) wall = cur; } }
   let fit: FitResult;
   if (type === 'auto') {
@@ -240,7 +243,7 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
     let fs: FitResult | null = null; try { fs = fitInPlane('Langloch', wall.p, plane); } catch { /* */ }
     fit = fs && fs.rms < 0.6 * fc.rms && fs.length! - fs.width! > 0.2 * fs.width! ? fs : fc;
   } else fit = fitInPlane(type, wall.p, plane);
-  fit.n = wall.verts.length;
+  fit.n = wall.verts.length; if (_env.DBGW) console.log('AX3', fit.type, fit.radius, fit.rms);
   // Plausibilität (relativ zur Netzauflösung): Wand passt nicht zu Kreis/Langloch -> keine Hilfsebenen-Lösung
   if (!(fit.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)))) { if (isFinite(maxDist)) return null; throw new Error(`Wall does not match ${type === 'auto' ? 'circle/slot' : type === 'Kreis' ? 'circle' : 'slot'} (RMS ${fit.rms.toFixed(2)} mm)`); }
   let planeIdx = planeReg ? planeReg.verts : new Uint32Array(0);
@@ -274,12 +277,14 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
     const maxD = r.best.type === 'Langloch' ? diag : T;
     try {
       const a = tryExtractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, 'auto', undefined, maxD);
+      if (_env.DBGW) console.log('AUTO-A', !!a, a?.fit.radius, a?.fit.rms);
       if (a) return { ...base, indices: a.wallIdx, fit: a.fit, aux: { plane: a.plane, indices: a.planeIdx } };
-    } catch { /* keine Hilfsebene */ }
+    } catch (e) { if (_env.DBGW) console.log('AUTO-ERR', String(e)); /* keine Hilfsebene */ }
     // Click on the rim between aux plane and hole wall (e.g. viewed at ~45°): segment the neighborhood into the
     // planar part and the wall, restart from the nearest planar triangle and fit the circle/slot in that plane.
     if (r.best.type !== 'Ebene') {
       const seg = segmentedRim(mesh, topo, seedTri, seedPoint, o, T);
+      if (_env.DBGW) console.log('AUTO-SEG', seg?.fit.radius, seg?.fit.rms, r.best.type, r.best.rms);
       if (seg && (seg.fit.rms < r.best.rms || seg.fit.rms < 0.05)) return { ...base, indices: seg.wallIdx, fit: seg.fit, aux: { plane: seg.plane, indices: seg.planeIdx } };
     }
   }
