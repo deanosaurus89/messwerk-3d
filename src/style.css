@@ -238,6 +238,8 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #labels, body.thumb #hin
 
 #btn-center { display:none !important; }
 #view-gear { position:absolute; left:8px; bottom:118px; z-index:7; display:flex; flex-direction:column-reverse; align-items:flex-start; gap:4px; }
+#view-gear .vg-amt { display:flex; align-items:center; gap:6px; padding:2px 6px; font:600 12px system-ui; color:#1e3a5c; }
+#view-gear .vg-amt input { width:90px; }
 #view-gear .vg-btn { width:34px; height:34px; border-radius:17px; border:1px solid #9fb2c8; background:#fffffff0; font-size:18px; cursor:pointer; color:#1e3a5c; box-shadow:0 2px 6px rgba(0,0,0,.2); }
 #view-gear .vg-menu { display:none; flex-direction:column; gap:3px; background:#fffffff2; border:1px solid #9fb2c8; border-radius:8px; padding:5px; box-shadow:0 3px 12px rgba(0,0,0,.22); }
 #view-gear:hover .vg-menu, #view-gear.open .vg-menu { display:flex; }
@@ -299,8 +301,18 @@ body.ctx-on #progress { bottom:80px; }
 @media (max-width:900px), (max-height:560px) {
   #ctx-panel { left:6px; right:6px; transform:none; max-width:none; bottom:6px; font-size:11.5px; gap:6px; padding:4px; flex-wrap:wrap; justify-content:flex-end; }
   #ctx-panel .cp-main { flex:1 1 100%; } #ctx-panel .cp-c button { min-height:34px; }
-  body.ctx-on #view-gear { bottom:150px; } body.ctx-on #navcube { bottom:110px; }
+  /* bottoms are set from the context-window height so the gear never covers it */
 }
+#btn-new-tab { display:none; }
+@media (max-width:900px), (max-height:560px) {
+  #btn-new-tab { display:inline-flex; align-items:center; background:none; border:none; color:#fff; font-size:16px; padding:0 8px; cursor:pointer; }
+}
+#confirm-dlg { position:fixed; inset:0; z-index:80; background:rgba(20,30,40,.35); display:flex; align-items:center; justify-content:center; }
+#confirm-dlg .ud-box { background:#fff; border-radius:8px; padding:14px 18px; max-width:min(460px,94vw); box-shadow:0 8px 30px rgba(0,0,0,.3); }
+#confirm-dlg h3 { margin:0 0 6px; font-size:15px; }
+#ctx-panel .cp-bfrom { margin-left:4px; }
+#ctx-panel .isl-x { margin-left:4px; font-weight:700; }
+#ctx-panel .cp-excl { display:flex; flex-wrap:wrap; gap:4px; align-items:center; width:100%; }
 .dlg-empty { color:#5b6b7c; padding:24px 10px; text-align:center; font-style:italic; }
 .wip-note { align-self:center; margin:0 10px; padding:4px 8px; background:#fff4d6; border:1px solid #e0b43c; border-radius:4px; color:#7a5200; font-weight:600; font-size:12px; white-space:nowrap; }
 .cl-filter { display:flex; gap:6px; align-items:center; padding:4px 8px; border-bottom:1px solid var(--line); font-size:12px; }

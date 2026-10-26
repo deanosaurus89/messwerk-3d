@@ -171,6 +171,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
   const grownC = dil(occ, 1), island = new Uint8Array(W * H); let islandCells = 0;
   if (p.islands === false) for (let k = 0; k < W * H; k++) if (inside[k] && has[k] && !grownC[k] && !rcell[k]) { island[k] = 1; islandCells++; }
   let islands: Island[] | undefined;
+  const closeH = new Uint8Array(W * H);
   if (p.isl) { // 0.31: detected islands, excluded unless chosen “not an island”
     const lift3 = (x: number, y: number) => [c[0] + u[0] * x + v[0] * y, c[1] + u[1] * x + v[1] * y, c[2] + u[2] * x + v[2] * y];
     const cellXY = (k: number) => { const i = k % W, j = (k - i) / W; return [(i + 0.5 - M) * h + x0, (j + 0.5 - M) * h + y0]; };
@@ -183,17 +184,20 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
       while (q.length) { const k = q.pop()!, i = k % W, j = (k - i) / W;
         for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= W || jj >= H) { open = true; continue; }
           const kk = jj * W + ii; if (outD[kk] && !inside[kk]) open = true; if (!cand0[kk] || comp[kk] >= 0) continue; comp[kk] = id; cells.push(kk); q.push(kk); } }
-      comps.push(open || cells.length < 2 || cells.length > 0.25 * insideCells ? [] : cells); } // large areas = form deviation of the face, not an island
+      let voidN = 0; for (const k of cells) if (!has[k] && !high[k]) voidN++;
+      const mostlyVoid = voidN >= 2 && voidN >= 0.5 * cells.length; // through-holes and countersinks stay, even when the flood touches the outer contour
+      comps.push((open && !mostlyVoid) || cells.length < 2 || (cells.length > 0.25 * insideCells && !mostlyVoid) ? [] : cells); } // large areas = form deviation of the face, not an island
     // per component: kind, centre, height, point count
     islands = [];
     const choices = p.isl;
     for (let id = 0; id < comps.length; id++) { const cells = comps[id]; if (!cells.length) continue;
       let sx = 0, sy = 0, nv = 0, nr = 0, nb = 0, npt = 0, hmx = 0; for (const k of cells) { const [x, y] = cellXY(k); sx += x; sy += y; if (!has[k] && !high[k]) nv++; if (rcell[k]) nr++; if (hpos[k] > T) nb++; npt += pc[k]; hmx = Math.max(hmx, hpos[k]); }
       const cc = lift3(sx / cells.length, sy / cells.length), area = cells.length * h * h, r = Math.sqrt(area / Math.PI);
-      const kind: Island['kind'] = nr > 0 && hmx > 0.5 ? 'raised' : nv >= 2 ? 'hole' : 'bump'; // a flat swell of a few 0.1 mm is a bump, not a raised feature
+      const kind: Island['kind'] = nv >= 2 ? 'hole' : nr > 0 && hmx > 0.5 ? 'raised' : 'bump'; // a void (bore, countersink) is a hole even when its wall is steep; a flat swell of a few 0.1 mm is a bump
       let ch: IslandChoice | undefined, bd = Math.max(1, 0.5 * r);
       for (const o of choices) { const d = Math.hypot(o.c[0] - cc[0], o.c[1] - cc[1], o.c[2] - cc[2]); if (d < bd) { bd = d; ch = o; } }
-      const rim = kind === 'hole' && nb >= 3, inc = !!ch?.inc, m = ch?.m ?? 0;
+      const rim = kind === 'hole' && (nb >= 3 || nr > 0), inc = !!ch?.inc, m = ch?.m ?? 0;
+      if (inc && kind === 'hole') for (const k of cells) if (inside[k]) closeH[k] = 1;
       // excluded zone = component refined by the margin (dilate / erode inside its bounding box)
       let i0 = W, i1 = 0, j0 = H, j1 = 0; for (const k of cells) { const i = k % W, j = (k - i) / W; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
       const rr = Math.round(Math.abs(m) / h), pad = rr + 2, bi = Math.max(0, i0 - pad), bj = Math.max(0, j0 - pad), bw = Math.min(W - 1, i1 + pad) - bi + 1, bh = Math.min(H - 1, j1 + pad) - bj + 1;
@@ -236,7 +240,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
     const ii = cx(dx * u[0] + dy * u[1] + dz * u[2]), jj = cy(dx * v[0] + dy * v[1] + dz * v[2]); if (ii >= 0 && jj >= 0 && ii < W && jj < H) selC[jj * W + ii] = 1; }
   const selD = dil(selC, 1), selInv = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) selInv[k] = selD[k] ? 0 : 1;
   const selE = dil(selInv, 1), selM = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) selM[k] = selE[k] ? 0 : 1;
-  for (let k = 0; k < W * H; k++) if (selC[k]) selM[k] = 1;
+  for (let k = 0; k < W * H; k++) if (selC[k] || closeH[k]) selM[k] = 1;
   const contour = maskLoops(selM, W, H).map((L) => L.map(([gi, gj]) => { const x = (gi - M) * h + x0, y = (gj - M) * h + y0;
     return [c[0] + u[0] * x + v[0] * y + n[0] * lift, c[1] + u[1] * x + v[1] * y + n[1] * lift, c[2] + u[2] * x + v[2] * y + n[2] * lift]; }));
   return { indices: Uint32Array.from(idx), added, cell: h, insideCells, raised: Uint32Array.from(raised), raisedCount: raised.length, contour, islandCells, insetDropped, islands };

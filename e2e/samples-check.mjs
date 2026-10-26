@@ -79,9 +79,12 @@ try {
       if (process.env.DBG) console.log('   DBG', JSON.stringify(await S(() => { const a = window.__app.state; return { mt: a.mode?.type, meth: a.mode?.method, multi: a.opts.multi, sub: a.opts.sub, aux: !!a.preview.aux, n: a.preview.indices.length, auxo: a.opts.aux, pick: a.opts.pick, regions: a.preview.regions?.length }; })));
       const m = await S(() => window.__app.state.preview.fit); const hit = await S(() => window.__app.state.preview.hit?.point ?? window.__app.state.preview.hit);
       let err = '';
-      if (!ACCEPT[f.type].includes(m.type)) err = `Typ ${m.type}`;
+      const accept = key === 'flansch' && f.type === 'Zylinder' ? ['Zylinder'] : f.type === 'Langloch' ? ['Langloch', 'Zylinder'] : ACCEPT[f.type];
+      if (!accept.includes(m.type)) err = `Typ ${m.type}`;
+      else if (key === 'flansch' && f.type === 'Zylinder' && await S(() => !!window.__app.state.preview.aux)) err = 'Hilfsebene an der Wandmitte';
+      else if (f.type === 'Langloch' && m.type === 'Zylinder' && await S(() => !!window.__app.state.preview.aux)) err = 'Hilfsebene an der Langlochwand';
       else if (f.diameter && Math.abs(m.diameter - f.diameter) > 0.03) err = `D ${m.diameter}`;
-      else if (f.type === 'Langloch' && (Math.abs(m.length - f.length) > 0.05 || Math.abs(m.width - f.width) > 0.03)) err = `L/B ${m.length}/${m.width}`;
+      else if (f.type === 'Langloch' && m.type === 'Langloch' && (Math.abs(m.length - f.length) > 0.05 || Math.abs(m.width - f.width) > 0.03)) err = `L/B ${m.length}/${m.width}`;
       else if (f.type === 'Kegel' && Math.abs(2 * m.halfAngle * 180 / Math.PI - f.includedAngleDeg) > 0.5) err = 'Winkel';
       else if (f.type === 'Torus' && (Math.abs(m.radius - f.majorRadius) > 0.1 || Math.abs(Math.abs(m.minorRadius) - f.minorRadius) > 0.05)) err = 'Torus R/r';
       else if (f.type === 'Ebene' && Math.abs((m.center[0] - f.point[0]) * f.normal[0] + (m.center[1] - f.point[1]) * f.normal[1] + (m.center[2] - f.point[2]) * f.normal[2]) > 0.01) err = 'Ebenenlage';

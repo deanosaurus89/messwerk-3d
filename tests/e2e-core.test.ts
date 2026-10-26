@@ -133,8 +133,10 @@ describe('Automatik: Ebene vs. Hilfsebene vs. Wand, Torus', () => {
     const r = autoExtract(mesh, topo, t0, pt, { maxAngleDeg: 20, radius: 0 }, 120);
     expect(r.fit.type).toBe('Kreis'); expect(r.fit.diameter!).toBeCloseTo(12.08, 1); expect(r.fit.center[2]).toBeCloseTo(20, 2);
   });
-  it('Langlochwand -> Langloch mit Hilfsebene', () => {
-    const r = run([20, 50, 10], [0, -1, 0]); expect(r.fit.type).toBe('Langloch'); expect(r.aux).toBeDefined();
+  it('Langlochwand Mitte -> Zylinder; Wand an der Kante -> Langloch mit Hilfsebene', () => {
+    // Mid-wall: the pick does not cover the face, so Smart Detect stays on the surface. The rim covers both.
+    const mid = run([20, 50, 10], [0, -1, 0]); expect(mid.fit.type).toBe('Zylinder'); expect(mid.aux).toBeUndefined();
+    const k = run([20, 50, 19.3], [0, -1, 0]); expect(k.fit.type).toBe('Langloch'); expect(k.aux).toBeDefined();
   });
   it('Torus am Beispielteil', () => {
     const r = run([40, 16, 22.8], [0, 0, 1]);
