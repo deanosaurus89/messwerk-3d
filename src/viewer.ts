@@ -94,6 +94,12 @@ export class Viewer {
       this.wire.raycast = () => {}; this.wire.visible = this.model.visible; this.scene.add(this.wire);
     }
   }
+  /** Drop the polygon model (New project). */
+  clearModel() {
+    this.setWireframe(false);
+    if (this.model) { this.scene.remove(this.model); this.model.geometry.dispose(); this.model = null; }
+    this.colors = null; this.clearPrims();
+  }
   setModel(positions: Float32Array, indices: Uint32Array, normals: Float32Array | null, keepView = false) {
     const hadWire = !!this.wire; this.setWireframe(false);
     if (this.model) { this.scene.remove(this.model); this.model.geometry.dispose(); }
@@ -581,7 +587,7 @@ export class Viewer {
   addContour(pts: number[][], color: number) {
     if (pts.length < 3) return;
     const path = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), true, 'centripetal');
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(1200, pts.length * 3), this.radius / 170, 6), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.min(1200, pts.length * 3), this.radius / 400, 6), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.85 }));
     tube.renderOrder = 8; this.prims.add(tube);
   }
   /** Kontrollpunkt (anfassbar), immer sichtbar. */

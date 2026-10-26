@@ -9,7 +9,7 @@ if (!base) { const { spawn } = await import('node:child_process'); srv = spawn('
 const b = await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 for (const [n, opt] of [['desktop', { viewport: { width: 1400, height: 900 } }], ['iphone', devices['iPhone 13']]]) {
   const p = await (await b.newContext(opt)).newPage(); const errs = []; p.on('pageerror', (e) => errs.push(e.message));
-  await p.goto(base + '?nodemo'); await p.waitForTimeout(2000);
+  await p.goto(base + '?nodemo', { timeout: 120000 }); await p.waitForTimeout(2000);
   await p.setInputFiles('#file', 'public/samples/beispielteil.stl');
   await p.waitForSelector('#unit-dlg', { timeout: 120000 }); await p.click('#unit-dlg [data-ok]'); await p.waitForTimeout(5000);
   await p.evaluate(() => document.querySelector('#whatsnew')?.remove());

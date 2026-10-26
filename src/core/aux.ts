@@ -2,7 +2,7 @@
 // Vorgehen wie in gängiger Messsoftware: Ebene aus der angrenzenden Planfläche, Wandpunkte (z. B. Bohrungswand)
 // senkrecht in diese Ebene projizieren, Kreis bzw. Stadion-Kontur in der Ebene fitten; Mittelpunkt liegt in der Ebene,
 // Orientierung = Ebenennormale.
-import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitLine, fitPlane, fitSlot, fitType } from './fit';
+import { FitResult, autoFit, axisFromNormals, fitCircle3D, fitLine, fitPlane, fitSlot, fitType, signedDistance } from './fit';
 import { Vec3, dot, norm, scale, sub, unit } from './linalg';
 import { MeshData } from './mesh';
 import { GrowOptions, MeshTopology, gather } from './region';
@@ -55,6 +55,96 @@ function isPlanar(r: Region): { ok: boolean; normal: Vec3 } {
   let ext = 0; for (const q of r.p) ext = Math.max(ext, Math.hypot(q[0] - f.center[0], q[1] - f.center[1], q[2] - f.center[2]));
   const nn = dot(f.normal, m) < 0 ? scale(f.normal, -1) : f.normal;
   return { ok: f.rms < Math.max(0.03, 0.002 * ext, 0.12 * H) && l / r.n.length > 0.9, normal: nn };
+}
+
+/** Smart Detect: the pick circle covers both a wall and a face when two normal clusters inside it are each ≥ 10 % of the area and meet at ≥ ~60°. */
+export function pickCoversEdge(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions, diag: number): boolean {
+  const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag));
+  const tris = topo.growRegion(seedTri, seedPoint, { maxAngleDeg: 179, radius: T, legacy: true, noCurv: true });
+  const fn = mesh.faceNormals; if (!fn || tris.length < 4) return false;
+  const fa = mesh.faceAreas; const cl: { n: Vec3; a: number }[] = []; let tot = 0;
+  for (const t of tris) {
+    const n: Vec3 = [fn[3 * t], fn[3 * t + 1], fn[3 * t + 2]], a = fa?.[t] ?? 1; tot += a;
+    let c = cl.find((k) => Math.abs(dot(k.n, n)) > 0.965); if (!c) cl.push((c = { n, a: 0 })); c.a += a;
+  }
+  for (let i = 0; i < cl.length; i++) if (cl[i].a >= 0.1 * tot)
+    for (let j = i + 1; j < cl.length; j++) if (cl[j].a >= 0.1 * tot && Math.abs(dot(cl[i].n, cl[j].n)) < 0.5) return true;
+  return false;
+}
+
+/** Aux plane on the clicked end of a wall. If the plane already found sits at the far end, take the planar face that
+ *  touches that end (walk across a chamfer). The nearest face wins; size only breaks a tie. A larger face a few
+ *  millimetres past the rim (the base under a pad) must not replace the face the wall actually meets. */
+function planeOnClickedSide(mesh: MeshData, topo: MeshTopology, wall: Region, planeReg: Region, plane: FitResult, seedPoint: Vec3, _o: GrowOptions): Region | undefined {
+  const axN = axisFromNormals(wall.n);
+  let axis = axN.ratio < 0.05 ? axN.axis : plane.normal;
+  if (dot(axis, plane.normal) < 0) axis = scale(axis, -1);
+  let tMin = Infinity, tMax = -Infinity;
+  for (const q of wall.p) { const t = dot(q, axis); if (t < tMin) tMin = t; if (t > tMax) tMax = t; }
+  const span = tMax - tMin; if (!(span > 0.5)) { if (_env.AUXSIDE) console.log('SIDE short', { span, ratio: +axN.ratio.toFixed(3) }); return undefined; }
+  const tClick = dot(seedPoint, axis);
+  const near = Math.abs(tClick - tMin) <= Math.abs(tClick - tMax) ? tMin : tMax;
+  const far = near === tMin ? tMax : tMin;
+  let pc = 0; for (const q of planeReg.p) pc += dot(q, axis); pc /= Math.max(1, planeReg.p.length);
+  if (Math.abs(pc - near) <= Math.abs(pc - far) + Math.max(0.5, 0.15 * span)) { if (_env.AUXSIDE) console.log('SIDE keep', { near, far, pc, span }); return undefined; }
+  const P = mesh.positions, F = mesh.indices, fn = mesh.faceNormals!, nt = F.length / 3;
+  const cen = (t: number): Vec3 => { const a = 3 * F[3 * t], b = 3 * F[3 * t + 1], c = 3 * F[3 * t + 2]; return [(P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3]; };
+  const align = (t: number) => Math.abs(fn![3 * t] * plane.normal[0] + fn![3 * t + 1] * plane.normal[1] + fn![3 * t + 2] * plane.normal[2]);
+  const axOf = (t: number) => { const c = cen(t); return c[0] * axis[0] + c[1] * axis[1] + c[2] * axis[2]; };
+  // Parallel to the face already found, in a band at the clicked end, and close to that rim (not the base plate
+  // several millimetres past a pad). One scan — no region grow from the wall click.
+  const rim: Vec3[] = [];
+  for (const q of wall.p) if (Math.abs(dot(q, axis) - near) <= 2) rim.push(q);
+  if (rim.length < 3) return undefined;
+  const lateral = (c: Vec3) => {
+    let best = Infinity;
+    const step = Math.max(1, Math.floor(rim.length / 80));
+    for (let i = 0; i < rim.length; i += step) {
+      const e = rim[i], w0 = c[0] - e[0], w1 = c[1] - e[1], w2 = c[2] - e[2];
+      const t = w0 * axis[0] + w1 * axis[1] + w2 * axis[2];
+      const r = Math.hypot(w0 - t * axis[0], w1 - t * axis[1], w2 - t * axis[2]);
+      if (r < best) best = r;
+    }
+    return best;
+  };
+  const cand: { t: number; lat: number }[] = [];
+  for (let t = 0; t < nt; t++) {
+    if (topo.sliver[t] || align(t) < 0.95) continue;
+    const c = cen(t), tc = c[0] * axis[0] + c[1] * axis[1] + c[2] * axis[2];
+    if (Math.abs(tc - near) > 3) continue;
+    const lat = lateral(c); if (lat > 8) continue;
+    cand.push({ t, lat });
+  }
+  cand.sort((a, b) => a.lat - b.lat);
+  if (!cand.length) { if (_env.AUXSIDE) console.log('SIDE noface', { near: +near.toFixed(2), far: +far.toFixed(2), click: +tClick.toFixed(2), rim: rim.length }); return undefined; }
+  let best: Region | undefined, bestDist = Infinity, grows = 0; const claimed = new Uint8Array(nt);
+  for (const { t: u } of cand) {
+    if (best && bestDist < 1.2 && best.verts.length > 40) break;
+    if (claimed[u] || align(u) < 0.95) continue;
+    grows++;
+    const n0x = fn![3 * u], n0y = fn![3 * u + 1], n0z = fn![3 * u + 2];
+    const comp = [u]; claimed[u] = 1;
+    for (let i = 0; i < comp.length && comp.length < 20000; i++) {
+      for (const w of topo.neighbors(comp[i])) {
+        if (claimed[w] || topo.sliver[w]) continue;
+        const d = Math.abs(fn![3 * w] * n0x + fn![3 * w + 1] * n0y + fn![3 * w + 2] * n0z);
+        if (d < 0.985 || align(w) < 0.95) continue;
+        claimed[w] = 1; comp.push(w);
+      }
+    }
+    if (comp.length < 8) continue;
+    const gt = Uint32Array.from(comp);
+    const v = topo.regionVertices(gt), verts = v.interior.length >= 20 ? v.interior : v.all;
+    if (verts.length < 20) continue;
+    const gth = gather(mesh, verts, 8000), reg: Region = { tris: gt, verts, p: gth.p, n: gth.n };
+    const q = isPlanar(reg);
+    if (!q.ok || Math.abs(dot(q.normal, plane.normal)) < 0.95) continue;
+    let mean = 0; for (const t of comp) mean += axOf(t); mean /= comp.length;
+    const dist = Math.abs(mean - near);
+    if (!best || dist < bestDist - 0.5 || (dist <= bestDist + 0.5 && reg.verts.length > best.verts.length)) { best = reg; bestDist = dist; }
+  }
+  if (_env.AUXSIDE) console.log('SIDE', { near: +near.toFixed(2), far: +far.toFixed(2), pc: +pc.toFixed(2), cand: cand.length, grows, best: best?.verts.length, bestDist: best ? +bestDist.toFixed(2) : undefined });
+  return best;
 }
 
 export function extractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedTri: number, seedPoint: Vec3, o: GrowOptions,
@@ -218,8 +308,16 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   // 0.40: Rohfit (ohne Ausreißerunterdrückung) – das fertige Merkmal wird roh gefittet (rawFinal); ein robuster Fit übersah mitgenommene Fremdpunkte (Welle Ø50: Einstichring)
   const fitOk = (r: Region) => { try { const f = fitInPlane(t2f, r.p, plane, false); return f.rms < limF && (t2f !== 'Langloch' || (f.width ?? 0) > 0.1 * (f.length ?? 0)) ? f : null; } catch { return null; } };
   /** Kontur-Wand; mit Lückensprung nur, wenn der Fit damit plausibel bleibt (sonst z. B. Stufe/zweiter Ring mitgenommen) */
-  const contourBest = (seeds: Uint32Array, axis: Vec3) => { const a = contourWall(seeds, axis); if (!WALL_GAP) return a; const g = contourWall(seeds, axis, true);
-    return g && (!a || g.verts.length > a.verts.length) && fitOk(g) ? g : a; };
+  // Gap-bridging prefers the larger wall, but only when that wall still contains the click (inner vs outer edge).
+  // Completing the same slot also moves the centroid; the seed-on-fit test keeps that, and rejects a bridge onto a different contour.
+  const contourBest = (seeds: Uint32Array, axis: Vec3) => {
+    const a = contourWall(seeds, axis); if (!WALL_GAP) return a;
+    const g = contourWall(seeds, axis, true);
+    const fg = g && (!a || g.verts.length > a.verts.length) ? fitOk(g) : null;
+    if (!fg) return a;
+    if (a && fitOk(a) && Math.abs(signedDistance(fg, seedPoint)) > Math.max(1.5, 4 * topo.medianEdge())) return a;
+    return g;
+  };
   if (_env.DBGW) console.log('AX0', wall.verts.length, plane.normal.map((x) => x.toFixed(5)).join(','), planeReg?.verts.length, limF);
   if (CONTOUR) { const full = contourBest(wall.tris, plane.normal); if (_env.DBGW) console.log('AX1', full?.verts.length);
     if (full && full !== wall) { // größere Kontur-Wand gewinnt; ist die bisherige Wand ausgelaufen (Fase/Verrundung), die besser passende
@@ -237,6 +335,17 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
         cur = c; ax = na; }
       if (_env.DBGW) console.log('AX2', cur.verts.length, ax.map((x) => x.toFixed(4)).join(','));
       if (cur !== wall) wall = cur; } }
+  if (_env.AUXSIDE) console.log('SIDE enter', { plane: !!planeReg, wall: wall?.verts.length, given: !!givenPlane });
+  if (!givenPlane && planeReg && wall) {
+    const alt = planeOnClickedSide(mesh, topo, wall, planeReg, plane, seedPoint, o);
+    if (alt) {
+      let np = fitType('Ebene', alt.p, alt.n); const pn = isPlanar(alt).normal; if (dot(pn, np.normal) < 0) np = { ...np, normal: scale(np.normal, -1) };
+      const t2 = type === 'auto' ? 'Kreis' : type;
+      let keep = false; let rms = -1; try { const f = fitInPlane(t2, wall.p, np); rms = f.rms; keep = f.rms < Math.max(0.05, 0.5 * topo.localEdge(seedTri)) && (t2 !== 'Langloch' || (f.width ?? 0) > 0.1 * (f.length ?? 0)); } catch { /* keep the plane already found */ }
+      if (_env.AUXSIDE) console.log('SIDE fit', { keep, rms: +rms.toFixed(3) });
+      if (keep) { planeReg = alt; plane = np; }
+    }
+  }
   let fit: FitResult;
   if (type === 'auto') {
     const fc = fitInPlane('Kreis', wall.p, plane);
@@ -271,8 +380,10 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
   if (g.p.length < 3) throw new Error('Too few points selected');
   const r = autoFit(g.p, g.n);
   const base = { indices: use, fit: r.best, candidates: r.candidates.map((c) => ({ type: c.type, rms: c.rms })) };
-  // Kugel/Torus/Kegel direkt neben einer Ebene sind meist Bohrungsränder: Kreis in Hilfsebene bevorzugen
-  if (['Ebene', 'Zylinder', 'Kreis', 'Langloch', 'Kugel', 'Torus', 'Kegel'].includes(r.best.type)) {
+  const curve = (t: string) => t === 'Kreis' || t === 'Langloch' || t === 'Linie';
+  // Curve features only when the pick covers BOTH the wall and the adjacent face. A click in the middle of a face stays a surface feature.
+  const edge = pickCoversEdge(mesh, topo, seedTri, seedPoint, o, diag);
+  if (edge && ['Ebene', 'Zylinder', 'Kreis', 'Langloch', 'Kugel', 'Torus', 'Kegel'].includes(r.best.type)) {
     const T = o.seedR && o.seedR > 0 ? Math.max(o.seedR, 0.05) : Math.min(3, Math.max(0.5, 0.015 * diag)); // pick circle: plane/wall transition must lie inside it
     const maxD = r.best.type === 'Langloch' ? diag : T;
     try {
@@ -288,7 +399,13 @@ export function autoExtract(mesh: MeshData, topo: MeshTopology, seedTri: number,
       if (seg && (seg.fit.rms < r.best.rms || seg.fit.rms < 0.05)) return { ...base, indices: seg.wallIdx, fit: seg.fit, aux: { plane: seg.plane, indices: seg.planeIdx } };
     }
   }
-  return { ...base, aux: undefined as undefined | { plane: FitResult; indices: Uint32Array } };
+  let best = r.best;
+  if (curve(best.type)) {
+    const z = r.candidates.find((c) => c.type === 'Zylinder' && isFinite(c.rms));
+    const surf = z ?? r.candidates.filter((c) => !curve(c.type) && isFinite(c.rms)).sort((a, b) => a.rms - b.rms)[0];
+    if (surf) best = surf;
+  }
+  return { indices: use, fit: best, candidates: base.candidates, aux: undefined as undefined | { plane: FitResult; indices: Uint32Array } };
 }
 
 /** Neighborhood segmentation plane + wall: dominant face-normal direction N in a disc around the click; restart the
@@ -394,6 +511,11 @@ export function extractLine(mesh: MeshData, topo: MeshTopology, seedTri: number,
     if (++tried > 300) break;
   }
   if (!r2 && !givenPlane) throw new Error('No adjacent face found – click closer to an edge');
+  if (!givenPlane && r2 && !isPlanar(r1).ok) {
+    const pl = fitType('Ebene', r2.p, r2.n);
+    const alt = planeOnClickedSide(mesh, topo, r1, r2, pl, seedPoint, o);
+    if (alt) r2 = alt;
+  }
   const [auxR, wallR] = givenPlane ? [undefined, r1] : auxSide === 0 ? [r1, r2!] : [r2!, r1];
   let plane = givenPlane ?? fitType('Ebene', auxR!.p, auxR!.n);
   if (auxR) { const pn = isPlanar(auxR).normal; if (dot(pn, plane.normal) < 0) plane = { ...plane, normal: scale(plane.normal, -1) }; }

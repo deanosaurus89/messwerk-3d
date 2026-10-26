@@ -54,6 +54,11 @@ describe('frozen point set on the demo top plane', () => {
     let cur: Uint32Array = created;
     for (let k = 0; k < 2; k++) { const r = reextract(fit, pos, nrm, cur, { ...P, frozenIdx: created }, [], tris); expect(r.indices.length).toBe(created.length); expect(r.indices.every((v, i) => v === created[i])).toBe(true); cur = r.indices; }
   });
+  it('beispielteil top plane: exclusion 0 keeps the creation set when the search distance is tighter than the creation band', () => {
+    const r = reextract(fit, pos, nrm, created, { ...P, maxDist: 1e-4, frozenIdx: created }, [], tris);
+    expect(r.indices.length).toBe(created.length);
+    expect(r.indices.every((v, i) => v === created[i])).toBe(true);
+  });
   it('polygon only (without the frozen point set) now nearly matches too (0.35: +1.3 %)', () => {
     const r = reextract(fit, pos, nrm, created, P, [], tris); const s = new Set(created); const extra = Array.from(r.indices).filter((v) => !s.has(v)).length;
     console.log('[0.36] polygon-only reex', r.indices.length, 'extra', extra, 'of', created.length);

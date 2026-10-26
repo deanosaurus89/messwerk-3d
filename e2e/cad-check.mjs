@@ -4,6 +4,11 @@ import { chromium, webkit, devices } from 'playwright';
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import fs from 'node:fs';
+const FX = process.env.CAD_FIXTURES || 'tests/fixtures/cad';
+if (!fs.existsSync(FX + '/motordeckel.stp') || !fs.existsSync(FX + '/deviated-cover.igs')) {
+  console.log('SKIP cad-check: private CAD fixtures absent (' + FX + '/motordeckel.stp, ' + FX + '/deviated-cover.igs). Same skip as tests/cad.test.ts describe.skipIf.');
+  process.exit(0);
+}
 let URL = process.argv[2] && process.argv[2] !== '-' ? process.argv[2] : null, srv = null; const PH = process.argv[3] === 'iphone'; const SUF = PH ? '-iphone' : '';
 if (!URL) { URL = 'http://localhost:8770/'; srv = spawn('npx', ['serve', '-l', '8770', 'dist'], { stdio: 'ignore' }); await sleep(2500); }
 const b = PH ? await webkit.launch() : await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -14,7 +19,7 @@ const idle = () => page.waitForFunction(() => !window.__app.cad.busy, null, { ti
 const camd = () => S(() => { const v = window.__app.viewer; return v.camera.position.toArray().map((x) => +x.toFixed(2)).join(','); });
 const tap = async (x, y) => { if (process.env.DBG) console.log('cam', await camd()); if (PH) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y); await sleep(350); };
 const panel = async (on) => { if (PH) { await S((on) => window.__app.togglePanel('dialog', on), on); await sleep(on ? 300 : 700); } };
-await page.goto(URL, { waitUntil: 'networkidle' });
+await page.goto(URL.includes('nodemo') ? URL : URL + (URL.includes('?') ? '&' : '?') + 'nodemo', { waitUntil: 'networkidle' });
 await page.click('.tab[data-tab="nuetz"]');
 // sichtbarer Punkt auf einer Fläche (größtes Dreieck, vom Picking bestätigt), Rückgabe Bildschirmkoordinaten
 const spot = (pred) => S((pred) => { const a = window.__app, v = a.viewer, r = v.renderer.domElement.getBoundingClientRect(); const fs = [...a.cad.faces].filter((f) => f.visible && (pred === 'any' || f.type === pred)).sort((x, y) => y.area - x.area);
@@ -30,7 +35,6 @@ const frontal = (T) => S((T) => { const a = window.__app, v = a.viewer; const f 
     let best = 0, bd = Infinity; for (let i = 0; i < n; i++) { const d = (P[3 * i] - c[0]) ** 2 + (P[3 * i + 1] - c[1]) ** 2 + (P[3 * i + 2] - c[2]) ** 2; if (d < bd) { bd = d; best = i; } }
     v.camera.position.set(c[0] + N[3 * best] * 100, c[1] + N[3 * best + 1] * 100, c[2] + N[3 * best + 2] * 100); v.controls.target.set(...c); v.controls.update(); v.focus(c, Math.sqrt(f.area) * 0.6); }, T);
 const areaOf = (id) => S((id) => { const f = window.__app.cad.faces[id]; return f.res ? f.res.area : f.area; }, id);
-const FX = process.env.CAD_FIXTURES || 'tests/fixtures/cad';
 for (const [file, key] of [[FX + '/motordeckel.stp', 'stp'], [FX + '/deviated-cover.igs', 'igs']]) {
   const t0 = Date.now(); await page.setInputFiles('#cad-file', file);
   await page.waitForFunction((n) => window.__app.cad.name && window.__app.cad.name.includes(n), file.split('/').pop(), { timeout: 300000 }); await idle(); await sleep(800);

@@ -15,7 +15,7 @@ const result = () => S(() => { const { state } = window.__app; const fm = new Ma
   return { feats: state.features.map((f) => f.name + (f.datum ? `[${f.datum}]` : '')).join(', '), pos: pc ? pc.datumIds.map((i) => fm.get(i)?.datum).join('|') + ' ' + JSON.stringify(pc.basic) : '',
     posVal: pc ? window.__app.evaluate(pc, fm, window.__app.ctx).measured : null }; });
 try {
-  await page.goto(URL, { waitUntil: 'networkidle' });
+  await page.goto(URL.includes('nodemo') ? URL : URL + (URL.includes('?') ? '&' : '?') + 'nodemo', { waitUntil: 'networkidle' });
   // A) alles überspringen
   await S(() => window.__app.startTraining()); let n = 0;
   while (n++ < 40) {
@@ -24,19 +24,19 @@ try {
     const skip = page.locator('#tc-skip');
     if (await skip.count()) await skip.click(); else await page.click('#tc-next');
     await page.waitForFunction((i) => !window.__app.tour || window.__app.tour.idx !== i, t.i, { timeout: 60000 });
-    if (t.i === 1 && MODE === 'desktop') await page.screenshot({ path: `docs/${MODE}-training-ueberspringen.png` });
+    if (t.i === 1 && MODE === 'desktop') await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-training-ueberspringen.png` });
   }
   let r = await result(); console.log('Alles übersprungen:', JSON.stringify(r));
-  if (!/Ebene 1\[A\].*Ebene 2\[B\].*Ebene 3\[C\].*Zylinder 1/.test(r.feats) || r.pos !== 'A|B|C [20,20,0]' || !(r.posVal < 0.05)) fail('Überspringen erzeugt nicht alle Ergebnisse');
+  if (!/Plane 1\[A\].*Plane 2\[B\].*Plane 3\[C\].*Cylinder 1/.test(r.feats) || r.pos !== 'A|B|C [20,20,0]' || !(r.posVal < 0.05)) fail('Überspringen erzeugt nicht alle Ergebnisse');
   // B) neu laden, Training, Schrittliste → direkt zu „Positionstoleranz“
   await page.reload({ waitUntil: 'networkidle' }); await page.click('#rb-discard').catch(() => {});
   await S(() => window.__app.startTraining()); await page.click('#tc-list'); await sleep(200);
-  await page.screenshot({ path: `docs/${MODE}-training-schrittliste.png` });
-  const k = await S(() => window.__app.tour.steps.findIndex((s) => s.title.startsWith('Positionstoleranz')));
+  await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-training-schrittliste.png` });
+  const k = await S(() => window.__app.tour.steps.findIndex((s) => s.title.startsWith('Position tolerance')));
   await page.click(`.tc-list button[data-i="${k}"]`);
   await page.waitForFunction((k) => window.__app.tour?.idx === k, k, { timeout: 90000 });
   r = await result(); console.log('Sprung zu Schritt', k + 1, ':', JSON.stringify(r));
-  if (!/Ebene 1\[A\].*Ebene 2\[B\].*Ebene 3\[C\].*Zylinder 1/.test(r.feats)) fail('Sprung erzeugt Voraussetzungen nicht');
+  if (!/Plane 1\[A\].*Plane 2\[B\].*Plane 3\[C\].*Cylinder 1/.test(r.feats)) fail('Sprung erzeugt Voraussetzungen nicht');
   await sleep(1500);
   if (!(await S(() => window.__app.tour.idx)) > k) console.log('(Position automatisch erkannt → weiter)');
 } catch (e) { fail(e.stack || e); }

@@ -94,9 +94,12 @@ export function frozenTester(F: FrozenBoundary, d: number, off = 0, setOnly = fa
   const { o, n, u, v } = F;
   return (q: [number, number, number]) => {
     const w0 = q[0] - o[0], w1 = q[1] - o[1], w2 = q[2] - o[2];
-    if (Math.abs(w0 * n[0] + w1 * n[1] + w2 * n[2]) > d) return false;
     const x = w0 * u[0] + w1 * u[1] + w2 * u[2], y = w0 * v[0] + w1 * v[1] + w2 * v[2];
-    if (setOnly) return off < 0 ? minDist(x, y, -off) >= -off : true; // 0.35: candidate is a frozen vertex – only the exclusion distance
+    // 0.35 / 0.41: a frozen vertex is already in the creation set. Exclusion 0 keeps every one of them.
+    // The search distance must not drop points that sit slightly off the refined plane (the creation band is tighter
+    // than that). A positive exclusion distance only measures in-plane distance to the frozen loops.
+    if (setOnly) return off < 0 ? minDist(x, y, -off) >= -off : true;
+    if (Math.abs(w0 * n[0] + w1 * n[1] + w2 * n[2]) > d) return false;
     if (x < ox - g || x > ox + nx * g || y < oy - g || y > oy + ny * g) return false;
     const inn = inside(x, y);
     if (off < 0) return inn && minDist(x, y, -off) >= -off;

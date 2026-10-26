@@ -17,9 +17,10 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   await page.goto(BASE + '?nodemo'); await sleep(2500);
   await page.setInputFiles('#file', STL); await page.waitForSelector('#unit-dlg', { timeout: 180000 }); await page.click('#unit-dlg [data-ok]'); await sleep(5000);
   const r = await page.evaluate(async () => { const A = window.__app, S = A.state, w = (ms) => new Promise((r) => setTimeout(r, ms)), T = A.TRAIN_FEATS, r = {};
-    A.startFitMode('auto'); A.renderAll(); await w(300); r.autoOption = !!document.querySelector('details.cp-params select[data-exs="zoneSrc"]') && !!document.querySelector('details.cp-params #cp-area');
+    A.startFitMode('auto'); A.renderAll(); await w(300);
     S.opts.ex.zoneSrc = 'geom'; await A.previewByClick(A.hitAt(T.H[1], T.H[2])); await w(1200); r.grown = S.preview.indices.length;
     const sel = document.querySelector('#cp-type'); sel.value = 'Zylinder'; sel.dispatchEvent(new Event('change')); await w(2500);
+    const zb = document.querySelector('#ctx-panel [data-zsrc="geom"]'); r.autoOption = !!zb && !zb.closest('details');
     r.preview = S.preview.indices.length; await A.commitPreview(); await w(1000); const f = S.features.at(-1); r.created = f.indices.length; r.src = f.fp?.zoneSrc;
     S.mode = null; S.preview = null; A.renderAll(); await A.refitFeature(f); await w(1000); r.refit = f.indices.length;
     const pos = A.viewer.model.geometry.getAttribute('position').array, m = f.measured, n = m.normal, c = m.center; let t0 = Infinity, t1 = -Infinity;

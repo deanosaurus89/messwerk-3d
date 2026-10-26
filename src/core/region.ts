@@ -597,6 +597,14 @@ export function brushSelect(m: MeshData, center: Vec3, radius: number, facing?: 
   return new Uint32Array(out);
 }
 
+/** Sorted union of vertex indices. Add region keeps every index already chosen, then refits. */
+export function unionIndices(a: ArrayLike<number>, b: ArrayLike<number>): Uint32Array {
+  const s = new Set<number>();
+  for (let i = 0; i < a.length; i++) s.add(a[i]);
+  for (let i = 0; i < b.length; i++) s.add(b[i]);
+  return Uint32Array.from(s).sort((x, y) => x - y);
+}
+
 /** Punkte/Normalen einer Knotenmenge holen, ggf. gleichmäßig ausdünnen. */
 export function gather(m: MeshData, idx: Uint32Array, maxPts = 30000): { p: Vec3[]; n: Vec3[] } {
   const step = Math.max(1, Math.ceil(idx.length / maxPts));

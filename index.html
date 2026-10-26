@@ -10,9 +10,10 @@
 </head>
 <body>
 <div id="app">
-  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span class="qat" id="qat" title="Quick Access Toolbar"><button id="q-undo" disabled title="Undo (Ctrl+Z) – for now: the last mesh edit; later: every operation">↶</button><button id="q-redo" disabled title="Redo (Ctrl+Y) – comes with the global undo (later)">↷</button></span><span id="projname">New project</span>
+  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span class="qat" id="qat" title="Quick Access Toolbar"><button id="q-undo" disabled title="Undo (Ctrl+Z) – for now: the last mesh edit; later: every operation">↶</button><button id="q-redo" disabled title="Redo (Ctrl+Y) – comes with the global undo (later)">↷</button><button type="button" id="btn-new-title" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)">📄</button></span><span id="projname">New project</span>
     <input id="search" placeholder="Search tree …" /></header>
   <nav id="ribbon-tabs">
+    <button type="button" id="btn-new-tab" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)">📄</button>
     <button class="tab active" data-tab="start">Home</button>
     <button class="tab" data-tab="merkmale" title="Start: features, coordinate systems and mesh editing">Start</button>
     <button class="tab" data-tab="pruef">Controls</button>
@@ -25,6 +26,7 @@
   <section id="ribbon">
     <div class="panel" data-tab="start">
       <div class="group"><div class="btns">
+        <button class="big" id="btn-new" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)"><span class="ico">📄</span>New project</button>
         <label class="big" title="Import polygon model or point cloud"><span class="ico">⤓</span>Import<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc,.gz" hidden /></label>
         <button class="big" id="btn-sample" title="Load a demo part (sample data)"><span class="ico">▣</span>Load sample</button>
       </div><div class="glabel">Data</div></div>

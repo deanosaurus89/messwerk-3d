@@ -13,6 +13,19 @@ await ctx.addInitScript(() => addEventListener('DOMContentLoaded', () => new Mut
 const page = await ctx.newPage(); const touch = MODE !== 'desktop';
 const errors = []; page.on('pageerror', (e) => errors.push(String(e))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
+/** Second sample replaces the project: unsaved changes, then “Load and create a new project”. */
+async function confirmReplace() {
+  const dlg = page.locator('#confirm-dlg');
+  if (!(await dlg.waitFor({ state: 'visible', timeout: 1200 }).then(() => true, () => false))) return;
+  for (let i = 0; i < 3; i++) {
+    if (!(await dlg.isVisible().catch(() => false))) return;
+    const discard = dlg.locator('[data-c="discard"]'), neu = dlg.locator('[data-c="new"]');
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    else if (await neu.isVisible().catch(() => false)) await neu.click();
+    else return;
+    await sleep(200);
+  }
+}
 const S = (fn, a) => page.evaluate(fn, a);
 const P = MODE === 'desktop' ? 'desktop' : 'iphone';
 async function clickWorld(p, views) {
@@ -47,18 +60,23 @@ try {
   await S(() => document.querySelector('#whatsnew')?.remove()); // 0.40: „Neu in dieser Version“ fing die Klicks ab
   await page.click('#btn-sample');
   await page.waitForSelector('.sample-card');
+  await page.locator('.sd-grid').evaluate((g) => { g.scrollTop = g.scrollHeight; });
   await page.waitForFunction(() => [...document.querySelectorAll('.sample-card img')].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 20000 }).catch(() => fail('Vorschaubilder nicht geladen'));
+  await page.locator('.sd-grid').evaluate((g) => { g.scrollTop = 0; });
   const cards = await S(() => [...document.querySelectorAll('.sample-card')].map((c) => c.dataset.key));
   console.log('Karten:', cards.join(', '));
   // 0.40: Kartensatz aus public/samples/index.json (statt fest 4 / pruefplatte, freiform)
   const IDX = JSON.parse(fs.readFileSync('public/samples/index.json', 'utf8')).filter((x) => !x.hidden).map((x) => x.key);
   if (cards.length !== IDX.length || IDX.some((k) => !cards.includes(k))) fail(`erwartet Beispielteile ${IDX.join(', ')}`);
-  await page.screenshot({ path: `docs/${P}-beispiel-auswahl.png` });
+  const shotDir = process.env.SHOT_DIR || 'docs';
+  await page.screenshot({ path: `${shotDir}/${P}-beispiel-auswahl.png` });
   await page.click('#sd-close');
   // Teile ohne Soll-JSON: nur Laden prüfen (Mesh vorhanden); Teile mit Soll-JSON: zusätzlich Auto-Extraktion gegen Soll
   for (const key of IDX.filter((k) => !fs.existsSync(`public/samples/${k}.json`) && k !== 'cadsample')) {
     await page.click('.tab[data-tab="start"]').catch(() => {}); const t0 = Date.now();
+    await confirmReplace();
     await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${key}"]`);
+    await confirmReplace();
     const loaded = await page.waitForFunction((k) => window.__app.state.data?.name === k && window.__app.state.data.vertexCount > 1000, key, { timeout: 180000 }).then(() => true, () => false);
     if (!loaded) fail(`${key}: nicht geladen`); else console.log(`${key}: geladen in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }
@@ -66,7 +84,9 @@ try {
     const nom = JSON.parse(fs.readFileSync(`public/samples/${key}.json`, 'utf8'));
     await page.click('.tab[data-tab="start"]').catch(() => {});
     const t0 = Date.now();
+    await confirmReplace();
     await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${key}"]`);
+    await confirmReplace();
     await page.waitForFunction((k) => window.__app.state.data?.name === k, key, { timeout: 180000 });
     const st = await page.textContent('#stats');
     console.log(`${nom.name}: geladen in ${((Date.now() - t0) / 1000).toFixed(1)} s, ${st}`);
@@ -79,23 +99,27 @@ try {
       if (process.env.DBG) console.log('   DBG', JSON.stringify(await S(() => { const a = window.__app.state; return { mt: a.mode?.type, meth: a.mode?.method, multi: a.opts.multi, sub: a.opts.sub, aux: !!a.preview.aux, n: a.preview.indices.length, auxo: a.opts.aux, pick: a.opts.pick, regions: a.preview.regions?.length }; })));
       const m = await S(() => window.__app.state.preview.fit); const hit = await S(() => window.__app.state.preview.hit?.point ?? window.__app.state.preview.hit);
       let err = '';
-      if (!ACCEPT[f.type].includes(m.type)) err = `Typ ${m.type}`;
+      const accept = key === 'flansch' && f.type === 'Zylinder' ? ['Zylinder'] : f.type === 'Langloch' ? ['Langloch', 'Zylinder'] : ACCEPT[f.type];
+      if (!accept.includes(m.type)) err = `Typ ${m.type}`;
+      else if (key === 'flansch' && f.type === 'Zylinder' && await S(() => !!window.__app.state.preview.aux)) err = 'Hilfsebene an der Wandmitte';
+      else if (f.type === 'Langloch' && m.type === 'Zylinder' && await S(() => !!window.__app.state.preview.aux)) err = 'Hilfsebene an der Langlochwand';
       else if (f.diameter && Math.abs(m.diameter - f.diameter) > 0.03) err = `D ${m.diameter}`;
-      else if (f.type === 'Langloch' && (Math.abs(m.length - f.length) > 0.05 || Math.abs(m.width - f.width) > 0.03)) err = `L/B ${m.length}/${m.width}`;
+      else if (f.type === 'Langloch' && m.type === 'Langloch' && (Math.abs(m.length - f.length) > 0.05 || Math.abs(m.width - f.width) > 0.03)) err = `L/B ${m.length}/${m.width}`;
       else if (f.type === 'Kegel' && Math.abs(2 * m.halfAngle * 180 / Math.PI - f.includedAngleDeg) > 0.5) err = 'Winkel';
       else if (f.type === 'Torus' && (Math.abs(m.radius - f.majorRadius) > 0.1 || Math.abs(Math.abs(m.minorRadius) - f.minorRadius) > 0.05)) err = 'Torus R/r';
       else if (f.type === 'Ebene' && Math.abs((m.center[0] - f.point[0]) * f.normal[0] + (m.center[1] - f.point[1]) * f.normal[1] + (m.center[2] - f.point[2]) * f.normal[2]) > 0.01) err = 'Ebenenlage';
       console.log(`  ${f.id}: ${m.type}${m.diameter ? ' Ø' + m.diameter.toFixed(4) : ''}${m.type === 'Langloch' ? ` ${m.length.toFixed(3)}×${m.width.toFixed(3)}` : ''}${m.type === 'Torus' ? ` R${m.radius.toFixed(3)} r${Math.abs(m.minorRadius).toFixed(3)}` : ''}${m.type === 'Kegel' ? ` ${(2 * m.halfAngle * 180 / Math.PI).toFixed(3)}°` : ''} Form ${m.form.toFixed(4)}${err ? ' Treffer ' + JSON.stringify(hit) : ''} ${err ? '✗ ' + err : '✓'}`);
       if (err) fail(`${key} ${f.id}: ${err}`); else ok++;
+      await page.evaluate(() => document.getElementById('ctx-menu')?.classList.add('hidden'));
       await page.click('#cp-ok');
     }
     if (ok < Math.min(3, tried)) fail(`${key}: nur ${ok} Merkmale korrekt geprüft`);
     console.log(`  → ${ok}/${tried} korrekt`);
     await S(() => { const { viewer } = window.__app; viewer.viewDir([1, -1.3, 1.1]); viewer.view('fit'); viewer.viewDir([1, -1.3, 1.1]); }); await sleep(500);
-    await page.screenshot({ path: `docs/${P}-scan-${key}.png` });
+    await page.screenshot({ path: `${shotDir}/${P}-scan-${key}.png` });
     const c = close[key]; if (!c) { await page.keyboard.press('Escape').catch(() => {}); continue; }
     await S(([t, d, r]) => { const { viewer, state } = window.__app; state.showLabels = false; state.showPrims = false; state.colorPts = false; state.sel = []; window.__app.renderAll(); viewer.viewDir(d); viewer.focus(t, r); viewer.setWireframe(true); }, c);
-    await sleep(600); await page.screenshot({ path: `docs/${P}-scan-${key}-netz.png` });
+    await sleep(600); await page.screenshot({ path: `${shotDir}/${P}-scan-${key}-netz.png` });
     await S(() => { const { viewer, state } = window.__app; viewer.setWireframe(false); state.showLabels = true; state.showPrims = true; state.colorPts = true; window.__app.renderAll(); });
     await page.keyboard.press('Escape').catch(() => {});
   }

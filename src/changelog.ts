@@ -7,6 +7,17 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.41', date: '2026-10-26', items: [
+    'Feature Builder (3D view context window): before the first click only ✨ Smart Detect and ⚙. After detection: Add region (strictly additive), Brush add, Exclude. Smart Remove region is gone – paint exclusion and island chips cover it.',
+    'Boundary [Geometry | Points] only for cylinder, cone, sphere and torus. Hidden for planes and for circle, slot and line.',
+    'Island chips: ✕ excludes a bore, countersink or bump; the chip stays and can be restored until ✓.',
+    'Smart Detect returns a circle, slot or line only when the pick covers both the wall and the adjacent face. A click in the middle of a face stays a surface feature.',
+    'Auxiliary plane of a circle, slot or line is the face at the wall end nearest the click (inner or outer edge).',
+    'New project, and Load data / Load sample: one data object. If data exists, confirm “Load and create a new project”. Unsaved changes are asked first.',
+    'Transparency is one setting for the gear above the cube, the Analyze context window and Home › Options. Hiding the mesh in the tree hides a transparent model completely.',
+    'Show aux-plane points of an assigned plane shows that plane’s own points.',
+    'iPhone: the view gear and the navigation cube stay above the 3D view context window, and move up with it when the panel grows.',
+  ] },
   { version: '2026.0.40', date: '2026-10-20', items: [
     'Feature Builder (new creation panel): one main action “✨ Smart Detect” – tap a face and the feature is detected (or fitted as the chosen type). Type, pick radius and the Brush path are under “Advanced parameters”. The Auto icon is no longer pre-highlighted.',
     'After detection: “＋ Add region” adds a further region and keeps the original, “🖌＋ Brush add” paints further points onto the same feature (selection and type stay), “− Remove region” as before.',

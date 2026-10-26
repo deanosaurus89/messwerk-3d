@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { it } from 'vitest';
 import { parseSTL } from '../src/core/io';
 import { MeshTopology, setNormalMode, setRobustS } from '../src/core/region';
@@ -20,7 +21,8 @@ const F: { name: string; seed: V3; n: V3; d: (p: V3) => number; e: (p: V3) => nu
 const BINS = [0, 0.25, 0.5, 1, 2, 1e9];
 const out: any = {};
 const FILES = (process.env.FILES ?? 'public/samples/beispielteil.stl,/tmp/beispielteil-old.stl').split(','), MODES = (process.env.MODES ?? 'needle036,plain,robust').split(',') as any[], SS = (process.env.SS ?? '0.1').split(',').map(Number);
-for (const file of FILES) for (const mode of MODES) for (const S of SS) it(`${file} ${mode} ${S}`, () => {
+const OUT = process.env.OUT ?? '/workspace/research/edge037/edge.json';
+for (const file of FILES) for (const mode of MODES) for (const S of SS) it.skipIf(!existsSync(file) || !existsSync(dirname(OUT)))(`${file} ${mode} ${S}`, () => {
   setNormalMode(mode); setRobustS(S); const b = readFileSync(file); const m = parseSTL(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), 'x');
   const t0 = performance.now(); const topo = new MeshTopology(m); const ms = performance.now() - t0; const p = m.positions, f = m.indices, fn = m.faceNormals!, nv = p.length / 3;
   const res: any = { ms: Math.round(ms) };
@@ -34,5 +36,5 @@ for (const file of FILES) for (const mode of MODES) for (const S of SS) it(`${fi
       console.log('KPROF', mode, ft.name, ks.map((a) => { a.sort((x, y) => x - y); return a.length ? `${a[a.length >> 1].toFixed(3)}/${a[Math.floor(a.length * 0.9)].toFixed(3)}` : '-'; }).join(' ')); }
     res[ft.name] = { sel: nsel, wrong, frac: got.map((g, i) => (tot[i] ? +(g / tot[i]).toFixed(3) : null)), tot, minE: +minE.toFixed(3), info: topo.lastGrow?.legacy ? 'kante' : topo.lastGrow?.model };
   }
-  out[`${file.includes('old') ? 'ALT-Nadelnetz' : 'neu'} ${mode} s=${S}`] = res; writeFileSync(process.env.OUT ?? '/workspace/research/edge037/edge.json', JSON.stringify(out, null, 1));
+  out[`${file.includes('old') ? 'ALT-Nadelnetz' : 'neu'} ${mode} s=${S}`] = res; writeFileSync(OUT, JSON.stringify(out, null, 1));
 }, 300000);

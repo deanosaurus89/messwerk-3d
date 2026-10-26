@@ -3,7 +3,8 @@
 // Aufruf: node e2e/nurbs-check.mjs [URL|-] [desktop|iphone]
 import { chromium, webkit, devices } from 'playwright';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 const URL = process.argv[2] && process.argv[2] !== '-' ? process.argv[2] : 'http://localhost:8766/';
 const MODE = process.argv[3] || 'desktop'; const touch = MODE !== 'desktop';
 const browser = MODE === 'desktop' ? await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }) : await webkit.launch();
@@ -18,11 +19,14 @@ const screenOf = (p) => S((p) => { const { viewer } = window.__app; const q = vi
 const tap = async (xy) => (touch ? page.touchscreen.tap(xy[0], xy[1]) : page.mouse.click(xy[0], xy[1]));
 /** Genauigkeit der Fläche gegen die Formel (an Flächenpunkten, Rand 3 % ausgenommen). */
 const accuracy = (fit) => S((fit) => window.__app.nurbsAccuracy(fit), fit);
+const FF = fileURLToPath(new globalThis.URL('../tests/fixtures/samples/freiform.stl.gz', import.meta.url));
+if (!existsSync(FF)) { console.log('SKIP nurbs-check: freiform fixture absent (' + FF + ')'); await browser.close(); process.exit(0); }
 try {
-  await page.goto(URL, { waitUntil: 'networkidle' });
-  await page.click('#btn-sample'); await page.click('.sample-card[data-key="freiform"]');
-  await page.waitForFunction(() => window.__app.state.data?.name === 'freiform', null, { timeout: 180000 });
-  await page.click('.tab[data-tab="merkmale"]'); await page.click('#btn-feat-more'); await page.click('[data-ftype="Freiformfläche"]');
+  await page.goto(URL.includes('nodemo') ? URL : URL + (URL.includes('?') ? '&' : '?') + 'nodemo', { waitUntil: 'networkidle' });
+  await page.setInputFiles('#file', FF);
+  await page.waitForSelector('#unit-dlg', { timeout: 180000 }); await page.click('#unit-dlg [data-ok]');
+  await page.waitForFunction(() => (window.__app.state.data?.name ?? '').startsWith('freiform'), null, { timeout: 180000 });
+  await page.click('.tab[data-tab="merkmale"]'); await page.click('#btn-feat-more'); await page.click('#feat-more-pop [data-ftype="Freiformfläche"]');
   await S(() => window.__app.viewer.viewDir([0.35, -1, 1.3])); await sleep(500);
   const hitP = [35, 40, Zf(35, 40)]; await tap(await screenOf(hitP));
   await page.waitForFunction(() => window.__app.state.preview?.fit?.nurbs, null, { timeout: 90000 });
@@ -31,8 +35,8 @@ try {
   if (pv.kind !== 'vierseitig' || pv.curves !== 4 || !(pv.std < 0.012)) fail('Vorschau Freiformfläche');
   let acc = await accuracy(await S(() => window.__app.state.preview.fit)); console.log('Genauigkeit gegen Formel (Vorschau):', JSON.stringify(acc));
   if (!(acc.max < 0.01)) fail('Fläche weicht von bekannter Fläche ab');
-  await sleep(300); await page.screenshot({ path: `docs/${MODE}-freiform-vorschau.png` });
-  await page.click('#pc-create');
+  await sleep(300); await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-freiform-vorschau.png` });
+  await page.click('#cp-ok');
   await page.waitForFunction(() => window.__app.state.features.some((f) => f.type === 'Freiformfläche'), null, { timeout: 20000 });
   // Eigenschaften: Kontrollpunkte ändern → automatisch neu
   await page.keyboard.press('Escape').catch(() => {}); await S(() => { const { state } = window.__app; state.mode = null; state.sel = [state.features.find((f) => f.type === 'Freiformfläche').id]; window.__app.renderAll(); });
@@ -70,21 +74,23 @@ try {
   // Screenshot Merkmal ausgewählt (Farbkarte, Randkurven, Kontrollnetz)
   if (touch) await S(() => window.__app.togglePanel('dialog', false));
   await S(() => window.__app.viewer.viewDir([0.35, -1, 1.3])); await sleep(500);
-  await page.screenshot({ path: `docs/${MODE}-freiform-merkmal.png` });
-  if (touch) { await S(() => window.__app.togglePanel('dialog', true)); await page.locator('#fp-box').scrollIntoViewIfNeeded(); await page.screenshot({ path: `docs/${MODE}-freiform-eigenschaften.png` }); await S(() => window.__app.togglePanel('dialog', false)); }
-  // Pinsel: Teilbereich (getrimmtes oder vierseitiges Patch)
-  await page.click('#btn-feat-more'); await page.click('[data-ftype="Freiformfläche"]'); await page.click('#mode-bar [data-a="brush"]');
+  await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-freiform-merkmal.png` });
+  if (touch) { await S(() => window.__app.togglePanel('dialog', true)); await page.locator('#fp-box').scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-freiform-eigenschaften.png` }); await S(() => window.__app.togglePanel('dialog', false)); }
+  // Pinsel: Teilbereich (getrimmtes oder vierseitiges Patch). ✓ erzeugt direkt (0.33, ein Schritt).
+  await page.click('#btn-feat-more'); await page.click('#feat-more-pop [data-ftype="Freiformfläche"]');
+  await page.locator('details.cp-params').evaluate((d) => { d.open = true; }); await page.click('#ctx-panel [data-a="brush"]');
   await S(() => { window.__app.state.opts.brush = 6; });
   const pts = [[20, 25], [30, 30], [40, 35], [45, 45], [35, 50], [25, 45]].map(([x, y]) => [x, y, Zf(x, y)]);
   for (const p of pts) { const xy = await screenOf(p); if (touch) await page.touchscreen.tap(xy[0], xy[1]); else { await page.mouse.move(xy[0], xy[1]); await page.mouse.down(); await page.mouse.move(xy[0] + 3, xy[1] + 3, { steps: 3 }); await page.mouse.up(); } await sleep(150); }
   const bc = await S(() => window.__app.state.brushCount); console.log('Pinsel:', bc, 'Punkte');
-  await page.click('#mode-bar [data-a="fit"]');
-  await page.waitForFunction(() => window.__app.state.preview?.fit?.nurbs, null, { timeout: 60000 });
-  pv = await S(() => { const p = window.__app.state.preview; return { n: p.indices.length, kind: p.fit.nurbs.kind, curves: p.fit.nurbs.boundary.length, std: p.fit.nurbs.std }; });
-  acc = await accuracy(await S(() => window.__app.state.preview.fit));
-  console.log('Pinsel-Vorschau:', JSON.stringify(pv), 'Genauigkeit:', JSON.stringify(acc));
+  const before = await S(() => window.__app.state.features.filter((f) => f.type === 'Freiformfläche').length);
+  await page.click('#cp-ok');
+  await page.waitForFunction((n) => window.__app.state.features.filter((f) => f.type === 'Freiformfläche').length > n, before, { timeout: 60000 });
+  pv = await S(() => { const p = window.__app.state.features.filter((f) => f.type === 'Freiformfläche').at(-1); return { n: p.pointCount, kind: p.measured.nurbs.kind, curves: p.measured.nurbs.boundary.length, std: p.measured.nurbs.std, fit: p.measured }; });
+  acc = await accuracy(pv.fit);
+  console.log('Pinsel-Merkmal:', JSON.stringify({ ...pv, fit: undefined }), 'Genauigkeit:', JSON.stringify(acc));
   if (!(pv.std < 0.015 && pv.curves === 1 && acc.max < 0.1)) fail('Pinsel-Freiform');
-  await page.screenshot({ path: `docs/${MODE}-freiform-pinsel.png` });
+  await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/${MODE}-freiform-pinsel.png` });
 } catch (e) { fail(e.stack || e); }
 console.log('Konsolenfehler:', errors.length ? errors : 'keine'); if (errors.length) process.exitCode = 1;
 await browser.close();

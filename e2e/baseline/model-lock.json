@@ -330,9 +330,9 @@
      "tolUp": 0.02
     },
     "res": {
-     "deviation": 0.6865441371,
-     "measured": 7.686544137,
-     "status": "NIO"
+     "deviation": 0.002303883662,
+     "measured": 7.002303884,
+     "status": "IO"
     }
    },
    {
@@ -347,9 +347,9 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.3737187633,
-     "measured": 4.373718763,
-     "status": "NIO"
+     "deviation": -0.003655647368,
+     "measured": 3.996344353,
+     "status": "IO"
     }
    },
    {
@@ -381,8 +381,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -20.84989395,
-     "measured": -3.849893952,
+     "deviation": -20.00406452,
+     "measured": -3.004064521,
      "status": "NIO"
     }
    },
@@ -506,6 +506,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -569,6 +570,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -632,6 +634,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -697,6 +700,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -757,6 +761,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -842,6 +847,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -930,6 +936,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -993,6 +1000,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -1032,27 +1040,28 @@
     "datum": null,
     "fit": {
      "center": [
-      60.00587956,
-      8.013007838,
-      16.14996171
+      59.9998805,
+      8.002794559,
+      16.99579106
      ],
-     "diameter": 15.37308827,
-     "form": 0.9870255135,
-     "maxNeg": -0.3152332389,
-     "maxPos": 0.6717922746,
-     "n": 982,
+     "diameter": 14.00460777,
+     "form": 0.04750341641,
+     "maxNeg": -0.02638778682,
+     "maxPos": 0.02111562959,
+     "n": 648,
+     "nfRemoved": 0,
      "normal": [
-      -0.00535665747,
-      0.006187899298,
-      0.9999665075
+      0.001203228623,
+      0.01420343539,
+      0.9998984022
      ],
-     "radius": 7.686544137,
-     "rms": 0.2132185589,
+     "radius": 7.002303884,
+     "rms": 0.008032177196,
      "type": "Kugel"
     },
     "fp": {
      "aux": "auto",
-     "inset": 0,
+     "crit": "lsq",
      "k": 0,
      "maxAngleDeg": 20,
      "nf": {
@@ -1064,18 +1073,16 @@
      "ring": {
       "gap": 0.5,
       "width": 3
-     },
-     "zoneBand": 1,
-     "zoneSrc": "geom"
+     }
     },
     "id": 9,
     "idx": [
-     982,
-     4282007421
+     648,
+     115989713
     ],
     "method": "Klick",
     "name": "Sphere 1",
-    "pointCount": 982,
+    "pointCount": 648,
     "reex": null,
     "refs": null,
     "src": [
@@ -1091,29 +1098,30 @@
     "datum": null,
     "fit": {
      "center": [
-      39.98720004,
-      9.992327329,
-      20.5417829
+      39.99932379,
+      10.00016564,
+      20.80091046
      ],
-     "diameter": 12.0150823,
-     "form": 1.053191631,
-     "length": 4.373718763,
-     "maxNeg": -0.3127082152,
-     "maxPos": 0.740483416,
-     "minorRadius": 2.186859382,
-     "n": 1682,
+     "diameter": 12.00071011,
+     "form": 0.05985839953,
+     "length": 3.996344353,
+     "maxNeg": -0.02689741951,
+     "maxPos": 0.03296098002,
+     "minorRadius": 1.998172176,
+     "n": 1007,
+     "nfRemoved": 0,
      "normal": [
-      -0.0003178893435,
-      -0.001018501426,
-      0.9999994308
+      0.00020368974,
+      -0.0001070590794,
+      0.9999999735
      ],
-     "radius": 6.007541149,
-     "rms": 0.2165625226,
+     "radius": 6.000355054,
+     "rms": 0.007876043685,
      "type": "Torus"
     },
     "fp": {
      "aux": "auto",
-     "inset": 0,
+     "crit": "lsq",
      "k": 0,
      "maxAngleDeg": 20,
      "nf": {
@@ -1125,18 +1133,16 @@
      "ring": {
       "gap": 0.5,
       "width": 3
-     },
-     "zoneBand": 1,
-     "zoneSrc": "geom"
+     }
     },
     "id": 10,
     "idx": [
-     1682,
-     736685706
+     1007,
+     1057187312
     ],
     "method": "Klick",
     "name": "Torus 1",
-    "pointCount": 1682,
+    "pointCount": 1007,
     "reex": null,
     "refs": null,
     "src": [
@@ -1198,6 +1204,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -1260,6 +1267,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -1648,9 +1656,9 @@
      "tolUp": 0.02
     },
     "res": {
-     "deviation": 0.6865441371,
-     "measured": 7.686544137,
-     "status": "NIO"
+     "deviation": 0.002303883662,
+     "measured": 7.002303884,
+     "status": "IO"
     }
    },
    {
@@ -1665,9 +1673,9 @@
      "tolUp": 0.05
     },
     "res": {
-     "deviation": 0.3737187633,
-     "measured": 4.373718763,
-     "status": "NIO"
+     "deviation": -0.003655647368,
+     "measured": 3.996344353,
+     "status": "IO"
     }
    },
    {
@@ -1699,8 +1707,8 @@
      "tolUp": 0.1
     },
     "res": {
-     "deviation": -20.84989395,
-     "measured": -3.849893952,
+     "deviation": -20.00406452,
+     "measured": -3.004064521,
      "status": "NIO"
     }
    },
@@ -1824,6 +1832,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -1887,6 +1896,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -1950,6 +1960,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "fill": {
       "band": 0,
       "exRaised": false,
@@ -2015,6 +2026,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -2075,6 +2087,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -2160,6 +2173,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -2248,6 +2262,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -2311,6 +2326,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "inset": 0,
      "k": 0,
      "maxAngleDeg": 20,
@@ -2350,27 +2366,28 @@
     "datum": null,
     "fit": {
      "center": [
-      60.00587956,
-      8.013007838,
-      16.14996171
+      59.9998805,
+      8.002794559,
+      16.99579106
      ],
-     "diameter": 15.37308827,
-     "form": 0.9870255135,
-     "maxNeg": -0.3152332389,
-     "maxPos": 0.6717922746,
-     "n": 982,
+     "diameter": 14.00460777,
+     "form": 0.04750341641,
+     "maxNeg": -0.02638778682,
+     "maxPos": 0.02111562959,
+     "n": 648,
+     "nfRemoved": 0,
      "normal": [
-      -0.00535665747,
-      0.006187899298,
-      0.9999665075
+      0.001203228623,
+      0.01420343539,
+      0.9998984022
      ],
-     "radius": 7.686544137,
-     "rms": 0.2132185589,
+     "radius": 7.002303884,
+     "rms": 0.008032177196,
      "type": "Kugel"
     },
     "fp": {
      "aux": "auto",
-     "inset": 0,
+     "crit": "lsq",
      "k": 0,
      "maxAngleDeg": 20,
      "nf": {
@@ -2382,18 +2399,16 @@
      "ring": {
       "gap": 0.5,
       "width": 3
-     },
-     "zoneBand": 1,
-     "zoneSrc": "geom"
+     }
     },
     "id": 9,
     "idx": [
-     982,
-     4282007421
+     648,
+     115989713
     ],
     "method": "Klick",
     "name": "Sphere 1",
-    "pointCount": 982,
+    "pointCount": 648,
     "reex": null,
     "refs": null,
     "src": [
@@ -2409,29 +2424,30 @@
     "datum": null,
     "fit": {
      "center": [
-      39.98720004,
-      9.992327329,
-      20.5417829
+      39.99932379,
+      10.00016564,
+      20.80091046
      ],
-     "diameter": 12.0150823,
-     "form": 1.053191631,
-     "length": 4.373718763,
-     "maxNeg": -0.3127082152,
-     "maxPos": 0.740483416,
-     "minorRadius": 2.186859382,
-     "n": 1682,
+     "diameter": 12.00071011,
+     "form": 0.05985839953,
+     "length": 3.996344353,
+     "maxNeg": -0.02689741951,
+     "maxPos": 0.03296098002,
+     "minorRadius": 1.998172176,
+     "n": 1007,
+     "nfRemoved": 0,
      "normal": [
-      -0.0003178893435,
-      -0.001018501426,
-      0.9999994308
+      0.00020368974,
+      -0.0001070590794,
+      0.9999999735
      ],
-     "radius": 6.007541149,
-     "rms": 0.2165625226,
+     "radius": 6.000355054,
+     "rms": 0.007876043685,
      "type": "Torus"
     },
     "fp": {
      "aux": "auto",
-     "inset": 0,
+     "crit": "lsq",
      "k": 0,
      "maxAngleDeg": 20,
      "nf": {
@@ -2443,18 +2459,16 @@
      "ring": {
       "gap": 0.5,
       "width": 3
-     },
-     "zoneBand": 1,
-     "zoneSrc": "geom"
+     }
     },
     "id": 10,
     "idx": [
-     1682,
-     736685706
+     1007,
+     1057187312
     ],
     "method": "Klick",
     "name": "Torus 1",
-    "pointCount": 1682,
+    "pointCount": 1007,
     "reex": null,
     "refs": null,
     "src": [
@@ -2516,6 +2530,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {
@@ -2578,6 +2593,7 @@
     },
     "fp": {
      "aux": "auto",
+     "crit": "lsq",
      "k": 3,
      "maxAngleDeg": 20,
      "nf": {

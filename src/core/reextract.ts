@@ -45,6 +45,13 @@ export interface ReexParams {
 }
 /** 0.39 (Martin): Suchabstand 1 mm als Standard für die Extraktion (Optionen › Extraktion) */
 export const REEX_DEFAULT: ReexParams = { maxDist: 1, sigma: 3, maxAngleDeg: 30, margin: 0, iterations: 3 };
+/** A fitted-geometry zone replaces the grown selection only when the refit still describes that surface.
+ *  Form may rise a little (more of the same noisy face). A zone that runs onto a blend (sphere/torus) inflates it. */
+export function zoneFitAcceptable(grownForm: number, zoneForm: number): boolean {
+  if (!isFinite(zoneForm)) return false;
+  const g = isFinite(grownForm) && grownForm > 0 ? grownForm : zoneForm;
+  return zoneForm <= Math.max(0.1, g * 4);
+}
 /** default lateral extension: 0 – the zone follows the original contour exactly (no hidden margin) */
 export const lateralAuto = (_p: { maxDist: number }) => 0;
 export const lateralOf = (p: ReexParams) => (p.margin != null && isFinite(p.margin) ? p.margin : lateralAuto(p));
@@ -186,7 +193,7 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   let fit = fit0, idx = current, removed = 0, cand = 0, it = 0;
   for (it = 0; it < (p.iterations ?? 3); it++) {
     const sel: number[] = [];
-    for (const v of cands) { const q = P3(pos, v); if (Math.abs(signedDistance(fit, q)) > p.maxDist) continue;
+    for (const v of cands) { const q = P3(pos, v); if (!fset && Math.abs(signedDistance(fit, q)) > p.maxDist) continue; // frozen point set at exclusion 0: keep every creation point
       if (nrm && cosA > -1) { const nn: Vec3 = [nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]]; if (Math.abs(dot(nn, modelNormal(fit, q))) < cosA) continue; } sel.push(v); }
     cand = sel.length; if (sel.length < 5) throw new Error('Too few points within the distance/angle criteria');
     const dv = sel.map((v) => signedDistance(fit, P3(pos, v)));

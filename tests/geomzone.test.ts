@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSTL } from '../src/core/io';
 import { MeshTopology, gather } from '../src/core/region';
 import { fitType } from '../src/core/fit';
-import { reextract } from '../src/core/reextract';
+import { reextract, zoneFitAcceptable } from '../src/core/reextract';
 import { analyticShell } from '../src/core/trim';
 import type { Vec3 } from '../src/core/linalg';
 
@@ -61,4 +61,33 @@ describe('Boundary from fitted geometry (cylinder)', () => {
     expect(s.a1 - s.a0).toBeGreaterThan(Math.PI * 0.8);
     expect(s.a1 - s.a0).toBeLessThan(Math.PI * 1.3);
   });
+});
+
+describe('fitted-geometry zone stays on the grown surface (beispielteil)', () => {
+  it('accepts a small form rise and rejects a zone that runs onto a blend', () => {
+    expect(zoneFitAcceptable(0.05, 0.08)).toBe(true);
+    expect(zoneFitAcceptable(0.008, 0.99)).toBe(false);
+  });
+  function kept(pt: Vec3, nrm: Vec3, type: 'Kugel' | 'Torus') {
+    const tris = topo.growRegion(seedTri(pt, nrm), pt, { maxAngleDeg: 20, radius: 0, type });
+    const v = topo.regionVertices(tris);
+    const idx = v.interior.length > 20 ? v.interior : v.all;
+    const g = gather(mesh, idx);
+    const fit = fitType(type, g.p, g.n);
+    const z = reextract(fit, mesh.positions, mesh.vertexNormals ?? null, idx, { maxDist: 1, sigma: 3, sigmaOn: false, maxAngleDeg: 30, angleOn: false, margin: 0, iterations: 3 }, [pt], mesh.indices);
+    const use = zoneFitAcceptable(fit.form ?? Infinity, z.fit.form ?? Infinity) ? z.fit : fit;
+    return use;
+  }
+  it('sphere R7 keeps the grown sphere', () => {
+    const f = kept([60, 8, 24], [0, 0, 1], 'Kugel');
+    expect(f.radius!).toBeCloseTo(7, 1);
+    expect(f.center[2]).toBeCloseTo(17, 1);
+    expect(f.form!).toBeLessThan(0.12);
+  }, 60000);
+  it('torus R6 r2 keeps the grown torus', () => {
+    const f = kept([46, 10, 22.8], [0, 0, 1], 'Torus');
+    expect(f.radius!).toBeCloseTo(6, 1);
+    expect(Math.abs(f.minorRadius!)).toBeCloseTo(2, 1);
+    expect(f.form!).toBeLessThan(0.12);
+  }, 60000);
 });
