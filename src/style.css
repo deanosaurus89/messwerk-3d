@@ -109,7 +109,7 @@ td.dev.IO { color:var(--io); font-weight:600; } td.dev.NIO { color:var(--nio); f
 
 /* ---------- v3: Labels, Augen, Katalog, Bericht ---------- */
 #labels { position:absolute; inset:0; pointer-events:none; z-index:4; overflow:hidden; }
-#leaders { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+#leaders { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
 .lbl { position:absolute; left:0; top:0; pointer-events:auto; touch-action:none; cursor:grab; background:rgba(255,255,255,.94); border:1.5px solid var(--c);
   border-radius:4px; font-size:11px; box-shadow:0 2px 6px rgba(0,0,0,.25); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .lbl.sel { box-shadow:0 0 0 2px #1f5fa8, 0 2px 8px rgba(0,0,0,.3); }
@@ -200,18 +200,20 @@ body.training .lbl { pointer-events:none !important; }
 
 #sample-dialog { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(980px, calc(100vw - 16px)); max-height:min(760px, calc(100vh - 16px)); z-index:40; background:#fff; border:1px solid #9fb2c8; border-radius:6px; display:flex; flex-direction:column; box-shadow:0 6px 24px rgba(0,0,0,.3); }
 #sample-dialog.hidden { display:none; } #sample-dialog .note { color:#55626f; font-size:12px; margin-left:8px; }
-.sd-grid { overflow:auto; padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; -webkit-overflow-scrolling:touch; }
-.sample-card { display:block; width:100%; text-align:left; border:1px solid #c9d4e0; border-radius:8px; background:#f8fafc; padding:8px; cursor:pointer; font:inherit; min-height:44px; }
+.sd-grid { overflow:auto; padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap:10px; -webkit-overflow-scrolling:touch; }
+.sample-card { display:block; width:100%; min-width:0; text-align:left; border:1px solid #c9d4e0; border-radius:8px; background:#f8fafc; padding:8px; cursor:pointer; font:inherit; min-height:44px; overflow:hidden; }
 .sample-card:hover, .sample-card:active { border-color:#1d64c8; background:#eef4fc; }
 .sample-card > * { display:block; margin-bottom:4px; }
-.sample-card img { width:100%; height:auto; aspect-ratio:16/10; object-fit:cover; border-radius:5px; background:#dfe5ec; }
+.sample-card img { width:100%; max-width:100%; min-width:0; height:auto; aspect-ratio:16/10; object-fit:cover; border-radius:5px; background:#dfe5ec; display:block; pointer-events:none; }
 .sc-t { font-weight:700; font-size:14px; } .sc-d { font-size:12px; color:#33404d; } .sc-m { font-size:11px; color:#6b7a89; }
 @media (max-width: 900px), (max-height: 560px) {
   #sample-dialog { width:calc(100vw - 8px); max-height:calc(100vh - 8px); }
-  .sd-grid { grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:8px; padding:8px; }
+  /* flex, not grid: WebKit sized the grid rows shorter than the cards, so the next thumbnail sat on top of the previous card and stole the tap */
+  .sd-grid { display:flex; flex-wrap:wrap; align-content:flex-start; gap:8px; padding:8px; }
+  .sample-card { flex:1 1 calc(50% - 8px); width:auto; max-width:calc(50% - 4px); }
 }
 .sd-grid { align-items:start; grid-auto-rows:auto; }
-.sample-card { height:auto; overflow:visible; }
+.sample-card { height:auto; }
 body.thumb #btn-center, body.thumb #navcube, body.thumb #labels, body.thumb #hint, body.thumb #toast { display:none !important; }
 
 /* Modusanzeige */
@@ -302,6 +304,12 @@ body.ctx-on #progress { bottom:80px; }
   #ctx-panel { left:6px; right:6px; transform:none; max-width:none; bottom:6px; font-size:11.5px; gap:6px; padding:4px; flex-wrap:wrap; justify-content:flex-end; }
   #ctx-panel .cp-main { flex:1 1 100%; } #ctx-panel .cp-c button { min-height:34px; }
   /* bottoms are set from the context-window height so the gear never covers it */
+}
+/* portrait phone: pin ✓ / ✕ at the top of the right column. A tall preview scrolls beside them instead of pushing Create below the 3D view. */
+@media (max-width: 520px) {
+  #ctx-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; max-height:min(42vh, 340px); overflow:auto; }
+  #ctx-panel .cp-main { grid-column:1; grid-row:1; }
+  #ctx-panel .cp-btns { grid-column:2; grid-row:1; position:sticky; top:0; align-self:start; background:inherit; z-index:1; }
 }
 #btn-new-tab { display:none; }
 @media (max-width:900px), (max-height:560px) {
@@ -481,6 +489,12 @@ details.dsec details.reex { margin-top: 2px; }
   #ribbon .panel .big { min-width:40px; height:40px; padding:1px 2px; font-size:9px; }
   #ribbon .panel .big .ico, #ribbon .panel .big svg { height:18px; width:18px; font-size:15px; }
   #ribbon .panel .rsec-nav button { max-width:62px; }
+}
+/* iPhone width: Home + Start + the other tabs and the new-project button must fit without a horizontal scrollbar */
+@media (max-width: 430px) {
+  #ribbon-tabs { padding-left: 0; }
+  #btn-new-tab { padding: 0 2px; font-size: 14px; flex: none; }
+  .tab { padding: 0 3px; font-size: 10.5px; letter-spacing: -0.25px; }
 }
 @media (max-width: 900px), (max-height: 560px) {
   /* phone: the method ▾ sits inside the button corner instead of taking its own column */

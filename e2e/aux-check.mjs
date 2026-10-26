@@ -46,18 +46,14 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     // panel order + compactness: Datum before the method buttons, Boundary from visible, Search distance under Advanced
     // Remove region: grow the top plane, tap the plane itself (0.33: plane always inside contour → disc removal), selection shrinks, ↶ restores
     S.preview = null; S.mode = null; S.opts.multi = false; S.opts.sub = false; A.renderAll();
-    p = await prev('Ebene', [70, 52, 20], [0, 0, 1]); const nBefore = p.indices.length; const cp = document.querySelector('#ctx-panel .cp-main')?.textContent ?? ''; const iT = cp.indexOf('Freeform surface'), iD = cp.indexOf('Datum'), iR = cp.indexOf('Remove region'), iA = cp.indexOf('Advanced parameters');
-    document.querySelector('#ctx-panel button[data-a="fill"]')?.click(); await w(1500); const cp2 = document.querySelector('#ctx-panel .cp-main')?.innerText ?? ''; const det = document.querySelector('#ctx-panel details.cp-params'); 
-    out.order = { datumAfterType: iT >= 0 && iD > iT && iD < iR, boundaryVisible: null, advancedAfter: iA > iR, searchInAdv: !!det && /Search distance/.test(det.textContent) };
-    document.querySelector('#ctx-panel button[data-a="fill"]')?.click(); await w(1500);
+    p = await prev('Ebene', [70, 52, 20], [0, 0, 1]); const nBefore = p.indices.length;
+    const det = document.querySelector('#ctx-panel details.cp-params');
+    out.order = { datum: !!document.querySelector('#cp-datum'), noRemove: !document.querySelector('[data-a="subreg"]'), hasExcl: !!document.querySelector('[data-a="excl"]'), boundaryVisible: false, searchInAdv: !!det && /Search distance/.test(det.textContent) };
+    out.remove = { nBefore, still: S.preview?.indices.length === nBefore, btn: !!document.querySelector('[data-a="subreg"]') };
     { const pr = document.querySelector('#ctx-panel').getBoundingClientRect(), sc = document.querySelector('#ctx-panel').parentElement.getBoundingClientRect(); out.width = pr.width; out.avail = sc.width; out.h = pr.height; }
-    document.querySelector('#ctx-panel button[data-a="subreg"]')?.click(); await w(100);
-    out.subOn = S.opts.sub; await A.previewByClick(A.hitAt([60, 52, 20], [0, 0, 1])); await w(600);
-    const nAfter = S.preview?.indices.length ?? nBefore; out.subHint = document.querySelector('#ctx-panel')?.textContent.includes('1 removed');
-    document.querySelector('#ctx-panel button[data-a="unregion"]')?.click(); await w(600); out.remove = { nBefore, nAfter, restored: S.preview?.indices.length, hint: out.subHint, btn: !!document.querySelector('#ctx-panel button[data-a="subreg"]') };
-    // Boundary from (cylinder/cone/sphere/torus) directly visible, not inside Advanced parameters
+    // Boundary (Geometry | Points) for a cylinder is in the bar, not inside Advanced. No Remove region.
     S.preview = null; S.mode = null; S.opts.sub = false; await prev('Zylinder', [20, 26.04, 15], [0, -1, 0]);
-    { const lb = [...document.querySelectorAll('#ctx-panel label')].find((l) => /Boundary from/.test(l.textContent)); out.order.boundaryVisible = !!lb && !lb.closest('details'); }
+    { const lb = document.querySelector('#ctx-panel [data-zsrc="geom"]'); out.order.boundaryVisible = !!lb && !lb.closest('details'); }
     S.preview = null; S.mode = null; A.renderAll();
     return out; });
   console.log(v.name, JSON.stringify(r));
@@ -73,9 +69,9 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   if (r.menu !== '⁘ Show used points' || !r.used) fail(`${v.name}: tree right-click Show used points (${r.menu}, ${r.used})`);
   if (!r.dlg.pts || r.dlg.aux || !r.dlg.ptsOn) fail(`${v.name}: dialog top row (plane has no aux) ${JSON.stringify(r.dlg)}`);
   if (!/Aux-plane/.test(r.auxBtn ?? '') || !r.auxAll) fail(`${v.name}: aux-plane ribbon button ${r.auxBtn} ${r.auxAll}`);
-  if (!r.order.datumAfterType || !r.order.boundaryVisible || !r.order.advancedAfter || !r.order.searchInAdv) fail(`${v.name}: panel order ${JSON.stringify(r.order)}`);
+  if (!r.order.datum || !r.order.noRemove || !r.order.hasExcl || !r.order.boundaryVisible || !r.order.searchInAdv) fail(`${v.name}: panel order ${JSON.stringify(r.order)}`);
   if (v.name === 'desktop' && !(r.width >= Math.min(600, r.avail - 152) && r.h < 150)) fail(`${v.name}: panel not widened/compact (${r.width} of ${r.avail}, h ${r.h})`);
-  if (!r.remove.btn || !(r.remove.nAfter < r.remove.nBefore) || r.remove.restored !== r.remove.nBefore) fail(`${v.name}: remove region ${JSON.stringify(r.remove)}`);
+  if (r.remove.btn || !r.remove.still) fail(`${v.name}: remove region should be gone and the plane kept ${JSON.stringify(r.remove)}`);
   if (errors.length) fail(`${v.name}: page errors ${errors}`);
   await ctx.close();
 }

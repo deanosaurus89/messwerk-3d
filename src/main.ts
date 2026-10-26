@@ -19,7 +19,7 @@ import { freezeBoundary, type FrozenBoundary } from './core/frozen';
 import { installNumFields, parseNum } from './ui/numfield';
 import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts, setSearchDistDefault } from './ui/reexui';
-import { REEX_DEFAULT } from './core/reextract';
+import { REEX_DEFAULT, zoneFitAcceptable } from './core/reextract';
 import { OverlayManager } from './ui/overlays';
 import { initRibbonSections, installFitRibbon } from './ui/ribbonsec';
 import { GENTOL_DEFAULT, GenTol, TolKind, generalTol, iso286 } from './core/tolerances';
@@ -525,6 +525,8 @@ canvas.addEventListener('pointermove', (e) => {
 // Rechtsklick (ohne Ziehen) = Polylinie/Kurve abschließen; Rechts-Ziehen bleibt Verschieben
 let rdown: { x: number; y: number } | null = null;
 canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 2) rdown = { x: e.clientX, y: e.clientY }; });
+let lastCanvasPointer = 0;
+canvas.addEventListener('pointerup', () => { lastCanvasPointer = performance.now(); }, true);
 canvas.addEventListener('pointerup', (e) => { if (navPaused) { rdown = null; return; } if (e.button !== 2 || !rdown) return; const d = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y); rdown = null;
   if (d > 6) return; if (pe.tool === 'curve' && curveDraft.length > 1) { curveFinish(); return; } window.dispatchEvent(new CustomEvent('mw-rclick')); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -758,9 +760,10 @@ function ctxSpec(): CtxSpec | null {
   const zType = (p ? p.fit.type : m.type) as string;
   const showB = m.method === 'Klick' && GEOM_ZONE.includes(zType) && !p?.aux;
   const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${tt('Boundary: Geometry = a zone around the fitted cylinder, cone, sphere or torus. Points = the clicked selection. Hidden for planes and for circle, slot and line.')}"><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${tt('Boundary from the fitted geometry')}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${tt('Boundary from the point selection')}">${tt('Points')}</button></span>` : '';
-  const excl = exclOpen && p ? `<div class="cp-excl">${p.fit.type === 'Ebene' && !p.aux ? islandsHTML(p.islands ?? []) : ''}<button type="button" data-a="pex" class="${paintEx ? 'on' : ''}" title="${tt('Paint exclusion: the brush footprint is removed exactly, with no region growing.')}">🖌 ${tt('Paint exclusion')}</button><button type="button" data-a="lasso" title="${tt('Add island area: draw a lasso; the points inside are excluded.')}">⬚ ${tt('Add island area')}</button></div>` : '';
+  const isl = p && p.fit.type === 'Ebene' && !p.aux ? islandsHTML(p.islands ?? []) : '';
+  const excl = exclOpen && p ? `<div class="cp-excl"><button type="button" data-a="pex" class="${paintEx ? 'on' : ''}" title="${tt('Paint exclusion: the brush footprint is removed exactly, with no region growing.')}">🖌 ${tt('Paint exclusion')}</button><button type="button" data-a="lasso" title="${tt('Add island area: draw a lasso; the points inside are excluded.')}">⬚ ${tt('Add island area')}</button></div>` : '';
   const ctl = m.method === 'Klick'
-    ? `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${excl}`
+    ? `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}${excl}`
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
@@ -852,7 +855,7 @@ function bindIslands(el: ParentNode) {
   const list = state.preview?.islands; if (!list) return;
   const sel = el.querySelector<HTMLSelectElement>('[data-islsel]'); if (sel) sel.onchange = () => { islSel = Number(sel.value); renderAll(); };
   el.querySelectorAll<HTMLElement>('[data-islx]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); e.preventDefault(); const I = list[Number((b as HTMLElement).dataset.islx)]; if (!I) return; islandChoice(I).inc = false; extractLive(); }));
-  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-islx]')) return; const i = Number(b.dataset.isl); const I = list[i]; if (I && !I.inc) { islandChoice(I).inc = true; extractLive(); return; } islSel = islSel === i ? -1 : i; renderAll(); }));
+  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-islx]')) return; const i = Number(b.dataset.isl); if (islSel !== i) { islSel = i; renderAll(); return; } const I = list[i]; if (I && !I.inc) { islandChoice(I).inc = true; extractLive(); return; } islSel = -1; renderAll(); }));
   el.querySelectorAll<HTMLButtonElement>('[data-islinc]').forEach((b) => (b.onclick = () => { const I = list[islSel]; if (!I) return; islandChoice(I).inc = b.dataset.islinc === '1'; extractLive(); }));
   const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; extractLive(); };
 }
@@ -967,8 +970,9 @@ async function applyExtract(keep?: Uint32Array) {
     const r = await busy(engine.call<any>({ op: 'fit', indices: grown, type, params: geom ? { ...extractParams(type), inset: 0 } : extractParams(type) }));
     let zone: import('./core/reextract').SearchRegion | undefined;
     if (geom) { // boundary from the fitted geometry: zone around the fitted shape, all points of that surface inside it
+      const grownForm = r.fit.form ?? Infinity;
       const g = await geomZoneExtract(r.fit, r.indices, pv.hit?.point, state.opts.fill.band ?? undefined, { k: 0, angleOn: x0.angleOn, angleDeg: x0.angleDeg, inset: x0.inset });
-      r.fit = g.fit; r.indices = g.indices; r.band = g.band; zone = g.zone; }
+      if (zoneFitAcceptable(grownForm, g.fit.form ?? Infinity)) { r.fit = g.fit; r.indices = g.indices; r.band = g.band; zone = g.zone; } }
     if (removedSets.length || state.opts.fill.man.length) { const k = minusRemoved(r.indices); if (k.length !== r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: k, type, crit: state.opts.crit })); r.fit = q.fit; r.indices = q.indices; } } // removed regions stay out (also All inside boundary / fitted geometry)
     if (keep?.length) { const u = unionIndices(r.indices, minusRemoved(keep)); if (u.length > r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: u, type, crit: state.opts.crit, params: extractParams(type) })); r.fit = q.fit; r.indices = q.indices; } }
     state.preview = { ...pv, fit: r.fit, indices: r.indices, grown: base, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, islands: fill ? r.islands : undefined, zone };
@@ -1946,6 +1950,7 @@ function togglePanel(p: (typeof PANELS)[number], on?: boolean) {
   document.body.classList.toggle('show-' + p, show);
   document.querySelectorAll<HTMLButtonElement>('#mobile-bar [data-panel]').forEach((b) =>
     b.classList.toggle('on', document.body.classList.contains('show-' + b.dataset.panel)));
+  placeFloaters();
 }
 document.querySelectorAll<HTMLButtonElement>('#mobile-bar [data-panel]').forEach((b) => (b.onclick = () => togglePanel(b.dataset.panel as any)));
 for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#table-pane', 'table']] as const) {
@@ -2328,10 +2333,17 @@ function fitParamsHTML(f: FeatureView) {
   if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
   const fp = (f.fp ??= defaultFp()); const m = f.measured!; const crit = fp.crit ?? 'lsq';
   const fb = m.formBy; const ok = (c: FitCrit) => critSupported(f.type, c);
+  // The Filters section is omitted once re-extraction exists (those controls live there once). The normal-direction
+  // filter is not one of them – training and refit still tick #fp-nf under Fit.
+  const nf = filterParamsHTML(f) ? '' : `<div class="row chk"><label><input type="checkbox" id="fp-nf" ${fp.nf.on ? 'checked' : ''}> ${tt('Normal direction filter')}</label></div>
+    ${fp.nf.on ? `<div class="row"><label>${tt('max. normal deviation [°]')}</label><input id="fp-nfa" value="${fp.nf.angleDeg}" inputmode="decimal"></div>
+      <div class="row"><label>${tt('discard at most [%]')}</label><input id="fp-nfp" value="${fp.nf.maxPct}" inputmode="decimal"></div>` : ''}
+    <p class="note">${tt('Normal filter: points whose measured surface normal deviates from the fitted element by more than the angle (edges, chamfers, adjacent faces) are discarded – worst first, at most the percentage.')}${m.nfRemoved ? ` <b>${tt('Currently {0} points discarded.', m.nfRemoved)}</b>` : ''}</p>`;
   return `<div id="fp-box">
     <div class="row"><label>${tt('Geometry type')}</label><select id="d-retype">${FIT_TYPES.map((t) => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${typeName(t)}</option>`).join('')}</select></div>
     <div class="row" title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation of two boundaries (Chebyshev); Tangential circumscribed = smallest element containing all points (shaft); Tangential inscribed = largest element inside all points (hole). Plane: outer / inner tangent plane.')}"><label>${tt('Fit criterion')}</label><select id="fp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === crit ? 'selected' : ''} ${ok(c) ? '' : 'disabled'}>${tt(CRIT_NAME[c])}</option>`).join('')}</select><button type="button" class="help-q" data-doc-sec="fitcrit" title="${tt('Fit criteria – documentation')}">?</button></div>
     ${fb ? `<div class="crit-tab" title="${tt('Form deviation of the same points evaluated with every fit criterion (roundness per fit). The selected criterion is bold.')}"><div class="note">${formName(f.type)} ${tt('per fit')} [mm]</div>${FIT_CRITS.filter((c) => fb[c] != null).map((c) => `<span class="${c === crit ? 'on' : ''}">${tt(CRIT_SHORT[c])} <b>${fmt(fb[c]!, 4)}</b></span>`).join('')}</div>` : `<p class="note">${tt('Form per fit criterion is computed on the next refit.')}</p>`}
+    ${nf}
   </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
@@ -2563,6 +2575,14 @@ function placeFloaters() {
   const cube = document.getElementById('navcube') as HTMLElement | null;
   const panel = document.getElementById('ctx-panel') as HTMLElement | null;
   const phone = matchMedia('(max-width: 900px), (max-height: 560px)').matches;
+  const sheet = phone && ['show-table', 'show-dialog', 'show-tree'].some((c) => document.body.classList.contains(c));
+  if (sheet) {
+    // a bottom sheet covers the lower view; keep the cube and the gear in the 3D area above it
+    if (cube) { cube.style.top = '8px'; cube.style.bottom = 'auto'; }
+    if (gear) { gear.style.top = '96px'; gear.style.bottom = 'auto'; }
+    return;
+  }
+  cube?.style.removeProperty('top'); gear?.style.removeProperty('top');
   if (!phone || !panel || panel.classList.contains('hidden') || !document.body.classList.contains('ctx-on')) {
     gear?.style.removeProperty('bottom'); cube?.style.removeProperty('bottom'); return;
   }
@@ -3990,6 +4010,8 @@ function renderCsIndicator() {
     el = document.createElement('button'); el.id = 'cs-ind'; viewer.el.appendChild(el);
     el.addEventListener('pointerdown', (e) => e.stopPropagation());
     el.onclick = (e) => {
+      // a canvas tap's delayed click must not open this menu over the Create button
+      if (performance.now() - lastCanvasPointer < 500) { e.preventDefault(); e.stopPropagation(); return; }
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const items: [string, () => void][] = [[`${state.activeCs == null ? '● ' : '○ '}${tt('Global (WCS)')}`, () => csActivate(null)],
         ...state.csys.map((c) => [`${state.activeCs === c.id ? '● ' : '○ '}${c.name}`, () => csActivate(c.id)] as [string, () => void]), [`＋ ${tt('New 3-2-1 …')}`, () => csNew()]];

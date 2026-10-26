@@ -10,10 +10,11 @@ const page = await (await b.newContext(PH ? { ...devices['iPhone 14 Pro'] } : { 
 const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 const S = (f, a) => page.evaluate(f, a); const ok = (c, m) => { console.log((c ? 'OK  ' : 'FAIL') + ' ' + m); if (!c) process.exitCode = 1; };
 const idle = () => page.waitForFunction(() => !document.body.classList.contains('busy'), null, { timeout: 60000 }).catch(() => {});
-await page.goto(URL, { waitUntil: 'networkidle' });
-await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${KEY}"]`);
+await page.goto(URL.includes('nodemo') ? URL : URL + (URL.includes('?') ? '&' : '?') + 'nodemo', { waitUntil: 'networkidle' });
+await page.click('#btn-sample');
+await page.click(`.sample-card[data-key="${KEY}"]`);
 await page.waitForFunction(() => window.__app.state.data, null, { timeout: 120000 });
-await S(() => { document.querySelector('.tab[data-tab="poly"]').click(); document.querySelector('#btn-curve-detect').click(); });
+await S(() => { document.querySelector('.tab[data-tab="re"]').click(); document.querySelector('#btn-curve-detect').click(); });
 await page.waitForFunction(() => window.__app.state.layout, null, { timeout: 120000 }); await sleep(800);
 if (PH) await S(() => document.body.classList.remove('show-tree', 'show-dialog'));
 // sichtbare Kurvenstelle auf dem Bildschirm finden (pickCurve bestätigt)
@@ -31,7 +32,7 @@ const tap = async (x, y) => { if (PH) await page.touchscreen.tap(x, y); else awa
 await tap(target.x, target.y);
 ok(await S(() => window.__app.state.curveSel) === target.id, 'Klick wählt Kurve');
 ok(await S((id) => !!document.querySelector(`.curve-node.sel[data-cid="${id}"], .curve-node.selected[data-cid="${id}"], .curve-node.active[data-cid="${id}"]`), target.id), 'Baum zeigt Auswahl');
-await page.screenshot({ path: `docs/kurve-auswahl${PH ? '-iphone' : ''}.png` });
+await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/kurve-auswahl${PH ? '-iphone' : ''}.png` });
 // Kontrollpunkt ziehen
 const cp = await S((id) => { const a = window.__app, v = a.viewer, r = v.renderer.domElement.getBoundingClientRect(), c = a.state.curves.find((c) => c.id === id); const n = c.ctrl.length;
   for (let k = 0; k < n; k++) { const i = (Math.floor(n / 2) + (k % 2 ? 1 : -1) * Math.ceil(k / 2) + n) % n; const q = new (v.camera.position.constructor)(...c.ctrl[i]).project(v.camera); const x = r.left + (q.x + 1) / 2 * r.width, y = r.top + (1 - q.y) / 2 * r.height;
@@ -41,7 +42,7 @@ const [cx, cy] = await scr(cp.p);
 await page.mouse.move(cx, cy); await page.mouse.down(); for (let k = 1; k <= 8; k++) { await page.mouse.move(cx + k * 3, cy + k * 2); await sleep(30); } await page.mouse.up(); await sleep(600); await idle();
 const after = await S(([id, i]) => { const a = window.__app, c = a.state.curves.find((c) => c.id === id); return { p: c.ctrl[i], len: c.length, undo: a.cv().undo.length }; }, [target.id, cp.i]);
 ok(Math.hypot(after.p[0] - cp.p[0], after.p[1] - cp.p[1], after.p[2] - cp.p[2]) > 0.1 && after.undo >= 1, `Kontrollpunkt gezogen (Länge ${cp.len.toFixed(1)} → ${after.len.toFixed(1)} mm)`);
-await page.screenshot({ path: `docs/kurve-ziehen${PH ? '-iphone' : ''}.png` });
+await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/kurve-ziehen${PH ? '-iphone' : ''}.png` });
 const open = async () => { if (PH) await S(() => window.__app.togglePanel('dialog', true)); await sleep(300); };
 const close = async () => { if (PH) { await S(() => window.__app.togglePanel('dialog', false)); await sleep(700); } };
 // Punkt einfügen
@@ -72,11 +73,11 @@ ok(await S(() => window.__app.state.curves.length) === nc + 1, 'Löschen rückg�
 // Layout + Vorschläge
 await S(() => { window.__app.state.curveSel = null; document.querySelector('#btn-curve-layout').click(); }); await sleep(800); await idle();
 const L0 = await S(() => ({ p: window.__app.state.layout.regions.length, v: window.__app.state.layout.foursided, s: window.__app.state.layout.suggestions.length }));
-await page.screenshot({ path: `docs/kurvennetz-${KEY}-seiten${PH ? '-iphone' : ''}.png` });
+await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/kurvennetz-${KEY}-seiten${PH ? '-iphone' : ''}.png` });
 await S(() => document.querySelector('#btn-curve-accept').click()); await sleep(800); await idle();
 const L1 = await S(() => ({ p: window.__app.state.layout.regions.length, v: window.__app.state.layout.foursided }));
 ok(L1.v >= L0.v, `Vorschläge: ${L0.s} übernommen, Patches ${L0.p}→${L1.p}, 4-seitig ${L0.v}→${L1.v}`);
-await page.screenshot({ path: `docs/kurvennetz-${KEY}-vorschlaege${PH ? '-iphone' : ''}.png` });
+await page.screenshot({ path: `${process.env.SHOT_DIR || 'docs'}/kurvennetz-${KEY}-vorschlaege${PH ? '-iphone' : ''}.png` });
 const vis = await S(() => { const r = window.__app.viewer.renderer.domElement.getBoundingClientRect(); return r.width * r.height / (innerWidth * innerHeight); });
 ok(vis > 0.3, `3D-Ansicht sichtbar (${(vis * 100).toFixed(0)} %)`);
 ok(!errs.length, 'keine Seitenfehler ' + errs.join(' | '));

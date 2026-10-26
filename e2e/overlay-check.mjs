@@ -5,8 +5,10 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 let URL = process.argv[2] && process.argv[2] !== '-' ? process.argv[2] : null, srv = null;
 if (!URL) { URL = 'http://localhost:8767/'; srv = spawn('npx', ['serve', '-l', '8767', 'dist'], { stdio: 'ignore' }); await sleep(2500); }
+const STL = fileURLToPath(new globalThis.URL('../public/samples/beispielteil.stl', import.meta.url));
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -82,7 +84,16 @@ await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
 await page.evaluate(() => window.__app.showDatumInfo()); await check('datum info', OV.help); await closeBy('datum info', OV.help, 'esc');
 await tab('hilfe'); await page.evaluate(() => document.querySelector('#btn-whatsnew').click()); await check("what's new", OV.whatsnew); await closeBy("what's new", OV.whatsnew, 'swipe');
 await page.evaluate(() => document.querySelector('#btn-whatsnew').click()); await sleep(300); await closeBy("what's new", OV.whatsnew, 'esc');
-await page.evaluate(async () => { const A = window.__app; if (!A.state.features.length) { await A.ensurePosition(); A.state.mode = null; A.state.preview = null; A.renderAll(); } });
+// The sample grid hides the training part. Load it (answering the one-data-object confirms) so the properties dialog has a feature.
+await page.setInputFiles('#file', STL);
+await page.waitForSelector('#confirm-dlg [data-c="discard"]', { timeout: 20000 });
+await page.click('#confirm-dlg [data-c="discard"]');
+await page.waitForSelector('#confirm-dlg [data-c="new"]', { timeout: 10000 });
+await page.click('#confirm-dlg [data-c="new"]');
+await page.waitForSelector('#unit-dlg', { timeout: 180000 });
+await page.click('#unit-dlg [data-ok]');
+await page.waitForFunction(() => (window.__app.state.data?.name ?? '').startsWith('beispielteil'), null, { timeout: 180000 });
+await page.evaluate(async () => { const A = window.__app; await A.ensurePosition(); A.state.mode = null; A.state.preview = null; A.renderAll(); });
 await page.waitForFunction(() => window.__app.state.features.length > 0, null, { timeout: 60000 }).catch(() => {});
 const hasF = await page.evaluate(() => { const a = window.__app, f = a.state.features.find((x) => x.measured) ?? a.state.features[0]; if (f) a.showProperties(f); return !!f; });
 if (hasF) { await check('properties', OV.props); await closeBy('properties', OV.props, 'x'); } else fail('no feature for the properties dialog');

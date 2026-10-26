@@ -21,11 +21,14 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   await page.setInputFiles('#file', STL); await page.waitForSelector('#unit-dlg', { timeout: 180000 }); await page.click('#unit-dlg [data-ok]'); await sleep(5000);
   // 1. selection choice
   const seg = await page.evaluate(async () => { const A = window.__app, S = A.state, w = (ms) => new Promise((r) => setTimeout(r, ms));
-    A.startFitMode('Ebene'); A.renderAll(); await w(300); const b = [...document.querySelectorAll('.cp-selm button')].map((x) => x.dataset.a);
+    A.startFitMode('Ebene'); A.renderAll(); await w(300); const before = [...document.querySelectorAll('.cp-selm button')].map((x) => x.dataset.a);
+    await A.previewByClick(A.hitAt([70, 52, 20], [0, 0, 1])); await w(400);
+    const after = [...document.querySelectorAll('.cp-selm button')].map((x) => x.dataset.a);
     document.querySelector('.cp-selm [data-a="addreg"]').click(); await w(200); const multi = S.opts.multi, on = document.querySelector('.cp-selm .on')?.dataset.a;
-    document.querySelector('.cp-selm [data-a="click"]').click(); await w(200); return { b, multi, on, back: S.opts.multi }; });
+    document.querySelector('.cp-selm [data-a="click"]').click(); await w(200); S.preview = null; return { before, after, multi, on, back: S.opts.multi }; });
   console.log(v.name, 'selection', JSON.stringify(seg));
-  if (seg.b.join() !== 'click,addreg,brush') fail(`${v.name}: selection choice ${seg.b}`);
+  if (seg.before.join() !== 'click') fail(`${v.name}: before the first click only Smart Detect ${seg.before}`);
+  if (!seg.after.includes('addreg') || seg.after.includes('brush')) fail(`${v.name}: after detection ${seg.after}`);
   if (!seg.multi || seg.on !== 'addreg' || seg.back) fail(`${v.name}: Add region toggle`);
   for (const [k, p, n] of TAPS) {
     // view straight at the tap (wall taps obliquely from above), then a real tap/click at its screen position
@@ -50,8 +53,9 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
   }
   // Add region: cylinder from two partial wall regions (growth limit r = 3) on opposite sides of the hole
   const ar = await page.evaluate(async () => { const A = window.__app, S = A.state, w = (ms) => new Promise((r) => setTimeout(r, ms));
-    S.preview = null; A.startFitMode('Zylinder'); S.opts.radius = 3; A.renderAll(); await w(100); document.querySelector('.cp-selm [data-a="addreg"]').click(); await w(100);
+    S.preview = null; A.startFitMode('Zylinder'); S.opts.radius = 3; S.opts.multi = false; S.opts.ex.zoneSrc = 'points'; A.renderAll(); await w(100);
     await A.previewByClick(A.hitAt([20, 26.04, 10], [0, -1, 0])); await w(300); const n1 = S.preview?.indices.length;
+    document.querySelector('.cp-selm [data-a="addreg"]').click(); await w(100);
     await A.previewByClick(A.hitAt([20, 13.96, 10], [0, 1, 0])); await w(300); const p = S.preview;
     const r = { n1, n2: p?.indices.length, regions: p?.regions?.length, d: p?.fit.diameter ?? 2 * p?.fit.radius, label: document.querySelector('.cp-hint')?.textContent };
     S.opts.radius = 0; S.opts.multi = false; S.preview = null; A.startFitMode('Kreis'); return r; });

@@ -60,13 +60,16 @@ try {
   await S(() => document.querySelector('#whatsnew')?.remove()); // 0.40: „Neu in dieser Version“ fing die Klicks ab
   await page.click('#btn-sample');
   await page.waitForSelector('.sample-card');
+  await page.locator('.sd-grid').evaluate((g) => { g.scrollTop = g.scrollHeight; });
   await page.waitForFunction(() => [...document.querySelectorAll('.sample-card img')].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 20000 }).catch(() => fail('Vorschaubilder nicht geladen'));
+  await page.locator('.sd-grid').evaluate((g) => { g.scrollTop = 0; });
   const cards = await S(() => [...document.querySelectorAll('.sample-card')].map((c) => c.dataset.key));
   console.log('Karten:', cards.join(', '));
   // 0.40: Kartensatz aus public/samples/index.json (statt fest 4 / pruefplatte, freiform)
   const IDX = JSON.parse(fs.readFileSync('public/samples/index.json', 'utf8')).filter((x) => !x.hidden).map((x) => x.key);
   if (cards.length !== IDX.length || IDX.some((k) => !cards.includes(k))) fail(`erwartet Beispielteile ${IDX.join(', ')}`);
-  await page.screenshot({ path: `docs/${P}-beispiel-auswahl.png` });
+  const shotDir = process.env.SHOT_DIR || 'docs';
+  await page.screenshot({ path: `${shotDir}/${P}-beispiel-auswahl.png` });
   await page.click('#sd-close');
   // Teile ohne Soll-JSON: nur Laden prüfen (Mesh vorhanden); Teile mit Soll-JSON: zusätzlich Auto-Extraktion gegen Soll
   for (const key of IDX.filter((k) => !fs.existsSync(`public/samples/${k}.json`) && k !== 'cadsample')) {
@@ -107,15 +110,16 @@ try {
       else if (f.type === 'Ebene' && Math.abs((m.center[0] - f.point[0]) * f.normal[0] + (m.center[1] - f.point[1]) * f.normal[1] + (m.center[2] - f.point[2]) * f.normal[2]) > 0.01) err = 'Ebenenlage';
       console.log(`  ${f.id}: ${m.type}${m.diameter ? ' Ø' + m.diameter.toFixed(4) : ''}${m.type === 'Langloch' ? ` ${m.length.toFixed(3)}×${m.width.toFixed(3)}` : ''}${m.type === 'Torus' ? ` R${m.radius.toFixed(3)} r${Math.abs(m.minorRadius).toFixed(3)}` : ''}${m.type === 'Kegel' ? ` ${(2 * m.halfAngle * 180 / Math.PI).toFixed(3)}°` : ''} Form ${m.form.toFixed(4)}${err ? ' Treffer ' + JSON.stringify(hit) : ''} ${err ? '✗ ' + err : '✓'}`);
       if (err) fail(`${key} ${f.id}: ${err}`); else ok++;
+      await page.evaluate(() => document.getElementById('ctx-menu')?.classList.add('hidden'));
       await page.click('#cp-ok');
     }
     if (ok < Math.min(3, tried)) fail(`${key}: nur ${ok} Merkmale korrekt geprüft`);
     console.log(`  → ${ok}/${tried} korrekt`);
     await S(() => { const { viewer } = window.__app; viewer.viewDir([1, -1.3, 1.1]); viewer.view('fit'); viewer.viewDir([1, -1.3, 1.1]); }); await sleep(500);
-    await page.screenshot({ path: `docs/${P}-scan-${key}.png` });
+    await page.screenshot({ path: `${shotDir}/${P}-scan-${key}.png` });
     const c = close[key]; if (!c) { await page.keyboard.press('Escape').catch(() => {}); continue; }
     await S(([t, d, r]) => { const { viewer, state } = window.__app; state.showLabels = false; state.showPrims = false; state.colorPts = false; state.sel = []; window.__app.renderAll(); viewer.viewDir(d); viewer.focus(t, r); viewer.setWireframe(true); }, c);
-    await sleep(600); await page.screenshot({ path: `docs/${P}-scan-${key}-netz.png` });
+    await sleep(600); await page.screenshot({ path: `${shotDir}/${P}-scan-${key}-netz.png` });
     await S(() => { const { viewer, state } = window.__app; viewer.setWireframe(false); state.showLabels = true; state.showPrims = true; state.colorPts = true; window.__app.renderAll(); });
     await page.keyboard.press('Escape').catch(() => {});
   }

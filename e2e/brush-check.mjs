@@ -3,6 +3,7 @@
 import { chromium, webkit, devices } from 'playwright';
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 let URL = process.argv[2] && process.argv[2] !== '-' ? process.argv[2] : null, srv = null;
 const MODE = process.argv[3] || 'desktop'; const P = MODE;
 if (!URL) { URL = 'http://localhost:8765/'; srv = spawn('npx', ['serve', '-l', '8765', 'dist'], { stdio: 'ignore' }); await sleep(2500); }
@@ -30,40 +31,48 @@ async function stroke(a, b, shift = false) {
   }
   await sleep(500);
 }
+const shotDir = process.env.SHOT_DIR || 'docs';
+const STL = fileURLToPath(new globalThis.URL('../public/samples/beispielteil.stl', import.meta.url));
+const openBrush = async () => { await page.locator('details.cp-params').evaluate((d) => { d.open = true; }); await page.click('#ctx-panel [data-a="brush"]'); };
 try {
-  await page.goto(URL, { waitUntil: 'networkidle' });
-  await page.click('#btn-sample'); await page.click('.sample-card[data-key="beispielteil"]');
-  await page.waitForFunction(() => window.__app.state.data, null, { timeout: 60000 });
+  await page.goto(URL.includes('nodemo') ? URL : URL + (URL.includes('?') ? '&' : '?') + 'nodemo', { waitUntil: 'networkidle' });
+  await page.setInputFiles('#file', STL);
+  await page.waitForSelector('#unit-dlg', { timeout: 180000 }); await page.click('#unit-dlg [data-ok]');
+  await page.waitForFunction(() => (window.__app.state.data?.name ?? '').startsWith('beispielteil'), null, { timeout: 180000 });
   await page.click('.tab[data-tab="merkmale"]'); await page.click('[data-ftype="Ebene"]');
   await S(() => window.__app.viewer.view('+Z')); await sleep(300);
-  const bar = await page.textContent('#mode-bar'); if (!/Klick/.test(bar)) fail('Modusanzeige Klick fehlt: ' + bar);
-  await page.click('#mode-bar [data-a="brush"]');
-  if (!/Pinsel/.test(await page.textContent('#mode-bar'))) fail('Modusanzeige Pinsel fehlt');
+  const title = () => page.locator('#ctx-panel .cp-t').innerText();
+  if (!/Feature Builder|Smart Detect|Plane/.test(await title())) fail('Feature Builder fehlt: ' + await title());
+  if ((await S(() => window.__app.state.mode?.method)) !== 'Klick') fail('Start nicht Klick');
+  await openBrush();
+  if ((await S(() => window.__app.state.mode?.method)) !== 'Pinsel' || !/Brush/.test(await title())) fail('Pinsel-Modus fehlt: ' + await title());
   await stroke([60, 40, 20], [95, 50, 20]); const c1 = await count();
   await stroke([60, 10, 20], [95, 20, 20]); const c2 = await count();
   console.log('Gemalt:', c1, '→', c2);
   if (!(c1 > 50 && c2 > c1)) fail('Malen ohne Wirkung');
-  await page.screenshot({ path: `docs/${P}-pinsel-modusanzeige.png` });
+  await page.screenshot({ path: `${shotDir}/${P}-pinsel-modusanzeige.png` });
   // Radieren
   if (MODE === 'desktop') await stroke([60, 10, 20], [95, 20, 20], true);
-  else { await page.click('#mode-bar [data-a="erase"]'); await stroke([60, 10, 20], [95, 20, 20]); await page.click('#mode-bar [data-a="paint"]'); }
+  else { await page.click('#ctx-panel [data-a="erase"]'); await stroke([60, 10, 20], [95, 20, 20]); await page.click('#ctx-panel [data-a="paint"]'); }
   const c3 = await count(); console.log('Nach Radieren:', c3); if (!(c3 < c2)) fail('Radieren ohne Wirkung');
   // Rückgängig (Strg+Z bzw. Knopf) stellt den radierten Strich wieder her
-  if (MODE === 'desktop') await page.keyboard.press('Control+z'); else await page.click('#mode-bar [data-a="undo"]');
+  if (MODE === 'desktop') await page.keyboard.press('Control+z'); else await page.click('#cp-undo');
   await sleep(200); const c4 = await count(); console.log('Nach Rückgängig:', c4); if (c4 !== c2) fail(`Rückgängig: ${c4} statt ${c2}`);
-  await page.click('#mode-bar [data-a="undo"]'); await sleep(200); if (await count() !== c1) fail('2. Rückgängig falsch');
-  // Fitten aus Pinsel funktioniert
-  await page.click('#mode-bar [data-a="fit"]'); await page.waitForFunction(() => window.__app.state.preview?.method === 'Pinsel', null, { timeout: 30000 });
-  await page.click('#pc-discard');
-  // Auswahl löschen (prominenter Knopf)
-  await page.click('#mode-bar [data-a="clear"]'); if (await count() !== 0) fail('Auswahl löschen ohne Wirkung');
-  await page.screenshot({ path: `docs/${P}-pinsel-auswahl-geloescht.png` });
+  await page.click('#cp-undo'); await sleep(200); if (await count() !== c1) fail('2. Rückgängig falsch');
+  // Live-Fit der gemalten Punkte (0.33, ein Schritt), ✓ erzeugt das Merkmal direkt
+  await page.waitForFunction(() => window.__app.brushLive()?.fit?.type === 'Ebene', null, { timeout: 30000 });
+  const live = await S(() => { const b = window.__app.brushLive(); return { t: b?.fit?.type, n: b?.indices?.length }; });
+  console.log('Live-Fit:', JSON.stringify(live)); if (live.t !== 'Ebene' || !(live.n > 50)) fail('Pinsel-Fit fehlt');
+  await page.click('#cp-ok');
+  await page.waitForFunction(() => window.__app.state.features.some((f) => f.method === 'Pinsel'), null, { timeout: 30000 });
+  if (await count() !== 0) fail('Erzeugen lässt die Markierung stehen');
+  await page.screenshot({ path: `${shotDir}/${P}-pinsel-auswahl-geloescht.png` });
   // Esc: erst Auswahl löschen, dann zurück zu Klick (Desktop)
   await stroke([60, 40, 20], [95, 50, 20]);
   if (MODE === 'desktop') {
     await page.keyboard.press('Escape'); if (await count() !== 0) fail('Esc löscht Auswahl nicht');
     await page.keyboard.press('Escape'); if ((await S(() => window.__app.state.mode?.method)) !== 'Klick') fail('2. Esc → Klick fehlt');
-    await page.click('#mode-bar [data-a="brush"]'); await stroke([60, 40, 20], [95, 50, 20]);
+    await openBrush(); await stroke([60, 40, 20], [95, 50, 20]);
   }
   // Szenario Martin: Markierung bleibt stehen, neuer Typ im Menüband → Klick-Extraktion muss funktionieren
   if ((await count()) === 0) fail('Vorbedingung: Markierung');
@@ -72,7 +81,8 @@ try {
   if (st.m !== 'Klick' || st.n !== 0) fail('Typwechsel lässt Pinsel/Markierung stehen: ' + JSON.stringify(st));
   await S(() => window.__app.viewer.view('iso')); await sleep(300);
   const xy = await scr([20, 26.04, 15]);
-  MODE === 'desktop' ? await page.mouse.click(xy[0], xy[1]) : await page.touchscreen.tap(xy[0], xy[1]);
+  if (MODE === 'desktop') await page.mouse.click(xy[0], xy[1]);
+  else await S(([x, y]) => { const c = window.__app.viewer.renderer.domElement; const ev = (t) => c.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, pointerType: 'touch', isPrimary: true, bubbles: true, button: 0, pointerId: 11 })); ev('pointerdown'); ev('pointerup'); }, xy);
   await page.waitForFunction(() => window.__app.state.preview, null, { timeout: 30000 });
   const pv = await S(() => ({ t: window.__app.state.preview.fit.type, d: window.__app.state.preview.fit.diameter }));
   console.log('Klick nach Pinsel:', JSON.stringify(pv)); if (pv.t !== 'Zylinder' || Math.abs(pv.d - 12.08) > 0.05) fail('Klick-Extraktion nach Pinsel blockiert');
