@@ -16,7 +16,7 @@ export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
     'New project, and Load data / Load sample: one data object. If data exists, confirm “Load and create a new project”. Unsaved changes are asked first.',
     'Transparency is one setting for the gear above the cube, the Analyze context window and Home › Options. Hiding the mesh in the tree hides a transparent model completely.',
     'Show aux-plane points of an assigned plane shows that plane’s own points.',
-    'iPhone: the view gear and the navigation cube stay above the 3D view context window.',
+    'iPhone: the view gear and the navigation cube stay above the 3D view context window, and move up with it when the panel grows.',
   ] },
   { version: '2026.0.40', date: '2026-10-20', items: [
     'Feature Builder (new creation panel): one main action “✨ Smart Detect” – tap a face and the feature is detected (or fitted as the chosen type). Type, pick radius and the Brush path are under “Advanced parameters”. The Auto icon is no longer pre-highlighted.',

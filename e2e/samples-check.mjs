@@ -13,6 +13,19 @@ await ctx.addInitScript(() => addEventListener('DOMContentLoaded', () => new Mut
 const page = await ctx.newPage(); const touch = MODE !== 'desktop';
 const errors = []; page.on('pageerror', (e) => errors.push(String(e))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const fail = (m) => { console.error('FEHLER:', m); process.exitCode = 1; };
+/** Second sample replaces the project: unsaved changes, then “Load and create a new project”. */
+async function confirmReplace() {
+  const dlg = page.locator('#confirm-dlg');
+  if (!(await dlg.waitFor({ state: 'visible', timeout: 1200 }).then(() => true, () => false))) return;
+  for (let i = 0; i < 3; i++) {
+    if (!(await dlg.isVisible().catch(() => false))) return;
+    const discard = dlg.locator('[data-c="discard"]'), neu = dlg.locator('[data-c="new"]');
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    else if (await neu.isVisible().catch(() => false)) await neu.click();
+    else return;
+    await sleep(200);
+  }
+}
 const S = (fn, a) => page.evaluate(fn, a);
 const P = MODE === 'desktop' ? 'desktop' : 'iphone';
 async function clickWorld(p, views) {
@@ -58,7 +71,9 @@ try {
   // Teile ohne Soll-JSON: nur Laden prüfen (Mesh vorhanden); Teile mit Soll-JSON: zusätzlich Auto-Extraktion gegen Soll
   for (const key of IDX.filter((k) => !fs.existsSync(`public/samples/${k}.json`) && k !== 'cadsample')) {
     await page.click('.tab[data-tab="start"]').catch(() => {}); const t0 = Date.now();
+    await confirmReplace();
     await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${key}"]`);
+    await confirmReplace();
     const loaded = await page.waitForFunction((k) => window.__app.state.data?.name === k && window.__app.state.data.vertexCount > 1000, key, { timeout: 180000 }).then(() => true, () => false);
     if (!loaded) fail(`${key}: nicht geladen`); else console.log(`${key}: geladen in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }
@@ -66,7 +81,9 @@ try {
     const nom = JSON.parse(fs.readFileSync(`public/samples/${key}.json`, 'utf8'));
     await page.click('.tab[data-tab="start"]').catch(() => {});
     const t0 = Date.now();
+    await confirmReplace();
     await page.click('#btn-sample'); await page.click(`.sample-card[data-key="${key}"]`);
+    await confirmReplace();
     await page.waitForFunction((k) => window.__app.state.data?.name === k, key, { timeout: 180000 });
     const st = await page.textContent('#stats');
     console.log(`${nom.name}: geladen in ${((Date.now() - t0) / 1000).toFixed(1)} s, ${st}`);

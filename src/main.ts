@@ -6,6 +6,7 @@ import { initCtxPanel, setCtx, CtxSpec } from './ctxpanel';
 import { initLayout, setPaneOpen, paneOpen, initPanelsMenu, showAllPanes } from './layout';
 import { docsHtml } from './docs';
 import { provenanceOf, hardParentsOf, dependentsOf } from './core/provenance';
+import { unionIndices } from './core/region';
 import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
 import { sideView } from './ui/axisview';
 import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
@@ -952,11 +953,6 @@ function extractParams(type: GeomType): import('./worker').FitParams {
   return { k: 0, nf: x.angleOn ? { angleDeg: x.angleDeg, maxPct: 100 } : null,
     fill: fill ? { band: state.opts.fill.band ?? 0, excludeRaised: state.opts.fill.exRaised, islands: x.islands, inset: x.inset, isl: state.opts.fill.isl } : null, inset: plane && !fill ? x.inset : 0 };
 }
-/** Union of index sets. Add region uses this so a later zone refit cannot drop the points already chosen. */
-function unionIdx(a: ArrayLike<number>, b: ArrayLike<number>): Uint32Array {
-  const s = new Set<number>(); for (let i = 0; i < a.length; i++) s.add(a[i]); for (let i = 0; i < b.length; i++) s.add(b[i]);
-  return Uint32Array.from(s).sort((x, y) => x - y);
-}
 /** Preview: apply the extraction parameters (outer contour, islands, exclusion distance, normal angle, outliers) to the grown region(s).
  *  keep: indices that must survive (Add region is strictly additive). */
 async function applyExtract(keep?: Uint32Array) {
@@ -974,7 +970,7 @@ async function applyExtract(keep?: Uint32Array) {
       const g = await geomZoneExtract(r.fit, r.indices, pv.hit?.point, state.opts.fill.band ?? undefined, { k: 0, angleOn: x0.angleOn, angleDeg: x0.angleDeg, inset: x0.inset });
       r.fit = g.fit; r.indices = g.indices; r.band = g.band; zone = g.zone; }
     if (removedSets.length || state.opts.fill.man.length) { const k = minusRemoved(r.indices); if (k.length !== r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: k, type, crit: state.opts.crit })); r.fit = q.fit; r.indices = q.indices; } } // removed regions stay out (also All inside boundary / fitted geometry)
-    if (keep?.length) { const u = unionIdx(r.indices, minusRemoved(keep)); if (u.length > r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: u, type, crit: state.opts.crit, params: extractParams(type) })); r.fit = q.fit; r.indices = q.indices; } }
+    if (keep?.length) { const u = unionIndices(r.indices, minusRemoved(keep)); if (u.length > r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: u, type, crit: state.opts.crit, params: extractParams(type) })); r.fit = q.fit; r.indices = q.indices; } }
     state.preview = { ...pv, fit: r.fit, indices: r.indices, grown: base, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, islands: fill ? r.islands : undefined, zone };
     if (islSel >= (state.preview.islands?.length ?? 0)) islSel = -1;
     const x = state.opts.ex, extra = [x.inset > 0 ? tt('exclusion distance {0} mm', x.inset) : '', x.angleOn ? tt('normal angle ≤ {0}°{1}', x.angleDeg, r.fit.nfRemoved ? ` (−${r.fit.nfRemoved})` : '') : '', x.outlierOn ? tt('outliers > {0} × RMS removed', x.outlierK) : tt('no outlier removal')].filter(Boolean).join(' · ');
@@ -1023,7 +1019,7 @@ async function addAuxRegion(h: Hit) {
   try {
     const r = await busy(engine.call<any>({ op: 'auxMerge', tri: h.tri, point: h.point, maxAngleDeg: state.opts.maxAngleDeg, seedR: state.opts.pick, type, plane: pv.aux!.plane, indices: pv.indices } as any));
     regionOps.push('add'); regionSnaps.push(pv);
-    const idx = unionIdx(r.indices as Uint32Array, pv.indices);
+    const idx = unionIndices(r.indices as Uint32Array, pv.indices);
     state.preview = { ...pv, fit: r.fit, indices: idx };
     status(tt('{0} from {1} regions: {2} points, form {3} mm.', typeName(type), regionOps.filter((x) => x === 'add').length + 1, r.indices.length, fmt(r.fit.form, 4)));
   } catch (e: any) { status(tt('No geometry found: {0}', e.message)); }
@@ -1031,7 +1027,7 @@ async function addAuxRegion(h: Hit) {
 }
 async function ensureKeep(keep: Uint32Array) {
   const pv = state.preview; if (!pv) return;
-  const u = unionIdx(pv.indices, minusRemoved(keep));
+  const u = unionIndices(pv.indices, minusRemoved(keep));
   if (u.length === pv.indices.length) return;
   const q = await busy(engine.call<any>({ op: 'fit', indices: u, type: pv.fit.type, crit: state.opts.crit }));
   state.preview = { ...pv, fit: q.fit, indices: q.indices };
@@ -2839,6 +2835,8 @@ $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
   g.querySelector<HTMLInputElement>('#vg-trans')!.oninput = (e) => { e.stopPropagation(); setViewTrans(viewTrans.on, Number((e.target as HTMLInputElement).value)); };
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   window.addEventListener('resize', () => placeFloaters());
+  const panel = document.getElementById('ctx-panel');
+  if (panel) new ResizeObserver(() => placeFloaters()).observe(panel);
   viewer.el.appendChild(g);
   const info = document.createElement('div'); info.id = 'bbox-info'; info.className = 'hidden'; viewer.el.appendChild(info);
   info.addEventListener('pointerdown', (e) => { e.stopPropagation(); info.classList.toggle('open'); });
