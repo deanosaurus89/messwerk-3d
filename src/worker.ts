@@ -209,7 +209,7 @@ self.onmessage = (e: MessageEvent<{ id: number; req: Req }>) => {
         delete r.fit.residuals; r.fit.n = r.indices.length; if (r.aux) delete r.aux.plane.residuals;
         result = r;
       } else {
-        const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius, seedR: req.seedR });
+        const tris = topo.growRegion(req.tri, req.point, { maxAngleDeg: req.maxAngleDeg, radius: req.radius, seedR: req.seedR, type: req.type === 'Ebene' ? 'Ebene' : undefined });
         const v = topo.regionVertices(tris);
         const use = v.interior.length >= 20 ? v.interior : v.all;
         result = { indices: use, ...doFit(use, req.type) };

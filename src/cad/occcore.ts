@@ -135,33 +135,99 @@ export function faceAnalytic(oc: OC, f: any): CadAnalytic {
   } catch { return blank(); }
   finally { a.delete?.(); }
 }
-export function faceInfo(oc: OC, f: any, id: number): FaceInfo {
-  const a = new oc.BRepAdaptor_Surface_2(f, true); const t = a.GetType(); const T = oc.GeomAbs_SurfaceType; a.delete();
+export function faceClass(oc: OC, f: any): { type: FaceType; detail: string } {
+  const a = new oc.BRepAdaptor_Surface_2(f, true); const t = a.GetType(); const T = oc.GeomAbs_SurfaceType; a.delete?.();
   const map: [any, FaceType, string][] = [[T.GeomAbs_Plane, 'Ebene', ''], [T.GeomAbs_Cylinder, 'Zylinder', ''], [T.GeomAbs_Cone, 'Kegel', ''], [T.GeomAbs_Sphere, 'Kugel', ''], [T.GeomAbs_Torus, 'Torus', ''],
     [T.GeomAbs_BSplineSurface, 'NURBS', 'B-Spline'], [T.GeomAbs_BezierSurface, 'NURBS', 'Bézier'], [T.GeomAbs_SurfaceOfRevolution, 'NURBS', 'Rotationsfläche'], [T.GeomAbs_SurfaceOfExtrusion, 'NURBS', 'Extrusionsfläche'], [T.GeomAbs_OffsetSurface, 'NURBS', 'Offsetfläche']];
-  const m = map.find((x) => x[0] === t) ?? [t, 'NURBS', 'Freiform'];
-  const g = new oc.GProp_GProps_1(); oc.BRepGProp.SurfaceProperties_1(f, g, false, false); const c = g.CentreOfMass(); const r: FaceInfo = { id, type: m[1], detail: m[2], area: g.Mass(), center: [c.X(), c.Y(), c.Z()] }; g.delete();
+  const m = map.find((x) => x[0] === t) ?? [t, 'NURBS' as FaceType, 'Freiform'];
+  return { type: m[1], detail: m[2] };
+}
+export function faceInfo(oc: OC, f: any, id: number): FaceInfo {
+  const m = faceClass(oc, f);
+  const g = new oc.GProp_GProps_1(); oc.BRepGProp.SurfaceProperties_1(f, g, false, false); const c = g.CentreOfMass(); const r: FaceInfo = { id, type: m.type, detail: m.detail, area: g.Mass(), center: [c.X(), c.Y(), c.Z()] }; g.delete();
   return r;
+}
+/** Area and centroid of a display mesh (no exact surface integration). */
+export function meshAreaCenter(t: Tess): { area: number; center: V3 } {
+  const p = t.positions, idx = t.indices; let a = 0, cx = 0, cy = 0, cz = 0;
+  for (let i = 0; i < idx.length; i += 3) {
+    const ia = idx[i] * 3, ib = idx[i + 1] * 3, ic = idx[i + 2] * 3;
+    const ux = p[ib] - p[ia], uy = p[ib + 1] - p[ia + 1], uz = p[ib + 2] - p[ia + 2];
+    const vx = p[ic] - p[ia], vy = p[ic + 1] - p[ia + 1], vz = p[ic + 2] - p[ia + 2];
+    const ar = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    a += ar; cx += ar * (p[ia] + p[ib] + p[ic]) / 3; cy += ar * (p[ia + 1] + p[ib + 1] + p[ic + 1]) / 3; cz += ar * (p[ia + 2] + p[ib + 2] + p[ic + 2]) / 3;
+  }
+  return a > 1e-12 ? { area: a, center: [cx / a, cy / a, cz / a] } : { area: 0, center: [0, 0, 0] };
+}
+/**
+ * Display mesh for CAD import. The previous load used linear deflection diag/1500
+ * (0.24 mm on a 360 mm part) and 0.35 rad, then exact surface properties on every face.
+ * Chordal error stays ≤ 0.75 mm so a ray hit remains inside the nominal edge window (≥ 2 mm).
+ */
+export function displayDeflection(diag: number): { linear: number; angular: number } {
+  const linear = Math.min(0.75, Math.max(0.15, (Number.isFinite(diag) ? diag : 1) / 250));
+  // 0.8 rad with surface-deflection control: the chord stays within `linear`.
+  // Finer angles (the old 0.35) spend most of their time in the mesher setup on trimmed NURBS.
+  return { linear, angular: 0.8 };
 }
 export function bboxDiag(oc: OC, sh: any): number {
   const b = new oc.Bnd_Box_1(); oc.BRepBndLib.Add(sh, b, true); const p = b.CornerMin(), q = b.CornerMax(); const d = p.Distance(q); b.delete(); return d;
 }
-/** Tessellation einer Fläche bzw. eines Verbunds (Netz wird bei Bedarf erzeugt). */
-export function tessellate(oc: OC, sh: any, defl: number, natural = false): Tess {
-  new oc.BRepMesh_IncrementalMesh_2(sh, defl, false, 0.35, false);
+/** Tessellation einer Fläche bzw. eines Verbunds (Netz wird bei Bedarf erzeugt). `angular` is radians. */
+export function tessellate(oc: OC, sh: any, defl: number, natural = false, angular = 0.35): Tess {
+  const mesher = new oc.BRepMesh_IncrementalMesh_2(sh, defl, false, angular, false);
+  try { return readTess(oc, sh, natural); }
+  finally { mesher.delete?.(); }
+}
+function readTess(oc: OC, sh: any, natural: boolean): Tess {
   const pos: number[] = [], idx: number[] = [], nor: number[] = [];
   for (const f of faces(oc, sh)) {
-    const loc = new oc.TopLoc_Location_1(); const h = oc.BRep_Tool.Triangulation(f, loc, 0); if (h.IsNull()) continue;
+    const loc = new oc.TopLoc_Location_1(); const h = oc.BRep_Tool.Triangulation(f, loc, 0); if (h.IsNull()) { loc.delete?.(); continue; }
     const T = h.get(); const tr = loc.Transformation(); const base = pos.length / 3; const n = T.NbNodes();
     const rev = !natural && f.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED; // natural: Normale der Fläche ohne Orientierungs-Flag
     for (let i = 1; i <= n; i++) { const p = T.Node(i).Transformed(tr); pos.push(p.X(), p.Y(), p.Z()); nor.push(0, 0, 0); }
     for (let i = 1; i <= T.NbTriangles(); i++) { const t = T.Triangle(i); let a = t.Value(1), b = t.Value(2); const c = t.Value(3); if (rev) [a, b] = [b, a]; idx.push(base + a - 1, base + b - 1, base + c - 1); }
     loc.delete();
   }
-  // Flächennormalen gemittelt
-  for (let t = 0; t < idx.length; t += 3) { const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]]; const n = cross(sub(pos.slice(3 * b, 3 * b + 3), pos.slice(3 * a, 3 * a + 3)), sub(pos.slice(3 * c, 3 * c + 3), pos.slice(3 * a, 3 * a + 3))); for (const v of [a, b, c]) for (let k = 0; k < 3; k++) nor[3 * v + k] += n[k]; }
-  for (let v = 0; v < nor.length; v += 3) { const n = norm(nor.slice(v, v + 3)); nor[v] = n[0]; nor[v + 1] = n[1]; nor[v + 2] = n[2]; }
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    const ax = pos[3 * a], ay = pos[3 * a + 1], az = pos[3 * a + 2];
+    const ux = pos[3 * b] - ax, uy = pos[3 * b + 1] - ay, uz = pos[3 * b + 2] - az;
+    const vx = pos[3 * c] - ax, vy = pos[3 * c + 1] - ay, vz = pos[3 * c + 2] - az;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    nor[3 * a] += nx; nor[3 * a + 1] += ny; nor[3 * a + 2] += nz;
+    nor[3 * b] += nx; nor[3 * b + 1] += ny; nor[3 * b + 2] += nz;
+    nor[3 * c] += nx; nor[3 * c + 1] += ny; nor[3 * c + 2] += nz;
+  }
+  for (let v = 0; v < nor.length; v += 3) { const x = nor[v], y = nor[v + 1], z = nor[v + 2]; const l = Math.hypot(x, y, z) || 1; nor[v] = x / l; nor[v + 1] = y / l; nor[v + 2] = z / l; }
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), normals: new Float32Array(nor) };
+}
+export interface LoadedFace { id: number; type: FaceType; detail: string; area: number; center: V3; geom: CadAnalytic | null; tess: Tess; }
+/** One display mesh per face. Exact area/centre of mass is not computed here — that dominated import time. */
+function meshShape(oc: OC, shape: any, linear: number, angular: number) {
+  const p = new oc.IMeshTools_Parameters();
+  p.Deflection = linear; p.Angle = angular; p.ControlSurfaceDeflection = true; p.InParallel = false;
+  p.Relative = false; p.CleanModel = true; p.AllowQualityDecrease = true;
+  const mesher = new oc.BRepMesh_IncrementalMesh_3(shape, p, new oc.Message_ProgressRange_1());
+  mesher.delete?.(); p.delete?.();
+}
+export function loadDisplayFaces(oc: OC, shape: any, onProgress?: (i: number, n: number) => void): { faces: LoadedFace[]; diag: number; defl: { linear: number; angular: number } } {
+  const orig = faces(oc, shape); const diag = bboxDiag(oc, shape); const defl = displayDeflection(diag);
+  onProgress?.(0, orig.length);
+  // One mesher for the whole model. Per-face IncrementalMesh repeated the edge setup on every face.
+  meshShape(oc, shape, defl.linear, defl.angular);
+  const out: LoadedFace[] = [];
+  for (let i = 0; i < orig.length; i++) {
+    if (i === 0 || i === orig.length - 1 || i % 25 === 0) onProgress?.(i, orig.length);
+    const f = orig[i];
+    let tess = readTess(oc, f, false);
+    if (!tess.indices.length) tess = tessellate(oc, f, defl.linear, false, defl.angular);
+    let geom: CadAnalytic | null = null; try { geom = faceAnalytic(oc, f); } catch { geom = null; }
+    const cls = faceClass(oc, f); const ac = meshAreaCenter(tess);
+    const center = ac.area > 0 ? ac.center : (geom?.origin ?? [0, 0, 0]);
+    out.push({ id: i, type: cls.type, detail: cls.detail, area: ac.area, center, geom, tess });
+  }
+  return { faces: out, diag, defl };
 }
 function compound(oc: OC, list: any[]): any { const c = new oc.TopoDS_Compound(); const b = new oc.BRep_Builder(); b.MakeCompound(c); for (const s of list) b.Add(c, s); return c; }
 function listOf(oc: OC, list: any[]): any { const l = new oc.TopTools_ListOfShape_1(); for (const s of list) l.Append_1(s); return l; }

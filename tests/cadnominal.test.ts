@@ -8,12 +8,15 @@ const plane = (origin: [number, number, number], normal: [number, number, number
   ({ type: 'Ebene', origin, normal, edges });
 
 describe('Soll/Ist choice', () => {
-  it('Auto follows the nearer target', () => {
-    expect(creationSide({ cad: true, mesh: true, cadCloser: true }, 'auto')).toBe('soll');
-    expect(creationSide({ cad: true, mesh: true, cadCloser: false }, 'auto')).toBe('ist');
-    expect(creationSide({ cad: true, mesh: false, cadCloser: true }, 'auto')).toBe('soll');
-    expect(creationSide({ cad: false, mesh: true, cadCloser: false }, 'auto')).toBe('ist');
-    expect(creationSide({ cad: false, mesh: false, cadCloser: false }, 'auto')).toBeNull();
+  it('Nominal and Measured are explicit — the nearer surface does not choose', () => {
+    expect(creationSide({ cad: true, mesh: true, cadCloser: true }, 'soll')).toBe('soll');
+    expect(creationSide({ cad: true, mesh: true, cadCloser: false }, 'soll')).toBe('soll');
+    expect(creationSide({ cad: true, mesh: false, cadCloser: true }, 'soll')).toBe('soll');
+    expect(creationSide({ cad: false, mesh: true, cadCloser: false }, 'soll')).toBeNull();
+    expect(creationSide({ cad: true, mesh: true, cadCloser: true }, 'ist')).toBe('ist');
+    expect(creationSide({ cad: false, mesh: true, cadCloser: false }, 'ist')).toBe('ist');
+    expect(creationSide({ cad: true, mesh: false, cadCloser: true }, 'ist')).toBeNull();
+    expect(creationSide({ cad: false, mesh: false, cadCloser: false }, 'ist')).toBeNull();
   });
   it('override forces one side and ignores the other target', () => {
     expect(creationSide({ cad: false, mesh: true, cadCloser: false }, 'soll')).toBeNull();
@@ -45,12 +48,28 @@ describe('nominal from a described face', () => {
     expect(rim.aux?.type).toBe('Ebene');
     expect(distCircle([10, 0, 10.4], [0, 0, 10], [0, 0, 1], 10)).toBeCloseTo(0.4);
   });
-  it('a freeform face is not an Auto result; explicit Freeform still is', () => {
+  it('a freeform face hit is a freeform nominal; an edge of a plane is a line, not the plane', () => {
     const ff: CadAnalytic = { type: 'NURBS', origin: [1, 2, 3], normal: [0, 0, 1], edges: [] };
-    expect(nominalFromCad(ff, [1, 2, 3], 'auto', 2)).toBeNull();
-    const n = nominalFromCad(ff, [1, 2, 3], 'Freiformfläche', 2)!;
+    const n = nominalFromCad(ff, [1, 2, 3], 'auto', 2)!;
     expect(n.freeform).toBe(true);
     expect(n.fit.type).toBe('Freiformfläche');
+    const typed = nominalFromCad(ff, [1, 2, 3], 'Freiformfläche', 2)!;
+    expect(typed.freeform).toBe(true);
+    const edged: CadAnalytic = plane([0, 0, 0], [0, 0, 1], [
+      { kind: 'line', mid: [5, 0, 0], length: 10, a: [0, 0, 0], b: [10, 0, 0] },
+    ]);
+    expect(nominalFromCad(edged, [5, 0.2, 0], 'auto', 2)!.fit.type).toBe('Linie');
+    expect(nominalFromCad(edged, [5, 5, 0], 'auto', 2)!.fit.type).toBe('Ebene');
+    expect(nominalFromCad(edged, [5, 5, 0], 'Linienzug', 2)).toBeNull();
+    const chain: CadAnalytic = plane([0, 0, 0], [0, 0, 1], [
+      { kind: 'line', mid: [5, 0, 0], length: 10, a: [0, 0, 0], b: [10, 0, 0] },
+      { kind: 'line', mid: [15, 0, 0], length: 10, a: [10, 0, 0], b: [20, 0, 0] },
+      { kind: 'line', mid: [20, 5, 0], length: 10, a: [20, 0, 0], b: [20, 10, 0] },
+    ]);
+    const poly = nominalFromCad(chain, [5, 0.1, 0], 'Linienzug', 2)!;
+    expect(poly.fit.type).toBe('Linienzug');
+    expect(poly.fit.pts!.length).toBe(3);
+    expect(poly.fit.length).toBeCloseTo(20);
   });
   it('explicit Kreis uses the circular edge even away from it; explicit Ebene stays a plane', () => {
     expect(nominalFromCad(disk, [0, 0, 10], 'Kreis', 2)!.fit.type).toBe('Kreis');

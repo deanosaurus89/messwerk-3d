@@ -34,6 +34,23 @@ describe('constructions', () => {
     const p = run('ln-proj', [ln([0, 0, 5], [1, 0, 1]), pl([0, 0, 0], [0, 0, 1])]); close(p.direction!, [1, 0, 0]); expect(p.center[2]).toBeCloseTo(0);
     const md = run('ln-mid', [ln([0, 0, 0], [1, 0, 0]), ln([0, 4, 0], [-1, 0, 0])]); expect(md.center[1]).toBeCloseTo(2);
     const pp = run('ln-perp', [pt([0, 5, 0]), ln([0, 0, 0], [1, 0, 0])]); close(pp.direction!, [0, 1, 0]); expect(pp.length).toBeCloseTo(5);
+    const g1 = run('ln-section', [pl([0, 3, 0], [0, 1, 0]), cy([0, 0, 0], [0, 0, 1], 5)], { side: 0 });
+    expect(g1.center[1]).toBeCloseTo(3);
+    expect(Math.abs(g1.center[0])).toBeCloseTo(4);
+    expect(Math.hypot(g1.center[0], g1.center[1])).toBeCloseTo(5);
+    expect(Math.abs(g1.direction![2])).toBeCloseTo(1);
+    const g2 = run('ln-section', [pl([0, 3, 0], [0, 1, 0]), cy([0, 0, 0], [0, 0, 1], 5)], { side: 1 });
+    expect(g2.center[0]).toBeCloseTo(-g1.center[0]);
+    const gen = run('ln-section', [pl([0, 0, 0], [1, 0, 0]), cone]);
+    expect(gen.center[0]).toBeCloseTo(0, 5);
+    expect(Math.abs(gen.direction![2])).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(() => run('ln-section', [pl([0, 0, 0], [0, 0, 1]), { type: 'Torus', center: [0, 0, 0], normal: [0, 0, 1], radius: 10, minorRadius: 2, ...R }])).toThrow(/torus/i);
+    const S = { degU: 1, degV: 1, nu: 2, nv: 2, ku: [0, 0, 1, 1], kv: [0, 0, 1, 1], ctrl: [0, 0, 0, 0, 10, 0, 10, 0, 0, 10, 10, 0] };
+    const ff = { type: 'Freiformfläche', center: [5, 5, 0], normal: [0, 0, 1], nurbs: { surface: S } } as any;
+    const sec = run('ln-section', [pl([5, 0, 0], [1, 0, 0]), ff]);
+    expect(Math.abs(sec.direction![1])).toBeGreaterThan(0.99);
+    expect(sec.center[0]).toBeCloseTo(5, 3);
+    expect(sec.length!).toBeGreaterThan(8);
   });
   it('planes', () => {
     const f = run('pl-fit', [pt([0, 0, 0]), pt([1, 0, 0]), pt([0, 1, 0]), pt([1, 1, 0.2])]); expect(Math.abs(f.normal[2])).toBeGreaterThan(0.98); expect(f.form).toBeGreaterThan(0);

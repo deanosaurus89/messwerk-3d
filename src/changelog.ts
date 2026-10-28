@@ -7,6 +7,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.47', date: '2026-10-28', items: [
+    'CAD import builds one display mesh for the whole model (chordal error at most 0.75 mm; previously each face at diagonal/1500, and an exact area on every face). On the included CAD sample the tessellation step goes from about 13 s to about 3.4 s. Picking and CAD nominals still use the analytic face. Reading the IGES/STEP file is unchanged (about 14 s on that sample).',
+    'Plane on one wall of a slot stays on that wall. Choosing Plane no longer walks the round ends onto the opposite wall and fits a plane between them. Smart Detect in the middle of the wall is unchanged.',
+    'Construction: a line from the straight section of a plane with a cylinder (plane parallel to the axis), a cone (plane through the apex) or a freeform surface when that section is straight. A torus section is a curve; the construction says so. The torus axis is unchanged.',
+    'Nominal or Measured is an explicit choice and stays for the next feature. There is no Auto. Measured keeps click-and-grow and the brush. A CAD nominal is the pointer only: a face hit is the surface (including freeform), an edge hit is a circle, slot or line. Create nominal adds it to the tree. Polyline is only the Polyline type: tangent CAD line segments are joined until a corner.',
+  ] },
   { version: '2026.0.46', date: '2026-10-28', items: [
     'Feature Builder, the tree and dialogs label the two components measured and nominal.',
     'Smart Detect shows the recognised type again (plane, circle, cylinder, cone, sphere, torus, freeform, slot, line), including on hover before the click.',
