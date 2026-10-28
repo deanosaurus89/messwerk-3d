@@ -128,8 +128,9 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
   if (want === 'auto') {
     if (!seamOnly && slot && slotD <= edgeTol && slotD <= bestD + 1e-6) return slotFit(slot);
     if (!seamOnly && best && bestD <= edgeTol) return circleFit(best);
-    if (!surf) return null;
-    return surf.type === 'Freiformfläche' ? { fit: surf, freeform: true } : { fit: surf };
+    // Freeform is never an Auto result. A NURBS face stays unmatched until the user picks Freiformfläche.
+    if (!surf || surf.type === 'Freiformfläche') return null;
+    return { fit: surf };
   }
   if (want === 'Kreis') return best ? circleFit(best) : null;
   if (want === 'Langloch') return slot ? slotFit(slot) : null;

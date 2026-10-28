@@ -49,7 +49,10 @@ td.dev.IO { color:var(--io); font-weight:600; } td.dev.NIO { color:var(--nio); f
 .node .tw { width:12px; color:#6b7886; font-size:10px; } .node svg { width:16px; height:16px; flex:none; }
 .node .badge { margin-left:auto; font-size:10.5px; padding:0 5px; border-radius:3px; color:#fff; }
 .badge.IO { background:var(--io); } .badge.NIO { background:var(--nio); }
-.indent1 { padding-left:18px; } .indent2 { padding-left:34px; } .indent3 { padding-left:50px; }
+.indent1 { padding-left:18px; } .indent2 { padding-left:34px; } .indent3 { padding-left:50px; } .indent4 { padding-left:66px; }
+#ctx-panel .cp-bfrom { display:inline-flex; align-items:center; gap:2px; }
+#ctx-panel .cp-bl { font:700 11px system-ui; color:#1e3a5c; margin-right:2px; }
+#view-gear .vg-sub { display:flex; flex-direction:column; gap:2px; border-top:1px solid #d5e0ec; padding-top:3px; margin-top:2px; }
 #dialog { padding:8px 10px; }
 #dialog h3 { margin:4px 0 8px; font-size:14px; } #dialog h4 { margin:12px 0 4px; font-size:12.5px; color:#3c4a58; }
 .row { display:flex; align-items:center; gap:6px; margin:4px 0; } .row label { width:118px; color:#3c4a58; }

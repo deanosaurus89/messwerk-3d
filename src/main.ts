@@ -11,11 +11,11 @@ import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
 import { sideView } from './ui/axisview';
 import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
 import { TRIM_TYPES, trimmedSurface, analyticShell, analyticSphere, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
-import { smoothedBoundary, loopSegments } from './core/boundary';
+import { smoothedBoundary, loopSegments, rawLoops, dropSealedLoops, openingFans, selectionHoles, type SealMark } from './core/boundary';
 import { zoneLoops } from './core/auxzone';
 import type { Island, IslandChoice } from './core/fillplane';
 import { normReex, lateralOf } from './core/reextract';
-import { freezeBoundary, sealedFans, unsealedBoundary, type FrozenBoundary, type HoleSeal } from './core/frozen';
+import { freezeBoundary, sealedFans, type FrozenBoundary, type HoleSeal } from './core/frozen';
 import { installNumFields, parseNum } from './ui/numfield';
 import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts, setSearchDistDefault } from './ui/reexui';
@@ -36,6 +36,27 @@ function curveTrimFor(f: FeatureView) {
 const shellCache = new Map<number, { key: string } & ReturnType<typeof analyticShell>>();
 let conePrev: { key: string; s: ReturnType<typeof analyticShell> } | null = null;
 /** Preview cone: full mesh frustum, cached so orbiting does not rescan the mesh every frame. */
+function previewAnalytic(p: Preview): boolean {
+  if (p.role === 'soll' || !GEOM_ZONE.includes(p.fit.type)) return false;
+  if (p.fit.type === 'Kegel' || p.fit.type === 'Kugel') return state.opts.ex.zoneSrc !== 'points';
+  return state.opts.ex.zoneSrc === 'geom';
+}
+function drawAnalyticPreview(p: Preview) {
+  if (p.fit.type === 'Kegel' && viewer.model) {
+    const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
+    const s = previewCone(p.fit, pos, p.indices);
+    viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
+  }
+  if (p.fit.type === 'Kugel' && p.fit.radius) {
+    const s = analyticSphere(p.fit); viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
+  }
+  if (p.fit.type === 'Zylinder' && viewer.model) {
+    const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
+    const s = analyticShell(p.fit, pos, p.indices, 72);
+    viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
+  }
+  viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
+}
 function previewCone(fit: FitResult, pos: ArrayLike<number>, idx: Uint32Array) {
   const key = fit.center.join(',') + '|' + fit.radius + '|' + fit.halfAngle + '|' + fit.length + '|' + idx.length + '|' + pos.length;
   if (conePrev?.key === key) return conePrev.s;
@@ -50,21 +71,42 @@ function shellFor(f: FeatureView) {
   const e = { key, ...r }; shellCache.set(f.id, e); return e;
 }
 function trimFor(f: FeatureView) {
-  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length + '|' + smoothTol + '|' + (f.frozen?.sealed?.length ?? 0);
+  const seals = f.fp?.seals?.length ?? 0;
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length + '|' + (f.frozen?.sealed?.length ?? 0) + '|' + seals + '|' + (f.fp?.zoneSrc ?? '');
   const c = trimCache.get(f.id); if (c && c.key === key) return c;
   const g = viewer.model!.geometry; if (!g.index) return null;
   const pos = g.getAttribute('position').array as Float32Array, tris = g.index.array as ArrayLike<number>;
   const r = trimmedSurface(f.measured!, pos, tris, f.indices);
-  // 0.31: boundary = smoothed contour of the selection on the fitted surface (no triangle zigzag)
-  // 0.44: a sealed opening (dismissed island / closed hole) is filled in the plane surface and dropped from the contour.
-  let loops = boundaryLoops(f.measured!, pos, tris, f.indices);
+  // 0.45: the outline is the triangle edges of the selection (no Taubin smoothing). A dismissed island is filled in the surface.
+  let loops = rawLoops(pos, tris, f.indices).filter((L) => L.length >= 3);
   let tri = r.tri;
-  if (f.type === 'Ebene' && f.frozen?.sealed?.length) {
-    loops = unsealedBoundary(loops, f.frozen);
-    const cap = sealedFans(pos, tris, f.indices, f.frozen);
+  const planeSeals: SealMark[] = f.type === 'Ebene' && f.frozen?.sealed?.length ? f.frozen.sealed.map((s) => ({ c: [f.frozen!.o[0] + f.frozen!.u[0] * s[0] + f.frozen!.v[0] * s[1], f.frozen!.o[1] + f.frozen!.u[1] * s[0] + f.frozen!.v[1] * s[1], f.frozen!.o[2] + f.frozen!.u[2] * s[0] + f.frozen!.v[2] * s[1]], r: s[2] })) : [];
+  const allSeals = [...planeSeals, ...(f.fp?.seals ?? [])];
+  if (allSeals.length) {
+    loops = dropSealedLoops(loops, allSeals);
+    const cap = f.type === 'Ebene' && f.frozen?.sealed?.length ? sealedFans(pos, tris, f.indices, f.frozen) : openingFans(f.measured!, rawLoops(pos, tris, f.indices), allSeals);
     if (cap.length) { const both = new Float32Array(tri.length + cap.length); both.set(tri); both.set(cap, tri.length); tri = both; }
   }
   const e = { key, tri, edges: loopSegments(loops) }; trimCache.set(f.id, e); return e;
+}
+/** Slightly darker than a feature fill, for the triangle-edge outline. */
+function shade(color: number, k = 0.62): number {
+  const r = Math.round(((color >> 16) & 255) * k), g = Math.round(((color >> 8) & 255) * k), b = Math.round((color & 255) * k);
+  return (r << 16) | (g << 8) | b;
+}
+/** Selected triangles projected onto the fit, outlined by their own mesh edges. Dismissed islands are filled. */
+function selectionDraw(fit: FitResult, indices: Uint32Array, seals: SealMark[]) {
+  const g = viewer.model!.geometry;
+  const pos = g.getAttribute('position').array as Float32Array, tris = g.index!.array as ArrayLike<number>;
+  const r = trimmedSurface(fit, pos, tris, indices);
+  let loops = rawLoops(pos, tris, indices).filter((L) => L.length >= 3);
+  let tri = r.tri;
+  if (seals.length) {
+    const cap = openingFans(fit, loops, seals);
+    if (cap.length) { const both = new Float32Array(tri.length + cap.length); both.set(tri); both.set(cap, tri.length); tri = both; }
+    loops = dropSealedLoops(loops, seals);
+  }
+  return { tri, edges: loopSegments(loops) };
 }
 /** Boundary smoothing tolerance [mm] (display only): null = automatic (0.7 × mesh edge, ≤ 0.5 mm), 0 = off */
 let smoothTol: number | null = (() => { const v = localStorage.getItem('mw3d-smooth'); return v == null || v === '' ? null : Number(v); })();
@@ -97,7 +139,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cad, cadOpen, cadPickHit, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity } from './cadui';
+import { initCad, cad, cadOpen, cadPickHit, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity, cadHighlight, cadClear } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
@@ -124,7 +166,7 @@ type AnchorMode = { kind: 'anchor'; out: GeomType | 'Abstand'; pts: Vec3[]; nrm:
 type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
-interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean; /** 0.31: per-island choices (not an island / refine) */ isl?: IslandChoice[] }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
+interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; /** dismissed islands on a curved surface: the opening is filled in the drawn geometry */ seals?: SealMark[]; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean; /** 0.31: per-island choices (not an island / refine) */ isl?: IslandChoice[] }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
 interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary (planes, set at ✓) */ frozen?: FrozenBoundary; /** 0.35: the frozen point set (creation selection) */ frozenIdx?: Uint32Array; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
@@ -603,7 +645,7 @@ let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
 /** Live nominal/actual label (and, for a CAD hit, the analytic preview) before the click confirms it. */
 let hoverNominal: { role: 'soll' | 'ist'; type: string; fit: FitResult | null } | null = null;
 let cadHoverT = 0, cadHoverSeq = 0;
-function clearAuxHover() { clearTimeout(auxT); clearTimeout(cadHoverT); auxSeq++; cadHoverSeq++; viewer.showHoverSets([]); const had = !!(hoverType || hoverNominal); hoverType = null; hoverNominal = null; if (had) renderModeBar(); }
+function clearAuxHover() { clearTimeout(auxT); clearTimeout(cadHoverT); auxSeq++; cadHoverSeq++; viewer.showHoverSets([]); if (state.preview?.role !== 'soll') cadHighlight(-1); const had = !!(hoverType || hoverNominal); hoverType = null; hoverNominal = null; if (had) renderModeBar(); }
 function edgeTol(): number {
   if (state.opts.pick > 0) return state.opts.pick;
   const r = viewer.radius || cad.faces.reduce((s, f) => Math.max(s, Math.sqrt(f.area)), 0);
@@ -621,10 +663,11 @@ function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
   cadHoverT = window.setTimeout(() => {
     if (seq !== cadHoverSeq || state.preview) return;
     const face = cad.faces[c.id]; const geom = face?.geom;
+    cadHighlight(c.id);
     if (!geom) { hoverNominal = { role: 'soll', type: face?.type ?? '', fit: null }; renderModeBar(); return; }
     const want = (state.mode as FitMode).type;
     const nom = nominalFromCad(geom, c.p, want, edgeTol());
-    const next = { role: 'soll' as const, type: nom?.fit.type ?? face.type, fit: nom && !nom.freeform ? nom.fit : null };
+    const next = { role: 'soll' as const, type: nom?.fit.type ?? (face.type === 'NURBS' ? '' : face.type), fit: nom && !nom.freeform ? nom.fit : null };
     const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type;
     hoverNominal = next; hoverType = next.type; if (!same) renderModeBar(); renderScene();
   }, 60);
@@ -648,6 +691,7 @@ async function previewFromCad(c: { id: number; p: V3 }) {
     catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; }
   }
   const tess = face.res?.tess ?? face.tess;
+  cadHighlight(c.id);
   state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: c.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
     aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
@@ -696,6 +740,12 @@ window.addEventListener('pointerup', async (e) => {
   if (!state.mode && await curveClick(e.clientX, e.clientY)) return;
   const aim = state.mode?.kind === 'fit' && state.mode.method === 'Klick' ? creationAim(e.clientX, e.clientY) : null;
   const picked = aim?.mesh ?? viewer.pick(e.clientX, e.clientY);
+  // Forced Soll never falls through to a scan fit, even when the mesh is also under the pointer.
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && state.opts.side === 'soll') {
+    clearAuxHover(); hoverNominal = null;
+    if (aim?.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.'));
+    return;
+  }
   if (!picked) {
     const fitClick = state.mode?.kind === 'fit' && state.mode.method === 'Klick';
     if (fitClick && (aim?.side === 'soll' || state.opts.side === 'soll')) { clearAuxHover(); hoverNominal = null; if (aim?.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.')); }
@@ -765,6 +815,8 @@ function undoBrush() {
 /** 0.33 (F4): brush in one step – live fit of the painted points after each stroke (stats in the panel), ✓ creates directly */
 /** ⚙ › Transparent: data object transparency (amount in %, Options › Display) */
 const viewTrans = { on: false, amt: 60 };
+/** CAD opacity, separate from the data object. Default opaque. */
+const cadTrans = { on: false, amt: 60 };
 let brushLive: Preview | null = null, brushLiveT = 0, brushLiveSeq = 0;
 function scheduleBrushFit() {
   window.clearTimeout(brushLiveT); brushLive = null;
@@ -855,26 +907,30 @@ function ctxSpec(): CtxSpec | null {
   const dsel = p && p.fit.type !== 'Abstand' && p.fit.type !== 'Winkel' && p.fit.type !== 'Linienzug'
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
   const zType = (p ? p.fit.type : m.type) as string;
-  const showB = m.method === 'Klick' && GEOM_ZONE.includes(zType) && !p?.aux;
-  const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${istBoundaryTip()}"><button type="button" data-zsrc="geom" disabled class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${istBoundaryTip()}">${tt('Geometry')}</button><button type="button" data-zsrc="points" disabled class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${istBoundaryTip()}">${tt('Points')}</button></span>` : '';
-  const isl = p && p.fit.type === 'Ebene' && !p.aux ? islandsHTML(p.islands ?? []) : '';
-  const ctl = m.method === 'Klick'
-    ? `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}`
+  const sollUi = p?.role === 'soll' || (!p && state.opts.side === 'soll');
+  const showB = !sollUi && m.method === 'Klick' && GEOM_ZONE.includes(zType) && !p?.aux;
+  const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${bfromTip()}"><span class="cp-bl">${tt('Boundary from')}</span><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${bfromTip()}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${bfromTip()}">${tt('Points')}</button></span>` : '';
+  const isl = !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || (GEOM_ZONE.includes(p.fit.type) && (p.islands?.length ?? 0) > 0)) ? islandsHTML(p.islands ?? []) : '';
+  const scanCtl = `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}`;
+  const ctl = sollUi
+    ? `${type}<span class="cp-hint">${tt('CAD nominal: the recognised geometry stays highlighted. ✓ creates it. Freeform is only used when you pick that type.')}</span>`
+    : m.method === 'Klick' ? scanCtl
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
-  const fullPars = !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
+  const fullPars = !sollUi && !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
   const sideCtl = `<label title="${tt('Auto: pointer on the CAD model creates a nominal (Soll), pointer on the polygon creates an actual (Ist). Override forces one of them.')}">${tt('Nominal / actual')} <select id="cp-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>Soll (${tt('from CAD')})</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>Ist (${tt('from scan')})</option></select></label>`;
-  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
+  const scanPars = `${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
     ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
     ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     ${m.method === 'Klick' ? `<label title="${tt('Normal angle: region growing from the click stops where the surface normal bends more than this angle (edge, fillet, chamfer, adjacent face). Smaller = stops earlier; larger = grows over soft transitions.')}">${tt('Normal angle')} <input id="cp-nang" data-num="abs" value="${state.opts.maxAngleDeg}" inputmode="decimal" style="width:3.5em">°<button type="button" class="help-q" data-doc-sec="nangle" title="${tt('Normal angle – documentation')}">?</button></label>` : ''}
     <label title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation; circumscribed / inscribed = tangential.')}">${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>
-  ` : ''}</div></details>`;
+  ` : ''}`;
+  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${sollUi ? tt('Nominal / actual. Scan fit parameters are not used for a CAD nominal.') : tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${sollUi ? '' : scanPars}</div></details>`;
   return {
     title: `${tt('Feature Builder')} · ${p?.role === 'soll' || (!p && hoverNominal?.role === 'soll') ? 'Soll' : p || hoverNominal?.role === 'ist' ? 'Ist' : ''} ${p ? typeName(p.fit.type as GeomType) : m.method === 'Klick' ? (hoverNominal?.type ? typeName(hoverNominal.type) : m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush')}`.replace('  ', ' '), cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${tt('Move over the CAD model or the polygon. Click to preview, ✓ creates the feature.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
+    controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Freeform is not in Auto. Pick Freeform surface to use this CAD face.') : tt('Click to highlight the recognised geometry, then ✓ creates the feature.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'pex') { paintEx = !paintEx; state.opts.multi = false; state.opts.addIsl = false; renderModeBar(); status(paintEx ? tt('Paint exclusion: paint the points to remove. They leave the selection exactly.') : ''); return; }
@@ -912,7 +968,8 @@ function ctxSpec(): CtxSpec | null {
   };
 }
 
-const istBoundaryTip = () => tt('Boundary, boundary exclusion distance and boundary smoothing apply only to a CAD nominal. They are greyed out for a scan (actual).');
+const istBoundaryTip = () => tt('Boundary exclusion distance and boundary smoothing apply only to a CAD nominal. They stay greyed out for a scan (actual).');
+const bfromTip = () => tt('Geometry: the analytic fit (full wall or frustum). Points: the clicked selection, drawn on its triangle edges.');
 /** Boundary smoothing input (Advanced): empty = auto, 0 = off. Greyed out for a scan (actual). */
 function smoothCtl(id: string, disabled = false) {
   const tip = disabled ? istBoundaryTip() : tt('Boundary smoothing [mm] (display only): the boundary of the selection is drawn as a smooth contour on the fitted surface instead of the triangle zigzag; every point moves at most this far. Empty = automatic (0.7 × mesh edge length, max. 0.5 mm), 0 = off. Applies to the preview and all features.');
@@ -1031,7 +1088,25 @@ async function previewByClick(h: Hit, add = false) {
       status(tt('Auto: {0} in auxiliary plane – {1} wall points (orange), {2} plane points (blue).', typeName(r.fit.type), r.indices.length, r.aux.indices.length)); renderAll(); return; }
     status(tt('Preview: {0} from {1} points ({2} ms). ✓ creates the feature.', typeName(r.fit.type), r.indices.length, r.ms.toFixed(0)));
   } catch (e: any) { state.preview = null; status(tt('No geometry found: {0}', e.message)); }
+  attachSurfaceIslands();
   renderAll();
+}
+/** Holes in a cylinder, cone, sphere or torus selection, so ✕ can close them in the geometry. */
+function attachSurfaceIslands() {
+  const pv = state.preview;
+  if (!pv || pv.role === 'soll' || pv.aux || !GEOM_ZONE.includes(pv.fit.type)) return;
+  const g = viewer.model?.geometry; if (!g?.index) return;
+  const src = pv.grown ?? pv.indices; if (src.length < 3) return;
+  const pos = g.getAttribute('position').array as Float32Array, tris = g.index.array as ArrayLike<number>;
+  const holes = selectionHoles(pos, tris, src);
+  const islands: Island[] = holes.map((h, i) => {
+    const I: Island = { id: i + 1, kind: 'hole', c: [...h.c], r: h.r, area: h.area, h: 0, n: h.loop.length, inc: false, m: 0, loops: [h.loop.map((q) => [...q])] };
+    const ch = state.opts.fill.isl.find((q) => Math.hypot(q.c[0] - h.c[0], q.c[1] - h.c[1], q.c[2] - h.c[2]) < Math.max(1, 0.5 * h.r));
+    if (ch?.drop) I.drop = true;
+    if (ch?.inc) I.inc = true;
+    return I;
+  });
+  state.preview = { ...state.preview!, islands };
 }
 
 /** Plane preview: capture all points inside the outer boundary of the grown region(s) (or back to the grown points). */
@@ -1072,6 +1147,7 @@ async function applyExtract(keep?: Uint32Array) {
     if (removedSets.length || state.opts.fill.man.length) { const k = minusRemoved(r.indices); if (k.length !== r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: k, type, crit: state.opts.crit })); r.fit = q.fit; r.indices = q.indices; } } // removed regions stay out (also All inside boundary / fitted geometry)
     if (keep?.length) { const u = unionIndices(r.indices, minusRemoved(keep)); if (u.length > r.indices.length) { const q = await busy(engine.call<any>({ op: 'fit', indices: u, type, crit: state.opts.crit, params: extractParams(type) })); r.fit = q.fit; r.indices = q.indices; } }
     state.preview = { ...pv, fit: r.fit, indices: r.indices, grown: base, bandUsed: r.band, seed: fill ? grown : undefined, filled: r.filled, raised: fill ? r.raised : undefined, contour: fill ? r.contour : undefined, islands: fill ? r.islands : undefined, zone };
+    attachSurfaceIslands();
     if (islSel >= (state.preview.islands?.length ?? 0)) islSel = -1;
     const x = state.opts.ex, extra = [x.inset > 0 ? tt('exclusion distance {0} mm', x.inset) : '', x.angleOn ? tt('normal angle ≤ {0}°{1}', x.angleDeg, r.fit.nfRemoved ? ` (−${r.fit.nfRemoved})` : '') : '', x.outlierOn ? tt('outliers > {0} × RMS removed', x.outlierK) : tt('no outlier removal')].filter(Boolean).join(' · ');
     if (fill) status(tt('Inside outer boundary: {0} points (+{1} on bumps/rims), flatness {2} mm.', r.indices.length, r.filled ?? 0, fmt(r.fit.form, 4)) + ' ' + extra + (r.raised?.length ? ' · ' + (state.opts.fill.exRaised ? tt('Raised features excluded: {0} points (magenta).', r.raised.length) : tt('Raised features (magenta) included: {0} points – “Exclude raised” drops them.', r.raised.length)) : ''));
@@ -1239,8 +1315,9 @@ function commitPreview() {
   if (f.fp) f.fp.crit = state.opts.crit;
   if (p.auxFill) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised };
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
-    if (p.zone && GEOM_ZONE.includes(t)) { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
+    if (p.zone && GEOM_ZONE.includes(t) && state.opts.ex.zoneSrc === 'geom') { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
     else if (GEOM_ZONE.includes(t) && !p.aux) { f.fp!.zoneSrc = 'points'; }
+    if (GEOM_ZONE.includes(t) && !p.aux) { const seals = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: [...I.c], r: I.r })); if (seals.length) f.fp!.seals = seals; }
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
@@ -1779,7 +1856,9 @@ function showDatumInfo() {
 $('#btn-an-ctrl').onclick = () => { const v = ($('#an-ctrl') as HTMLSelectElement).value; if (v) void analyzeControl(+v); };
 document.querySelector('#btn-an-off')?.addEventListener('click', analyzeOff);
 document.querySelector('#btn-an-whisk')?.addEventListener('click', () => { state.an.whisk = !state.an.whisk; renderAll(); });
-document.querySelector('#btn-an-trans')?.addEventListener('click', () => { setViewTrans(!viewTrans.on); status(viewTrans.on ? tt('Model semi-transparent – the same setting as the gear above the cube and Home › Options.') : tt('Model opaque.')); });
+document.querySelector('#btn-an-trans')?.addEventListener('click', () => { setViewTrans(!viewTrans.on); status(viewTrans.on ? tt('Data object semi-transparent.') : tt('Data object opaque.')); });
+document.querySelector('#btn-data-trans')?.addEventListener('click', () => { setViewTrans(!viewTrans.on); status(viewTrans.on ? tt('Data object semi-transparent.') : tt('Data object opaque.')); });
+document.querySelector('#btn-cad-trans')?.addEventListener('click', () => { setCadTrans(!cadTrans.on); status(cadTrans.on ? tt('CAD model semi-transparent.') : tt('CAD model opaque.')); });
 document.querySelector('#btn-an-set')?.addEventListener('click', () => { if (!state.an.on) analyze(state.an.kind); else document.querySelector<HTMLInputElement>('#an-sc')?.focus(); });
 
 // ------------------------------------------------------------------ Auswahl, Prüfmerkmale
@@ -2153,7 +2232,8 @@ function eyeBtn(visible: boolean, onToggle: () => void, label = false) {
 // Baumgruppen: zusammenklappbar (Zustand in localStorage); jede Zeile mit ▾ klappt die tieferen Folgezeilen ein.
 const TREE_KEY = 'mw-tree-closed';
 const treeClosed = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(TREE_KEY) ?? '[]'); } catch { return []; } })());
-function toggleTreeGroup(k: string) { treeClosed.has(k) ? treeClosed.delete(k) : treeClosed.add(k); try { localStorage.setItem(TREE_KEY, JSON.stringify([...treeClosed])); } catch { /* */ } renderTree(); }
+if (!localStorage.getItem('mw-cad-seen')) treeClosed.add('cad-model');
+function toggleTreeGroup(k: string) { treeClosed.has(k) ? treeClosed.delete(k) : treeClosed.add(k); try { localStorage.setItem(TREE_KEY, JSON.stringify([...treeClosed])); if (k === 'cad-model') localStorage.setItem('mw-cad-seen', '1'); } catch { /* */ } renderTree(); }
 const lvl = (el: HTMLElement) => { const m = el.className.match(/indent(\d)/); return m ? +m[1] : 0; };
 function applyTreeGroups(t: HTMLElement) {
   let hideBelow = Infinity;
@@ -2188,20 +2268,25 @@ function renderTree() {
     d.appendChild(b); if (extra) d.classList.add(extra); if (treePins.has(k)) d.classList.add('pin'); return d; };
   const dataGroup = () => {
     const pin = treePins.has('data'), c = pin ? ' pin' : '';
-    pinBtn(node(`<span class="tw">▾</span>${ICON.data}${tt('Data')}`, 'indent1 grp-data' + c, undefined, false, undefined, state.data ? eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderAll(); }) : undefined), 'data');
+    const n = pinBtn(node(`<span class="tw">▾</span>${ICON.data}${tt('Datenobjekte')}`, 'indent1 grp-data' + c, undefined, false, undefined, state.data ? eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderAll(); }) : undefined), 'data');
+    n.title = tt('Data objects');
     if (state.data) {
       const mn = node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(${tt('polygon model')})</span>`, 'indent2 model-node' + c, () => selectModel(), state.selModel, undefined,
         eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderTree(); renderScene(); }));
       mn.ondblclick = () => centerOn(null); attachContext(mn, null);
     }
   };
-  const refGroup = () => { const n = pinBtn(node(`<span class="tw"></span>${ICON.folder}${tt('Reference')} <span class="sub">(${tt('empty – CAD model later')})</span>`, 'indent1 grp-ref' + (treePins.has('ref') ? ' pin' : '')), 'ref');
-    n.title = tt('Reference: the nominal/CAD model will live here'); };
+  const refGroup = () => {
+    const sub = cad.faces.length ? '' : ` <span class="sub">(${tt('empty')})</span>`;
+    const n = pinBtn(node(`<span class="tw">▾</span>${ICON.folder}${tt('Referenzobjekte')}${sub}`, 'indent1 grp-ref' + (treePins.has('ref') ? ' pin' : '')), 'ref');
+    n.title = tt('Reference objects. CAD faces stay under the model and start collapsed.');
+    cadTree(node, q);
+  };
   if (treePins.has('data')) dataGroup(); if (treePins.has('ref')) refGroup();
   node(`<span class="tw">▾</span>${ICON.folder}<b>${tt('Objects')}</b>`, '');
   if (!treePins.has('data')) dataGroup(); if (!treePins.has('ref')) refGroup();
   const anyVis = feats.some((f) => !state.hidden.has(f.id));
-  node(`<span class="tw">▾</span>${ICON.folder}${tt('Features')} (${feats.length})`, 'indent1', undefined, false, undefined, feats.length ? eyeBtn(anyVis, () => {
+  const featHead = node(`<span class="tw">▾</span>${ICON.folder}${tt('Merkmale')} (${feats.length})`, 'indent1', undefined, false, undefined, feats.length ? eyeBtn(anyVis, () => {
     if (anyVis) feats.forEach((f) => state.hidden.add(f.id)); else state.hidden.clear(); renderAll(); }) : undefined);
   const distSlots = state.mode?.kind === 'dist' ? [state.mode.a, state.mode.b] : [];
   for (const f of feats) {
@@ -2236,7 +2321,7 @@ function renderTree() {
     }
   }
   csTree(node);
-  cadTree(node, q);
+  featHead.title = tt('Features');
   if (state.reports.length) {
     node(`<span class="tw">▾</span>${ICON.folder}${tt('Reports')} (${state.reports.length})`, 'indent1');
     for (const r of state.reports) node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
@@ -2337,9 +2422,12 @@ function renderDialog() {
 function renderModelDialog(d: HTMLElement) {
   d.innerHTML = `<h3>${ICON.mesh} ${tt('Polygon model')}</h3>${kv([[tt('Name'), state.data!.name], [tt('Points'), state.data!.vertexCount.toLocaleString('en-US')], [tt('Triangles'), state.data!.triCount.toLocaleString('en-US')], [tt('Edits'), pe.edits.length ? pe.edits.join(' → ') : tt('original')]])}
     <h4>${tt('Display')}</h4><div class="row chk"><label><input type="checkbox" id="md-vis" ${state.modelVisible ? 'checked' : ''}> ${tt('Visible')}</label></div>
+    <div class="row" title="${tt('Data object transparency. Separate from the CAD model.')}"><label><input type="checkbox" id="md-trans" ${viewTrans.on ? 'checked' : ''}> ${tt('Transparent')}</label> <input type="range" id="md-trans-a" min="5" max="95" step="5" value="${viewTrans.amt}"></div>
     <p class="note">${tt('Start ribbon › Features: choose a type (or Auto), click on the mesh, check the preview in the Action Bar and confirm with ✓.')}</p>
     <div><button class="btn" id="md-center">⌖ ${tt('Center')}</button><button class="btn" id="md-dev">◑ ${tt('Deviation to original')}</button></div>`;
   d.querySelector<HTMLInputElement>('#md-vis')!.onchange = (e) => { state.modelVisible = (e.target as HTMLInputElement).checked; renderTree(); renderScene(); };
+  d.querySelector<HTMLInputElement>('#md-trans')!.onchange = (e) => setViewTrans((e.target as HTMLInputElement).checked);
+  d.querySelector<HTMLInputElement>('#md-trans-a')!.oninput = (e) => setViewTrans(viewTrans.on, Number((e.target as HTMLInputElement).value));
   d.querySelector('#md-center')!.addEventListener('click', () => centerOn(null));
   d.querySelector('#md-dev')!.addEventListener('click', () => analyze('mesh'));
 }
@@ -2353,7 +2441,21 @@ function renderDistDialog(d: HTMLElement) {
 }
 function renderFitDialog(d: HTMLElement) {
   const m = state.mode as FitMode; const p = state.preview;
+  const sollUi = p?.role === 'soll' || (!p && state.opts.side === 'soll');
+  const showB = !sollUi && m.method === 'Klick' && (GEOM_ZONE.includes(p?.fit.type ?? '') || GEOM_ZONE.includes(m.type));
+  if (sollUi) {
+    d.innerHTML = `<h3>${ICON[p?.fit.type ?? m.type] ?? ''} ${tt('Create feature')}: Soll</h3>
+      <p class="note">${tt('Click a CAD face to highlight the recognised geometry, then ✓ creates the nominal. Freeform is not chosen by Auto. Brush radius, fit criterion and scan parameters are not used — the CAD face is exact.')}</p>
+      <div class="row"><label>${tt('Type')}</label><select id="d-type">${typeOptions(p ? p.fit.type : m.type)}</select></div>
+      <div class="row"><label>${tt('Nominal / actual')}</label><select id="d-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>Soll</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>Ist</option></select></div>
+      ${p ? `<h4>${tt('Preview')}: ${typeName(p.fit.type)}</h4>${kv(fitRows(p.fit, 0, false))}` : `<p class="note">${tt('No nominal yet. Click the CAD model.')}</p>`}`;
+    d.querySelector<HTMLSelectElement>('#d-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; m.type = v; if (state.preview) refitPreview(v); else renderAll(); };
+    d.querySelector<HTMLSelectElement>('#d-side')!.onchange = (e) => { state.opts.side = (e.target as HTMLSelectElement).value as SideMode; if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else renderAll(); };
+    return;
+  }
+  const bRow = showB ? `<h4>${tt('Boundary from')}</h4><div class="seg" id="d-bfrom"><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}">${tt('Points')}</button></div><p class="note">${bfromTip()}</p>` : '';
   d.innerHTML = `<h3>${ICON[m.type] ?? ''} ${tt('Create feature')}: ${m.type === 'auto' ? tt('Auto detection') : typeName(m.type)}</h3>${methodSeg(m.type, 'mesh')}
+    ${bRow}
     <p class="note">${tt('Method, type, brush/area radius and ✓ ✕ are in the Action Bar (bottom of the 3D view). Here: settings and details.')}</p>
     ${m.method === 'Klick' ? `<h4>${tt('Region growing')}</h4>
     <div class="row"><label>${tt('Max. normal angle [°]')}</label><input id="d-ang" value="${state.opts.maxAngleDeg}" inputmode="decimal"></div>
@@ -2374,6 +2476,7 @@ function renderFitDialog(d: HTMLElement) {
     const v = (e.target as HTMLSelectElement).value; state.opts.aux = v === 'auto' || v === 'none' || v === 'ring' ? v : +v;
     if (state.preview?.hit) refitPreview(state.preview.fit.type); else renderAll();
   });
+  d.querySelectorAll<HTMLButtonElement>('#d-bfrom [data-zsrc]').forEach((b) => (b.onclick = () => { state.opts.ex.zoneSrc = b.dataset.zsrc === 'geom' ? 'geom' : 'points'; extractLive(); }));
 }
 function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
@@ -2698,11 +2801,11 @@ function applySharedOpacity() {
     viewer.model.visible = !hide;
     if (viewer.wire) viewer.wire.visible = !hide;
   }
-  if (!viewer.model) return;
-  if (hide) { viewer.setModelOpacity(1); return; }
-  const o = viewTrans.on ? 1 - viewTrans.amt / 100 : 1;
-  viewer.setModelOpacity(o);
-  setCadOpacity(viewTrans.on ? Math.max(0.4, o) : 1);
+  if (viewer.model) {
+    if (hide) viewer.setModelOpacity(1);
+    else viewer.setModelOpacity(viewTrans.on ? 1 - viewTrans.amt / 100 : 1);
+  }
+  setCadOpacity(cadTrans.on ? 1 - cadTrans.amt / 100 : 1);
   state.an.trans = viewTrans.on;
 }
 function setViewTrans(on: boolean, amt?: number) {
@@ -2712,11 +2815,27 @@ function setViewTrans(on: boolean, amt?: number) {
   state.an.trans = on;
   try { localStorage.setItem('mw3d-trans', on ? '1' : '0'); } catch { /* */ }
   saveViewPrefs();
-  document.querySelector('#view-gear [data-vg="trans"]')?.classList.toggle('on', on);
-  document.querySelector('#btn-an-trans')?.classList.toggle('on', on);
-  for (const id of ['#vg-trans', '#an-trans', '#od-trans']) { const el = document.querySelector<HTMLInputElement>(id); if (el && el !== document.activeElement && el.value !== String(viewTrans.amt)) el.value = String(viewTrans.amt); }
-  const od = document.querySelector<HTMLInputElement>('#od-trans-on'); if (od && od !== document.activeElement) od.checked = on;
+  syncTransUi();
   if (was !== on) renderAll(); else applySharedOpacity();
+}
+function setCadTrans(on: boolean, amt?: number) {
+  const was = cadTrans.on;
+  cadTrans.on = on;
+  if (amt != null && isFinite(amt)) cadTrans.amt = Math.min(95, Math.max(5, Math.round(amt)));
+  saveViewPrefs();
+  syncTransUi();
+  if (was !== on) renderAll(); else applySharedOpacity();
+}
+function syncTransUi() {
+  document.querySelector('#view-gear [data-vg="trans"]')?.classList.toggle('on', viewTrans.on);
+  document.querySelector('#view-gear [data-vg="cadtrans"]')?.classList.toggle('on', cadTrans.on);
+  document.querySelector('#btn-an-trans')?.classList.toggle('on', viewTrans.on);
+  document.querySelector('#btn-data-trans')?.classList.toggle('on', viewTrans.on);
+  document.querySelector('#btn-cad-trans')?.classList.toggle('on', cadTrans.on);
+  for (const id of ['#vg-trans', '#an-trans', '#od-trans']) { const el = document.querySelector<HTMLInputElement>(id); if (el && el !== document.activeElement && el.value !== String(viewTrans.amt)) el.value = String(viewTrans.amt); }
+  for (const id of ['#vg-cad-trans', '#od-cad-trans', '#cad-op']) { const el = document.querySelector<HTMLInputElement>(id); if (el && el !== document.activeElement && el.value !== String(cadTrans.amt)) el.value = String(cadTrans.amt); }
+  const od = document.querySelector<HTMLInputElement>('#od-trans-on'); if (od && od !== document.activeElement) od.checked = viewTrans.on;
+  const oc = document.querySelector<HTMLInputElement>('#od-cad-on'); if (oc && oc !== document.activeElement) oc.checked = cadTrans.on;
 }
 function bindSharedTrans(el: ParentNode) {
   const i = el.querySelector<HTMLInputElement>('#an-trans');
@@ -2822,29 +2941,22 @@ async function requestLoad(): Promise<boolean> {
   return b === 'new';
 }
 function emptyProject() {
-  viewer.clearModel(); peReset(); curvesReset();
+  viewer.clearModel(); peReset(); curvesReset(); cadClear();
+  clearAuxHover(); hoverNominal = null; hoverType = null; cadHighlight(-1);
+  state.an.on = false; state.an.res = null; state.an.ctrl = null; state.an.derivePrev = null; state.an.ids = [];
+  resetIslands(); clearBrush();
   state.data = null; state.features = []; state.controls = []; state.reports = []; state.sel = []; state.selControl = null; state.selModel = false;
   state.mode = null; state.preview = null; state.csys = []; state.activeCs = null; state.csSel = null; state.csEdit = null;
   state.nextId = 1; state.nextCtrl = 1; state.nextReport = 1; state.nextCs = 1; state.typeCount = {}; state.openReport = null; state.addFeat = null;
   state.hidden.clear(); state.hiddenLabels.clear(); state.labelOffsets.clear(); state.usedPts.clear(); state.usedAux.clear(); ptsCache.clear();
+  trimCache.clear(); curveCache.clear(); shellCache.clear(); conePrev = null; pvLoops = null;
+  viewer.labels.set([]); viewer.clearPrims(); viewer.clearPointMarks();
+  document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove();
   $('#projname').textContent = tt('New project'); $('#stats').textContent = '';
   meshKey = ''; markClean(); void idbDel('project'); void idbDel('mesh');
   renderAll();
 }
 async function newProject() { if (!(await confirmDiscard())) return; emptyProject(); }
-/** Hole loops of a dismissed bore are not drawn, so the blue contour at that opening goes away. The outer loop stays. */
-function boundaryShown(loops: number[][][], islands?: Island[]) {
-  if (!islands?.length || loops.length < 2) return loops;
-  const closed = islands.filter((I) => I.kind === 'hole' && (I.drop || I.inc));
-  if (!closed.length) return loops;
-  let longest = 0; for (const L of loops) if (L.length > longest) longest = L.length;
-  return loops.filter((L) => {
-    if (L.length >= longest) return true;
-    let x = 0, y = 0, z = 0; for (const q of L) { x += q[0]; y += q[1]; z += q[2]; }
-    const n = L.length || 1; x /= n; y /= n; z /= n;
-    return !closed.some((I) => Math.hypot(x - I.c[0], y - I.c[1], z - I.c[2]) < Math.max(1.5, I.r * 1.6));
-  });
-}
 type PointMark = { idx: ArrayLike<number>; rgb: number[]; label: string; dev?: Float32Array; devR?: number };
 function pointMarks(): PointMark[] {
   if (!state.data) return [];
@@ -2907,7 +3019,7 @@ function exitPointColoring() {
 const shownFit = (f: FeatureView) => f.measured ?? f.soll?.fit;
 function renderScene() {
   if (!state.data && !state.features.length && !state.preview && !hoverNominal && !cad.faces.length) {
-    viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); viewer.clearPrims(); return;
+    viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); viewer.clearPrims(); viewer.labels.set([]); return;
   }
   if (!state.data) { viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); }
   ovm().sync();
@@ -2943,18 +3055,18 @@ function renderScene() {
     else if (state.trimGeo && CURVE_TRIM_TYPES.includes(f.type) && f.indices.length >= 2 && viewer.model) {
       const seg = curveTrimFor(f); if (seg) { viewer.addTrimmed(new Float32Array(0), seg, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
-    else if (f.type === 'Kugel' && f.measured?.radius) { // full fitted sphere, not the selected cap
+    else if (f.type === 'Kugel' && f.measured?.radius && f.fp?.zoneSrc !== 'points') { // Geometry: complete sphere
       const s = analyticSphere(f.measured); viewer.addTrimmed(s.tri, s.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
     }
-    else if (f.type === 'Kegel' && viewer.model && f.measured) { // full fitted cone (mesh frustum), not the selected patch
+    else if (f.type === 'Kegel' && viewer.model && f.measured && f.fp?.zoneSrc !== 'points') { // Geometry: mesh frustum
       const t = shellFor(f); viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
     }
-    else if (f.fp?.zoneSrc === 'geom' && (f.type === 'Zylinder' || f.type === 'Torus')) { // cylinder: analytic shell over the point height (0.27); torus: full primitive
+    else if (f.fp?.zoneSrc === 'geom' && (f.type === 'Zylinder' || f.type === 'Torus')) { // cylinder: full turn over the point height; torus: full primitive
       const t = f.type === 'Zylinder' && viewer.model ? shellFor(f) : null;
       if (t) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
     else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
-      const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+      const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel, shade(f.color)); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
     else viewer.addPrimitive(f.measured!, f.color, sel);
   }
@@ -2962,22 +3074,19 @@ function renderScene() {
     if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
     else if (p.fit.type === 'Abstand' && state.mode?.kind === 'dist') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
-    else if (p.fit.type === 'Kegel' && viewer.model) {
-      const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
-      const s = previewCone(p.fit, pos, p.indices);
-      viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
-    }
-    else if (p.fit.type === 'Kugel' && p.fit.radius) {
-      const s = analyticSphere(p.fit); viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
+    else if (p.role === 'soll') viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
+    else if (previewAnalytic(p)) drawAnalyticPreview(p);
+    else if (viewer.model && (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) && p.indices.length >= 3) {
+      const seals: SealMark[] = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: I.c, r: I.r }));
+      const d = selectionDraw(p.fit, p.indices, seals);
+      viewer.addTrimmed(d.tri, d.edges, PREVIEW_COLOR, true, shade(PREVIEW_COLOR));
+      viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
     }
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
     if (p.aux && state.opts.aux === 'ring' && (p.fit.type === 'Kreis' || p.fit.type === 'Langloch')) for (const L of zoneLoops(p.fit, p.aux.plane, state.opts.ring.gap, state.opts.ring.width)) viewer.addContour(L, AUX_COLOR); // ring / band zone, live
-    // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands.
-    // Cone and sphere show the full fitted surface; their outline is that surface, not the click-grown patch.
-    if (p.fit.type !== 'Kegel' && p.fit.type !== 'Kugel' && (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type))) for (const L of boundaryShown(previewLoops(p), p.islands)) viewer.addContour(L, 0x1565c0);
-    else if (p.fit.type !== 'Kegel' && p.fit.type !== 'Kugel') for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
-    (p.islands ?? []).forEach((I, i) => { if (I.drop || (I.inc && I.kind === 'hole' && i !== islSel)) return; /* dismissed bore: no blue contour */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.drop ? 0x78909c : 0xff8c1a); });
+    // Selected island only: straight mesh loop, not a smoothed tube. Dismissed islands are filled, not outlined.
+    (p.islands ?? []).forEach((I, i) => { if (i !== islSel || I.drop) return; for (const L of I.loops) viewer.addLoop(L, 0xff2bd6); });
   } else if (hoverNominal?.role === 'soll' && hoverNominal.fit && hoverNominal.fit.type !== 'Freiformfläche') viewer.addPrimitive(hoverNominal.fit, PREVIEW_COLOR, true);
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();
@@ -3076,8 +3185,11 @@ $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
 {
   const g = document.createElement('div'); g.id = 'view-gear';
   g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
-    <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="fit">⤢ ${tt('Fit all')}</button><button data-vg="trans" title="${tt('Show the data object transparent. Same switch as Analyze and Home › Options.')}">◌ ${tt('Transparent')}</button>
-    <label class="vg-amt" title="${tt('How transparent the data object is (5–95 %). Same value in Analyze, this menu and Home › Options.')}">${tt('Transparency [%]')} <input id="vg-trans" type="range" min="5" max="95" step="5" value="${viewTrans.amt}"></label>
+    <button data-vg="center">⌖ ${tt('Center')}</button><button data-vg="fit">⤢ ${tt('Fit all')}</button>
+    <div class="vg-sub"><button data-vg="trans" title="${tt('Data object transparency. Separate from the CAD model. Same switch as Analyze and Home › Options.')}">◌ ${tt('Data object')}</button>
+    <label class="vg-amt" title="${tt('How transparent the data object is (5–95 %).')}">${tt('Transparency [%]')} <input id="vg-trans" type="range" min="5" max="95" step="5" value="${viewTrans.amt}"></label></div>
+    <div class="vg-sub"><button data-vg="cadtrans" title="${tt('CAD model transparency. Separate from the data object. Default is opaque.')}">◌ ${tt('CAD model')}</button>
+    <label class="vg-amt" title="${tt('How transparent the CAD model is (5–95 %).')}">${tt('Transparency [%]')} <input id="vg-cad-trans" type="range" min="5" max="95" step="5" value="${cadTrans.amt}"></label></div>
     <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button><button data-vg="relabel" title="${tt('Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected')}">↺ ${tt('Reset positions')}</button>
     <button data-vg="zone" title="${tt('Show the extraction zone of the feature whose dialog is open (global preference, remembered)')}">⬚ ${tt('Extraction zone')}</button><button data-vg="wire" data-vt="wire">▦ ${tt('Mesh edges')}</button><button data-vg="curves" data-vt="curves" class="on">〰 ${tt('Curves/CAD edges')}</button>
     <button data-vg="opts">⚙ ${tt('Options …')}</button></div>`;
@@ -3085,11 +3197,13 @@ $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
   g.querySelector<HTMLButtonElement>('.vg-btn')!.onclick = () => { g.classList.toggle('open'); placeGear(); };
   g.addEventListener('mouseenter', () => placeGear());
   g.querySelector('[data-vg="trans"]')!.classList.toggle('on', viewTrans.on);
+  g.querySelector('[data-vg="cadtrans"]')!.classList.toggle('on', cadTrans.on);
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
     if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status(tt('Fitted to view.')); }
-    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'zone') setShowZone(!showZone); else if (a === 'trans') setViewTrans(!viewTrans.on); else if (a === 'opts') openOptions(); else toggleCurves();
-    g.classList.remove('open'); }));
+    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'zone') setShowZone(!showZone); else if (a === 'trans') setViewTrans(!viewTrans.on); else if (a === 'cadtrans') setCadTrans(!cadTrans.on); else if (a === 'opts') openOptions(); else toggleCurves();
+    if (a !== 'trans' && a !== 'cadtrans') g.classList.remove('open'); }));
   g.querySelector<HTMLInputElement>('#vg-trans')!.oninput = (e) => { e.stopPropagation(); setViewTrans(viewTrans.on, Number((e.target as HTMLInputElement).value)); };
+  g.querySelector<HTMLInputElement>('#vg-cad-trans')!.oninput = (e) => { e.stopPropagation(); setCadTrans(cadTrans.on, Number((e.target as HTMLInputElement).value)); };
   window.addEventListener('pointerdown', (e) => { if (!g.contains(e.target as Node)) g.classList.remove('open'); });
   window.addEventListener('resize', () => placeFloaters());
   const panel = document.getElementById('ctx-panel');
@@ -3132,7 +3246,8 @@ function openOptions() {
     <div class="row"><label><input type="checkbox" id="od-std" ${state.annot.std ? 'checked' : ''}> ${tt('Show standard deviation σ')}</label></div>
     <h4>${tt('Display')}</h4>
     <div class="row" title="${tt('Decimal places of all displayed values: annotations, panels, tree properties, report and CSV (lengths in mm, deviations and angles). Internal precision and input fields are not rounded; unit direction vectors keep at least 5 places. Also View ▸ Decimals.')}"><label>${tt('Decimal places')}</label> <span class="od-dec"><button class="btn" type="button" data-dec="-1" title="${tt('One decimal place less')}">−</button><input id="od-dec" type="number" min="${DEC_MIN}" max="${DEC_MAX}" step="1" value="${getDec()}" inputmode="numeric"><button class="btn" type="button" data-dec="1" title="${tt('One decimal place more')}">+</button></span> <span class="note">(${tt('default')} 2)</span></div>
-    <div class="row" title="${tt('How transparent the data object is when ⚙ › Transparent is on (5–95 %)')}"><label>${tt('Transparency [%]')}</label> <input type="number" id="od-trans" min="5" max="95" step="5" value="${viewTrans.amt}" style="width:5em"> <label><input type="checkbox" id="od-trans-on" ${viewTrans.on ? 'checked' : ''}> ${tt('Data object transparent')}</label></div>
+    <div class="row" title="${tt('How transparent the data object is (5–95 %). Separate from the CAD model.')}"><label>${tt('Data object [%]')}</label> <input type="number" id="od-trans" min="5" max="95" step="5" value="${viewTrans.amt}" style="width:5em"> <label><input type="checkbox" id="od-trans-on" ${viewTrans.on ? 'checked' : ''}> ${tt('Data object transparent')}</label></div>
+    <div class="row" title="${tt('How transparent the CAD model is (5–95 %). Default is opaque. Separate from the data object.')}"><label>${tt('CAD model [%]')}</label> <input type="number" id="od-cad-trans" min="5" max="95" step="5" value="${cadTrans.amt}" style="width:5em"> <label><input type="checkbox" id="od-cad-on" ${cadTrans.on ? 'checked' : ''}> ${tt('CAD transparent')}</label></div>
     <h4>${tt('Extraction')}</h4>
     <div class="row" title="${tt('Default search distance for extraction and re-extraction: points within ± this distance of the fitted geometry are collected. Applies to new extractions; per feature it can still be changed in the extraction parameters.')}"><label>${tt('Search distance [mm]')}</label> <input type="number" id="od-sdist" min="0.01" max="20" step="0.1" value="${REEX_DEFAULT.maxDist}" style="width:5em"></div>
     <h4>${tt('Tolerances')}</h4>
@@ -3147,6 +3262,8 @@ function openOptions() {
   el.querySelector<HTMLInputElement>('#od-dec')!.onchange = (e) => { const v = parseInt((e.target as HTMLInputElement).value, 10); setDecimals(isFinite(v) ? v : 2); };
   el.querySelector<HTMLInputElement>('#od-trans')!.onchange = (e) => { const v = Number((e.target as HTMLInputElement).value); if (isFinite(v)) setViewTrans(viewTrans.on, v); };
   el.querySelector<HTMLInputElement>('#od-trans-on')!.onchange = (e) => setViewTrans((e.target as HTMLInputElement).checked);
+  el.querySelector<HTMLInputElement>('#od-cad-trans')!.onchange = (e) => { const v = Number((e.target as HTMLInputElement).value); if (isFinite(v)) setCadTrans(cadTrans.on, v); };
+  el.querySelector<HTMLInputElement>('#od-cad-on')!.onchange = (e) => setCadTrans((e.target as HTMLInputElement).checked);
   el.querySelector<HTMLInputElement>('#od-sdist')!.onchange = (e) => { const v = Number((e.target as HTMLInputElement).value); if (isFinite(v) && v > 0) { setSearchDistDefault(Math.min(20, Math.max(0.01, v))); saveViewPrefs(); } };
   el.querySelector<HTMLInputElement>('#od-tol')!.onchange = (e) => { prefs.tolTables = (e.target as HTMLInputElement).checked; saveViewPrefs(); syncPrefsUI(); renderAll(); };
   el.querySelector<HTMLButtonElement>('[data-ok]')!.onclick = () => el.remove();
@@ -3158,10 +3275,11 @@ function applyColorMode() {
   state.features.forEach((f, i) => { if (!f.colorSet) f.color = state.colorMode === 'uniform' ? state.uniformColor : PALETTE[i % PALETTE.length]; });
 }
 const PREF_KEY = 'mw-view-prefs';
-function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec(), dataTrans: viewTrans.on, transAmt: viewTrans.amt, searchDist: REEX_DEFAULT.maxDist })); } catch { /* */ } }
-try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { if (pr.searchDist > 0) setSearchDistDefault(pr.searchDist); state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); viewTrans.on = !!pr.dataTrans; if (pr.transAmt != null && isFinite(+pr.transAmt)) viewTrans.amt = Math.min(95, Math.max(5, +pr.transAmt)); } } catch { /* */ }
+function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec(), dataTrans: viewTrans.on, transAmt: viewTrans.amt, cadTrans: cadTrans.on, cadAmt: cadTrans.amt, searchDist: REEX_DEFAULT.maxDist })); } catch { /* */ } }
+try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { if (pr.searchDist > 0) setSearchDistDefault(pr.searchDist); state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); viewTrans.on = !!pr.dataTrans; if (pr.transAmt != null && isFinite(+pr.transAmt)) viewTrans.amt = Math.min(95, Math.max(5, +pr.transAmt)); if (pr.cadTrans != null) cadTrans.on = !!pr.cadTrans; if (pr.cadAmt != null && isFinite(+pr.cadAmt)) cadTrans.amt = Math.min(95, Math.max(5, +pr.cadAmt)); } } catch { /* */ }
 if (!viewTrans.on && localStorage.getItem('mw3d-trans') === '1') viewTrans.on = true;
 state.an.trans = viewTrans.on;
+applySharedOpacity(); syncTransUi();
 syncPrefsUI();
 /** Options ▸ Decimal places / View ▸ Decimals: display only (fmt), internal values untouched */
 function setDecimals(n: number) { setDec(n); saveViewPrefs(); syncPrefsUI(); renderAll(); if (state.openReport != null) renderReport(); }
@@ -4002,7 +4120,16 @@ function renderCurveDialog(d: HTMLElement) {
 /** Test-Hilfe: Projekt speichern und sofort wieder öffnen (Persistenz-Prüfung). */
 (window as any).__app.roundtrip = async () => { const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob()); const p = readProject(bin); await applyProject(p.json, p.mesh, p.idx); return bin.length; };
 
-initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data, featureTool: () => state.mode?.kind === 'fit' });
+initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data, featureTool: () => state.mode?.kind === 'fit', cadOpacity: () => ({ on: cadTrans.on, amt: cadTrans.amt }), setCadOpacityUi: (on, amt) => setCadTrans(on, amt) });
+window.addEventListener('mw-cad-menu', (ev) => {
+  const e = ev as CustomEvent<{ x: number; y: number; id: number | null }>;
+  showMenu(e.detail.x, e.detail.y, [
+    [cadTrans.on ? tt('CAD opaque') : tt('CAD transparent'), () => setCadTrans(!cadTrans.on)],
+    [tt('CAD transparency 30 %'), () => setCadTrans(true, 30)],
+    [tt('CAD transparency 60 %'), () => setCadTrans(true, 60)],
+    [tt('CAD transparency 90 %'), () => setCadTrans(true, 90)],
+  ]);
+});
 
 
 // ------------------------------------------------------------------ Coordinate systems (3-2-1)

@@ -78,3 +78,83 @@ export function smoothedBoundary(f: FitResult | null, pos: ArrayLike<number>, tr
 export function smoothLoops(loops: number[][][], tol: number, onto?: (p: Vec3) => Vec3): Vec3[][] {
   return loops.map((L) => smoothLoop(L as Vec3[], tol, onto));
 }
+
+const P3 = (pos: ArrayLike<number>, i: number): Vec3 => [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]];
+const centroid = (L: Vec3[]): Vec3 => {
+  const c: Vec3 = [0, 0, 0];
+  for (const p of L) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; }
+  const n = L.length || 1;
+  return [c[0] / n, c[1] / n, c[2] / n];
+};
+/** Newell area of a closed loop (works for a mildly non-planar mesh ring). */
+export function loopArea3(L: Vec3[]): number {
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < L.length; i++) {
+    const a = L[i], b = L[(i + 1) % L.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return 0.5 * Math.hypot(nx, ny, nz);
+}
+/**
+ * Boundary of the selected triangles as the mesh edges themselves: vertex positions, no projection
+ * and no Taubin smoothing. One closed loop per boundary chain.
+ */
+export function rawLoops(pos: ArrayLike<number>, tris: ArrayLike<number>, verts: ArrayLike<number>): Vec3[][] {
+  return selectionLoops(tris, verts, pos.length / 3).map((L) => L.map((v) => P3(pos, v)));
+}
+export interface HoleLoop { c: Vec3; r: number; area: number; loop: Vec3[] }
+/**
+ * Inner boundary loops of a selection (holes / islands). The largest loop is the outer contour and is not an island.
+ * Tiny slivers (under 0.25 mm² or fewer than 6 vertices) are ignored.
+ */
+export function selectionHoles(pos: ArrayLike<number>, tris: ArrayLike<number>, verts: ArrayLike<number>): HoleLoop[] {
+  const loops = rawLoops(pos, tris, verts).filter((L) => L.length >= 3);
+  if (loops.length < 2) return [];
+  const areas = loops.map(loopArea3);
+  let outer = 0;
+  for (let i = 1; i < areas.length; i++) if (areas[i] > areas[outer]) outer = i;
+  const out: HoleLoop[] = [];
+  loops.forEach((L, i) => {
+    if (i === outer || L.length < 6 || areas[i] < 0.25) return;
+    const c = centroid(L);
+    let r = 0;
+    for (const p of L) r = Math.max(r, d3(p, c));
+    out.push({ c, r, area: areas[i], loop: L });
+  });
+  return out;
+}
+export interface SealMark { c: number[]; r: number }
+const nearSeal = (c: Vec3, seals: SealMark[]) => seals.some((s) => d3(c, s.c as Vec3) < Math.max(1.5, (s.r || 0) * 1.6));
+/** Keep the outer contour. Drop inner loops whose centre matches a dismissed island. */
+export function dropSealedLoops(loops: Vec3[][], seals: SealMark[]): Vec3[][] {
+  if (!seals.length || loops.length < 2) return loops;
+  const areas = loops.map(loopArea3);
+  let outer = 0;
+  for (let i = 1; i < areas.length; i++) if (areas[i] > areas[outer]) outer = i;
+  return loops.filter((L, i) => i === outer || !nearSeal(centroid(L), seals));
+}
+/**
+ * Triangle fans that close dismissed openings. Each fan vertex is projected onto the fitted surface,
+ * so a hole in a cylinder, cone, sphere or torus is filled in the geometry (not only hidden).
+ */
+export function openingFans(fit: FitResult, loops: Vec3[][], seals: SealMark[]): Float32Array {
+  if (!seals.length || !fit || loops.length < 2) return new Float32Array(0);
+  const onto = (p: Vec3) => projectOnto(fit, p);
+  const areas = loops.map(loopArea3);
+  let outer = 0;
+  for (let i = 1; i < areas.length; i++) if (areas[i] > areas[outer]) outer = i;
+  const out: number[] = [];
+  loops.forEach((L, li) => {
+    if (li === outer || L.length < 3) return;
+    const c0 = centroid(L);
+    if (!nearSeal(c0, seals)) return;
+    const c = onto(c0);
+    for (let i = 0; i < L.length; i++) {
+      const a = onto(L[i]), b = onto(L[(i + 1) % L.length]);
+      out.push(c[0], c[1], c[2], a[0], a[1], a[2], b[0], b[1], b[2]);
+    }
+  });
+  return new Float32Array(out);
+}
