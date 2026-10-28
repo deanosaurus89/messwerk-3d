@@ -45,9 +45,10 @@ describe('nominal from a described face', () => {
     expect(rim.aux?.type).toBe('Ebene');
     expect(distCircle([10, 0, 10.4], [0, 0, 10], [0, 0, 1], 10)).toBeCloseTo(0.4);
   });
-  it('a freeform face is a surface (Fläche), not a plane', () => {
+  it('a freeform face is not an Auto result; explicit Freeform still is', () => {
     const ff: CadAnalytic = { type: 'NURBS', origin: [1, 2, 3], normal: [0, 0, 1], edges: [] };
-    const n = nominalFromCad(ff, [1, 2, 3], 'auto', 2)!;
+    expect(nominalFromCad(ff, [1, 2, 3], 'auto', 2)).toBeNull();
+    const n = nominalFromCad(ff, [1, 2, 3], 'Freiformfläche', 2)!;
     expect(n.freeform).toBe(true);
     expect(n.fit.type).toBe('Freiformfläche');
   });

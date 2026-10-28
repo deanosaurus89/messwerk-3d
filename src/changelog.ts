@@ -7,6 +7,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.45', date: '2026-10-28', items: [
+    'New project clears the whole scene: features, annotations, CAD reference, data object and overlays. A label left on screen after Neues Projekt (seen on iOS) is removed with the rest.',
+    'CAD opacity is separate from the data object and starts opaque. The gear above the view cube has a Data object control and a CAD control; the same split is in the View ribbon, the CAD context menu and the dialog (Options, polygon model, CAD).',
+    'CAD nominal: a click highlights the recognised geometry, then ✓ creates it. Auto follows the hit (CAD → Soll, polygon → Ist); Advanced can still force one side. Forcing Soll no longer falls through to a scan fit. Freeform is not an Auto result — only an explicit Freeform type. The CAD-Soll panel has no brush radius, fit criterion or other scan parameters.',
+    'Tree groups: Datenobjekte, Referenzobjekte, Merkmale (coordinate systems, curves and reports stay). CAD faces sit under the reference object and start collapsed.',
+    'Surface boundary on a scan is the triangle edges of the selection, slightly darker than the fill. The smoothed outline is gone. Cylinder, cone, sphere and torus: Boundary from Geometry | Points is active again and shown in the create dialog. Geometry is the analytic fit (full wall or frustum); Points is the clicked selection. Dismissing an island closes that opening in the geometry. Boundary exclusion distance and boundary smoothing stay greyed out on a scan.',
+  ] },
   { version: '2026.0.44', date: '2026-10-28', items: [
     'Plane: dismissing an island (✕) or treating a hole as closed fills that opening in the frozen boundary and in the plane surface used for a later extract. The fit points stay outside the bore. A real island that was not dismissed still leaves a hole.',
     'Cone: display and extract-from-geometry use the fitted cone over the frustum the mesh covers (full turn when the wall is closed), not only the click-grown patch. Open ends stay at the mesh/CAD limit — the apex is not added past the scan. If that refit runs onto a blend, the point set stays the grown patch and the drawn cone is still the full frustum.',

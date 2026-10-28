@@ -184,13 +184,21 @@ export class Viewer {
     this.prims.add(new THREE.ArrowHelper(n, c, Math.max(s * 0.08, 3), color, s * 0.02, s * 0.012));
     const dot = new THREE.Mesh(new THREE.SphereGeometry(s / 250, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false })); dot.position.copy(c); dot.renderOrder = 6; this.prims.add(dot);
   }
-  /** Trimmed feature geometry: fitted surface over the selected triangles + boundary contour. */
-  addTrimmed(tri: Float32Array, edges: Float32Array, color: number, selected: boolean) {
+  /** Trimmed feature geometry: fitted surface over the selected triangles + boundary contour.
+   *  `edgeColor` overrides the contour colour (selection boundaries use a darker shade of the fill). */
+  addTrimmed(tri: Float32Array, edges: Float32Array, color: number, selected: boolean, edgeColor?: number) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(tri, 3));
     const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: selected ? 0.35 : 0.2, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
     m.renderOrder = selected ? 4 : 2; m.raycast = () => {}; this.prims.add(m);
     const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.BufferAttribute(edges, 3));
-    const l = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: selected ? 0xff2bd6 : color, depthTest: !selected })); l.renderOrder = 6; this.prims.add(l);
+    const l = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: edgeColor ?? (selected ? 0xff2bd6 : color), depthTest: !selected })); l.renderOrder = 6; this.prims.add(l);
+  }
+  /** Closed loop as straight segments (no curve smoothing). */
+  addLoop(pts: number[][], color: number) {
+    if (pts.length < 3) return;
+    const g = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
+    const l = new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color, depthTest: false }));
+    l.renderOrder = 8; this.prims.add(l);
   }
   /** Re-extraction search region as a transparent body (preview before running). */
   addRegion(R: SearchRegion) {

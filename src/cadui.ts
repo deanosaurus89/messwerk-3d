@@ -16,6 +16,11 @@ class CadEngine {
     this.w.onerror = (e) => { for (const p of this.pending.values()) p.rej(new Error('CAD kernel crashed: ' + (e.message || 'WASM error'))); this.pending.clear(); this.w?.terminate(); this.w = null; };
   }
   get loaded() { return !!this.w; }
+  /** Drop the kernel and any in-flight call. A new project must not keep the previous CAD shape. */
+  reset() {
+    for (const p of this.pending.values()) p.rej(new Error('CAD cleared'));
+    this.pending.clear(); this.w?.terminate(); this.w = null; this.seq = 0;
+  }
   call<T = any>(req: CadReq, prog?: (t: string) => void, tr: Transferable[] = []): Promise<T> { if (!this.w) this.make(); const id = ++this.seq;
     progressBegin(req.op === 'load' ? 'CAD laden' : req.op === 'apply' ? 'CAD beschneiden' : 'CAD exportieren');
     return new Promise<T>((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }).finally(progressEnd); }
@@ -28,6 +33,9 @@ export interface CadCtx {
   isPhone: () => boolean; togglePanel: (p: 'tree' | 'dialog' | 'table', on?: boolean) => void; eyeBtn: (v: boolean, f: () => void) => HTMLElement; hasMesh: () => boolean;
   /** Feature Builder is active: CAD face selection must not take the click. */
   featureTool?: () => boolean;
+  /** CAD opacity, separate from the data object. Dialog and context menu call this. */
+  cadOpacity?: () => { on: boolean; amt: number };
+  setCadOpacityUi?: (on: boolean, amt?: number) => void;
 }
 const TYPE_COLOR: Record<FaceType, number> = { Ebene: 0x9fb4cc, Zylinder: 0x9cc79a, Kegel: 0xd1bb8a, Kugel: 0xc4a0d6, Torus: 0x8ccccc, NURBS: 0xd6a3a3 };
 const TYPE_ICON: Record<FaceType, string> = { Ebene: '▱', Zylinder: '⌭', Kegel: '△', Kugel: '◯', Torus: '◎', NURBS: '∿' };
@@ -58,8 +66,21 @@ function buildFace(f: CadFace) {
   if (f.res) { const g = new THREE.Mesh(geo(f.tess), new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 })); g.raycast = () => {}; g.renderOrder = 1; ghosts[f.id] = g; group.add(g); }
 }
 let cadOpacity = 1;
-/** semi-transparent CAD faces (View › Transparent) */
+/** Opacity of the CAD model only (1 = opaque). Independent of the polygon model. */
 export function setCadOpacity(a: number) { if (a === cadOpacity) return; cadOpacity = a; cadPaint(); }
+export function getCadOpacity() { return cadOpacity; }
+/** Face under the pointer during nominal creation (does not change the trim selection). */
+export function cadHighlight(id: number) { if (cad.hover === id) return; cad.hover = id; cadPaint(); }
+/** Remove every CAD face, trim and the worker shape. Used by New project. */
+export function cadClear() {
+  for (const m of meshes) if (m) { group.remove(m); m.geometry.dispose(); (m.material as THREE.Material).dispose?.(); }
+  for (const g of ghosts) if (g) { group.remove(g); g.geometry.dispose(); (g.material as THREE.Material).dispose?.(); }
+  meshes = []; ghosts = [];
+  cad.name = ''; cad.faces = []; cad.sel.clear(); cad.hover = -1; cad.ops = []; cad.undo = []; cad.redo = []; cad.errors = [];
+  cad.tool = null; cad.draft = []; cad.opSel = -1; cad.busy = false;
+  drawOverlay();
+  try { eng.reset(); } catch { /* worker already gone */ }
+}
 /** Farben/Sichtbarkeit aktualisieren (Typfarbe, Hover, Auswahl, Beschnitt-Rest rot). */
 export function cadPaint() {
   for (const f of cad.faces) {
@@ -204,23 +225,37 @@ function renderCadRibbon() {
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const fmtA = (a: number) => a >= 1e4 ? `${(a / 100).toFixed(0)} cm²` : `${a.toFixed(1)} mm²`;
 
-/** Baum: Ordner „CAD-Flächen" mit Typen, Augen und Beschnitt-Operationen. */
+function cadMenu(el: HTMLElement, id: number | null) {
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('mw-cad-menu', { detail: { x: e.clientX, y: e.clientY, id } }));
+  });
+  let hold = 0, x0 = 0, y0 = 0;
+  el.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; x0 = e.clientX; y0 = e.clientY; hold = window.setTimeout(() => { hold = 0; window.dispatchEvent(new CustomEvent('mw-cad-menu', { detail: { x: x0, y: y0, id } })); }, 550); });
+  el.addEventListener('pointerup', () => { if (hold) clearTimeout(hold); hold = 0; });
+  el.addEventListener('pointermove', (e) => { if (hold && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) { clearTimeout(hold); hold = 0; } });
+}
+/** CAD model under Referenzobjekte. Faces are children of the model and start collapsed. */
 export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEvent) => void, sel?: boolean, fid?: number, eye?: HTMLElement) => HTMLElement, q: string) {
   if (!cad.faces.length) return;
   const trimmed = cad.faces.filter((f) => f.res).length;
-  node(`<span class="tw">▾</span>📐 CAD: ${cad.name} <span class="sub">${cad.faces.length} faces${trimmed ? ` · ${trimmed} trimmed` : ''}</span>`, 'indent1 cad-folder', undefined, false, undefined,
+  const folder = node(`<span class="tw">▾</span>📐 CAD: ${cad.name} <span class="sub">${cad.faces.length} faces${trimmed ? ` · ${trimmed} trimmed` : ''}</span>`, 'indent2 cad-folder', undefined, false, undefined,
     X.eyeBtn(cad.faces.some((f) => f.visible), () => { const v = !cad.faces.some((f) => f.visible); cad.faces.forEach((f) => (f.visible = v)); cadPaint(); X.renderTree(); }));
+  folder.dataset.gk = 'cad-model';
+  folder.title = 'Reference object. Faces stay under this model and start collapsed.';
+  cadMenu(folder, null);
   if (cad.ops.length) {
-    node(`<span class="tw">▾</span>✂ Beschnitte (${cad.ops.length})`, 'indent2');
-    cad.ops.forEach((o, k) => { const n = node(`<span class="tw"></span>${cad.errors[k] ? '⚠' : '✂'} ${OP_NAME(o)} <span class="sub">${o.faces.length} Fl.</span> <button class="cad-op-del" title="Operation entfernen">✕</button>`, 'indent3 cad-op', (e) => {
+    node(`<span class="tw">▾</span>✂ Trims (${cad.ops.length})`, 'indent3');
+    cad.ops.forEach((o, k) => { const n = node(`<span class="tw"></span>${cad.errors[k] ? '⚠' : '✂'} ${OP_NAME(o)} <span class="sub">${o.faces.length}</span> <button class="cad-op-del" title="Remove operation">✕</button>`, 'indent4 cad-op', (e) => {
       if ((e.target as HTMLElement).classList.contains('cad-op-del')) { removeOp(k); return; } cad.opSel = cad.opSel === k ? -1 : k; cad.sel = new Set(o.faces); cadPaint(); X.renderTree(); X.renderDialog(); }, cad.opSel === k); n.title = cad.errors[k] ?? ''; });
   }
   for (const f of cad.faces) {
     const label = `Face ${f.id + 1}`; if (q && !(`${label} ${f.type} ${f.detail}`.toLowerCase().includes(q))) continue;
-    const d = node(`<span class="tw"></span><span style="color:#${TYPE_COLOR[f.type].toString(16)}">${TYPE_ICON[f.type]}</span>${label} <span class="sub">${f.type}${f.detail ? ' · ' + f.detail : ''} · ${fmtA(f.res ? f.res.area : f.area)}${f.res ? ' ✂' : ''}</span>`, 'indent2 cad-face' + (f.visible ? '' : ' hidden-feat'),
+    const d = node(`<span class="tw"></span><span style="color:#${TYPE_COLOR[f.type].toString(16)}">${TYPE_ICON[f.type]}</span>${label} <span class="sub">${f.type}${f.detail ? ' · ' + f.detail : ''} · ${fmtA(f.res ? f.res.area : f.area)}${f.res ? ' ✂' : ''}</span>`, 'indent3 cad-face' + (f.visible ? '' : ' hidden-feat'),
       (e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) { cad.sel.has(f.id) ? cad.sel.delete(f.id) : cad.sel.add(f.id); } else { const only = cad.sel.size === 1 && cad.sel.has(f.id); cad.sel.clear(); if (!only) cad.sel.add(f.id); } cadPaint(); X.renderTree(); X.renderDialog(); },
       cad.sel.has(f.id), undefined, X.eyeBtn(f.visible, () => { f.visible = !f.visible; cadPaint(); X.renderTree(); }));
     d.dataset.cadf = String(f.id);
+    cadMenu(d, f.id);
   }
 }
 /** Dialogbereich für das Register; true, wenn gerendert. */
@@ -229,7 +264,9 @@ export function cadDialog(d: HTMLElement): boolean {
   if (!cad.faces.length && !cad.busy) { if (!document.querySelector('.tab.active[data-tab="nuetz"]')) return false; d.innerHTML = `<h3>📐 Trim CAD faces</h3><p class="note">Open a STEP or IGES file (e.g. faces exported from PolyWorks). Select faces, trim them with boundary offset, cut line or islands and export as STEP/IGES – the original is kept.</p>`; return true; }
   if (!cadActive() && !cad.sel.size) return false;
   const sel = [...cad.sel].map((i) => cad.faces[i]); const t = cad.tool; const b = cad.busy ? 'disabled' : '';
-  let h = `<h3>📐 ${cad.name}</h3><p class="note">Front side (face normal) in type color, <b style="color:#9e5c14">back side ochre</b>.</p>`;
+  const op = X.cadOpacity?.() ?? { on: false, amt: 60 };
+  let h = `<h3>📐 ${cad.name}</h3><p class="note">Front side (face normal) in type color, <b style="color:#9e5c14">back side ochre</b>.</p>
+    <div class="row" title="CAD model opacity. Independent of the data object. Default is opaque."><label><input type="checkbox" id="cad-op-on" ${op.on ? 'checked' : ''}> CAD transparent</label> <input type="range" id="cad-op" min="5" max="95" step="5" value="${op.amt}" style="flex:1"> <span>${op.amt}%</span></div>`;
   if (t === 'offset') h += `<h4>Boundary offset</h4><p class="note">Offset the boundary of the selected face(s) inwards by the distance (spatial distance to the boundary edge, on the face). Shared edges of several selected faces are kept.</p>
     <div class="row"><input type="range" id="cad-d-r" min="0.1" max="10" step="0.1" value="${cad.offsetD}" style="flex:1"><input type="number" data-num="abs" id="cad-d" min="0.01" max="100" step="0.1" value="${cad.offsetD}" style="width:5em"> mm</div>
     <div class="row"><button class="btn primary" id="cad-off-ok" ${sel.length ? '' : 'disabled'} ${b}>✔ Apply to ${sel.length} face(s)</button>${cad.opSel >= 0 && cad.ops[cad.opSel]?.kind === 'offset' ? `<button class="btn" id="cad-off-upd" ${b}>Change selected operation</button>` : ''}</div>`;
@@ -257,6 +294,11 @@ export function cadDialog(d: HTMLElement): boolean {
   on('#cad-ex-go', () => cadExport(cad.exportFmt)); d.querySelectorAll<HTMLButtonElement>('[data-exfmt]').forEach((x) => (x.onclick = () => { cad.exportFmt = x.dataset.exfmt as 'step' | 'iges'; X.renderDialog(); }));
   d.querySelectorAll<HTMLInputElement>('[name="cad-ex"]').forEach((r) => (r.onchange = () => (cad.exportAll = r.value === 'all')));
   on('#cad-undo', () => cadUndo()); on('#cad-redo', () => cadRedo()); on('#cad-close', () => setTool(null));
+  const cop = d.querySelector<HTMLInputElement>('#cad-op'), con = d.querySelector<HTMLInputElement>('#cad-op-on');
+  if (cop && con) {
+    con.onchange = () => X.setCadOpacityUi?.(con.checked, Number(cop.value));
+    cop.oninput = () => { const span = cop.parentElement?.querySelector('span'); if (span) span.textContent = cop.value + '%'; X.setCadOpacityUi?.(con.checked, Number(cop.value)); };
+  }
   return true;
 }
 
