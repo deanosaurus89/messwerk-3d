@@ -27,5 +27,5 @@ const KIND: Record<string, string> = {
 };
 export const kindName = (k: string) => t(KIND[k] ?? k);
 /** Method names (internal keys 'Klick' | 'Pinsel' | 'Konstruiert'). */
-const METHOD: Record<string, string> = { Klick: 'Click & grow', Pinsel: 'Brush', Konstruiert: 'Construction', Anker: 'Anchor', Abgeleitet: 'Derived from Analyze' };
+const METHOD: Record<string, string> = { Klick: 'Click & grow', Pinsel: 'Brush', Konstruiert: 'Construction', Anker: 'Anchor', Abgeleitet: 'Derived from Analyze', 'aus CAD': 'From CAD', 'aus Soll': 'From nominal' };
 export const methodName = (m: string) => t(METHOD[m] ?? m);

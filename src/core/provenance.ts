@@ -18,6 +18,7 @@ export function provenanceOf(f: Feature, extra?: { seed?: Vec3; params?: Extract
   if (f.derived) return { kind: 'derived', key: f.derived.key, parents: [f.derived.parent], error: f.derived.error };
   if (f.cons) return { kind: 'construction', key: f.cons.key, parents: [...f.cons.refs], params: { ...(f.cons.params ?? {}) }, error: f.cons.error };
   if (f.anchor || f.method === 'Anker') return { kind: 'anchor', pts: f.anchor?.pts ?? [] };
+  if (f.soll?.fit && !f.measured) return { kind: 'cad', ref: f.soll.method ?? 'aus CAD' };
   if (f.type === 'Abstand' && f.refs?.length === 2) return { kind: 'distance', parents: [f.refs[0], f.refs[1]] };
   const method = f.method === 'Pinsel' ? 'Pinsel' : 'Klick';
   return { kind: 'mesh', method, points: f.pointCount, seed: extra?.seed, params: extra?.params,

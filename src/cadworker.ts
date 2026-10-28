@@ -26,7 +26,9 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
       prog('Reading file …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
       orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
       prog(`Tessellating ${orig.length} faces …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
-      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer); return { ...C.faceInfo(o, f, i), tess: t }; });
+      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
+        let geom: any = null; try { geom = C.faceAnalytic(o, f); } catch { geom = null; }
+        return { ...C.faceInfo(o, f, i), geom, tess: t }; });
       r = { faces: fl, diag, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
     } else if (req.op === 'apply') {
       // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat

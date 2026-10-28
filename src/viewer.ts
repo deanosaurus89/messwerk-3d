@@ -15,7 +15,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export const BASE_COLOR = [0.62, 0.66, 0.72];
 
-export interface Hit { tri: number; point: [number, number, number]; normal: [number, number, number]; }
+export interface Hit { tri: number; point: [number, number, number]; normal: [number, number, number]; /** ray distance */ dist?: number; }
 
 export class Viewer {
   renderer: THREE.WebGLRenderer;
@@ -445,7 +445,7 @@ export class Viewer {
     if (!h) return null;
     const n = h.face ? h.face.normal.clone() : this.camera.position.clone().sub(h.point).normalize();
     if (n.dot(this.ray.ray.direction) > 0) n.negate();
-    return { tri: h.faceIndex ?? -1, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
+    return { tri: h.faceIndex ?? -1, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z], dist: h.distance };
   }
 
   private brushHi: THREE.Mesh | null = null;

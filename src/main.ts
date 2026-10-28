@@ -80,7 +80,7 @@ import {
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cadOpen, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity } from './cadui';
+import { initCad, cad, cadOpen, cadPickHit, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
@@ -96,7 +96,8 @@ import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
 import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
 import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin, nextEmptyField, rotate90, smartAxis } from './core/csys';
-import { NurbsParams, evalSurface, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
+import { NurbsParams, evalSurface, fitFreeform, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
+import { creationSide, nominalFromCad, nominalReexParams, nearerTarget, samplePositions, type SideMode } from './core/cadnominal';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
 type DimComp = '3D' | 'X' | 'Y' | 'Z';
@@ -111,6 +112,8 @@ interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
+  /** Soll = analytic CAD nominal; Ist = fitted to the polygon (default for mesh previews) */
+  role?: 'soll' | 'ist'; cadFace?: number; cadSeed?: Vec3[]; cadPoint?: Vec3;
   aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** zone from the fitted geometry (Boundary from: Fitted geometry) */ zone?: import("./core/reextract").SearchRegion; /** raw region-growing result (before extraction parameters) */ grown?: Uint32Array; /** All inside boundary: search distance used (auto = 3 × RMS) */ bandUsed?: number; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; /** All inside boundary: raised-feature points and the outer contour loops */ raised?: Uint32Array; contour?: number[][][]; /** All inside boundary: detected islands (0.31) */ islands?: Island[]; /** aux plane captured with All inside boundary */ auxFill?: boolean; }
 type V3 = [number, number, number];
 interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
@@ -138,7 +141,9 @@ const state = {
     /** unified extraction parameters (Creation Panel = Re-extraction): islands, boundary exclusion distance, normal angle criterion, outlier removal */
     crit: 'lsq' as FitCrit,
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: false, outlierK: 3, // Phase 1 step 3: Create = raw fit of the selection; filters optional
-       zoneSrc: 'geom' as 'points' | 'geom' } },
+       zoneSrc: 'geom' as 'points' | 'geom' },
+    /** Auto: CAD hit → Soll, polygon hit → Ist. Override forces one of them. */
+    side: 'auto' as SideMode },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -309,7 +314,7 @@ function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand') {
     [t === 'Abstand' ? tt('Between features') : tt('From polygon model'), () => (t === 'Abstand' ? startDistanceMode() : startFitMode(t))],
     [`🔗 ${tt('Construction')}`, t !== 'Abstand' && constructionsFor(t).length ? () => startConstruct(t) : null],
     [`📍 ${tt('Anchor')}${ANCHOR_N[t] ? ` (${ANCHOR_N[t]} ${tt('pts')})` : ''}`, ANCHOR_N[t] ? () => startAnchor(t) : null],
-    [tt('From CAD reference (later)'), null]];
+    [t === 'Abstand' ? tt('From CAD reference (later)') : tt('From CAD'), t === 'Abstand' ? null : () => startFitMode(t, 'soll')]];
   ctxMenu.className = 'ctx-menu';
   ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
   ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
@@ -319,8 +324,9 @@ $('#btn-distance').onclick = () => startDistanceMode();
 $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
 document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftype]').forEach((b) => (b.onclick = () => startFitMode(b.dataset.ftype as GeomType)));
 
-function startFitMode(t: GeomType | 'auto') {
-  if (!state.data) { status('Please load a polygon model first.'); return; }
+function startFitMode(t: GeomType | 'auto', side?: SideMode) {
+  if (!state.data && !cad.faces.length) { status(tt('Load a polygon model or a CAD model first.')); return; }
+  if (side) state.opts.side = side;
   pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
@@ -512,7 +518,14 @@ canvas.addEventListener('pointermove', (e) => {
   const desk = e.pointerType === 'mouse';
   if (pe.tool === 'erase') { const h = viewer.pick(e.clientX, e.clientY); lastHit = h; viewer.showCursor(h, pe.radius, desk); if (painting && h) pePaint(h); return; }
   if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && desk && !e.buttons) {
-    const h = viewer.pick(e.clientX, e.clientY); lastHit = h;
+    const aim = creationAim(e.clientX, e.clientY);
+    if (aim.side === 'soll' && aim.cad) {
+      const h: Hit = { tri: -1, point: aim.cad.p, normal: aim.cad.normal, dist: aim.cad.dist };
+      lastHit = h; viewer.showCursor(h, Math.max(pickR(), 1), !!viewer.model);
+      clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); scheduleCadHover(aim.cad); return;
+    }
+    hoverNominal = aim.mesh ? { role: 'ist', type: '', fit: null } : null;
+    const h = aim.mesh; lastHit = h;
     // Click & grow: pick circle = seed area of the region growing (also the plane/wall transition window for circles)
     viewer.showCursor(h, pickR(), true);
     scheduleAuxHover(h); return;
@@ -570,7 +583,65 @@ installPickMode(canvas.parentElement!, viewer.controls, () => navPaused);
 // Ctrl+Rad soll im Pinselmodus zoomen statt die Seite zu skalieren: OrbitControls übernimmt (preventDefault dort)
 // ---- Live-Vorschau Hilfsebene (Kreis/Langloch per Klick): Ebenenpunkte blau, Wandpunkte orange
 let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
-function clearAuxHover() { clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); if (hoverType) { hoverType = null; renderModeBar(); } }
+/** Live nominal/actual label (and, for a CAD hit, the analytic preview) before the click confirms it. */
+let hoverNominal: { role: 'soll' | 'ist'; type: string; fit: FitResult | null } | null = null;
+let cadHoverT = 0, cadHoverSeq = 0;
+function clearAuxHover() { clearTimeout(auxT); clearTimeout(cadHoverT); auxSeq++; cadHoverSeq++; viewer.showHoverSets([]); const had = !!(hoverType || hoverNominal); hoverType = null; hoverNominal = null; if (had) renderModeBar(); }
+function edgeTol(): number {
+  if (state.opts.pick > 0) return state.opts.pick;
+  const r = viewer.radius || cad.faces.reduce((s, f) => Math.max(s, Math.sqrt(f.area)), 0);
+  return Math.min(8, Math.max(2, r * 0.015 || 2));
+}
+function creationAim(x: number, y: number) {
+  const c = cad.faces.length ? cadPickHit(x, y) : null;
+  const mesh = viewer.pick(x, y);
+  const which = nearerTarget(c ? c.dist : null, mesh?.dist ?? null);
+  const side = creationSide({ cad: !!c, mesh: !!mesh, cadCloser: which === 'cad' }, state.opts.side);
+  return { side, cad: c, mesh };
+}
+function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
+  clearTimeout(cadHoverT); const seq = ++cadHoverSeq;
+  cadHoverT = window.setTimeout(() => {
+    if (seq !== cadHoverSeq || state.preview) return;
+    const face = cad.faces[c.id]; const geom = face?.geom;
+    if (!geom) { hoverNominal = { role: 'soll', type: face?.type ?? '', fit: null }; renderModeBar(); return; }
+    const want = (state.mode as FitMode).type;
+    const nom = nominalFromCad(geom, c.p, want, edgeTol());
+    const next = { role: 'soll' as const, type: nom?.fit.type ?? face.type, fit: nom && !nom.freeform ? nom.fit : null };
+    const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type;
+    hoverNominal = next; hoverType = next.type; if (!same) renderModeBar(); renderScene();
+  }, 60);
+}
+function freeformNominal(positions: ArrayLike<number>, normals: ArrayLike<number>): FitResult {
+  const P = samplePositions(positions, 700);
+  const step = Math.max(1, Math.ceil((positions.length / 3) / Math.max(1, P.length)));
+  const N: Vec3[] = [];
+  for (let i = 0; i < positions.length / 3 && N.length < P.length; i += step) N.push([normals[3 * i] || 0, normals[3 * i + 1] || 0, normals[3 * i + 2] || 1]);
+  const nb = fitFreeform(P, N.length === P.length ? N : P.map(() => [0, 0, 1] as Vec3), null, { nu: 6, nv: 6, deg: 3, smooth: 1e-3, iterations: 2 });
+  return { type: 'Freiformfläche', center: nb.frame.o, normal: nb.frame.n, nurbs: { surface: nb.surface, boundary: nb.boundary, kind: nb.kind, trimUV: nb.trimUV, corners: nb.corners, params: { nu: 6, nv: 6, deg: 3, smooth: 1e-3 }, std: nb.std, mean: nb.mean }, rms: nb.rms, form: nb.form, maxPos: nb.maxPos, maxNeg: nb.maxNeg, n: nb.n };
+}
+async function previewFromCad(c: { id: number; p: V3 }) {
+  const face = cad.faces[c.id]; const geom = face?.geom;
+  if (!geom) { status(tt('This CAD face has no analytic geometry.')); return; }
+  const want = (state.mode as FitMode).type;
+  let nom = nominalFromCad(geom, c.p, want, edgeTol());
+  if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); return; }
+  if (nom.freeform) {
+    try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; }
+    catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; }
+  }
+  const tess = face.res?.tess ?? face.tess;
+  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: c.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
+    aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
+  hoverNominal = null;
+  status(tt('Nominal (Soll) preview: {0}. ✓ creates the feature – the scan is not used yet.', typeName(nom.fit.type)));
+  renderAll();
+}
+function sideBadge(role: 'soll' | 'ist' | null | undefined, type?: string): string {
+  if (!role) return '';
+  const label = role === 'soll' ? 'Soll' : 'Ist';
+  return `<span class="cp-side ${role}" data-side="${role}">${label}${type ? ' · ' + typeName(type) : ''}</span>`;
+}
 function scheduleAuxHover(h: Hit | null) {
   clearTimeout(auxT); const m = state.mode as FitMode | null;
   if (!h || !m || m.kind !== 'fit' || m.type === 'Freiformfläche' || state.preview) { if (!h) viewer.showHoverSets([]); return; }
@@ -606,8 +677,17 @@ window.addEventListener('pointerup', async (e) => {
   down = null;
   if (moved > 8 || dt > 700) return;
   if (!state.mode && await curveClick(e.clientX, e.clientY)) return;
-  const h = viewer.pick(e.clientX, e.clientY);
-  if (!h) { if (!state.mode && !pe.tool) clearSelection(); return; }
+  const aim = state.mode?.kind === 'fit' && state.mode.method === 'Klick' ? creationAim(e.clientX, e.clientY) : null;
+  const picked = aim?.mesh ?? viewer.pick(e.clientX, e.clientY);
+  if (!picked) {
+    const fitClick = state.mode?.kind === 'fit' && state.mode.method === 'Klick';
+    if (fitClick && (aim?.side === 'soll' || state.opts.side === 'soll')) { clearAuxHover(); hoverNominal = null; if (aim?.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.')); }
+    else if (fitClick) status(tt('No polygon under the pointer for an actual.'));
+    else if (!state.mode && !pe.tool) clearSelection();
+    return;
+  }
+  const h = picked;
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && aim?.side === 'soll') { clearAuxHover(); hoverNominal = null; if (aim.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.')); return; }
   if (pe.tool === 'curve') curveAddPoint(h);
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && auxPickArm) { const F = viewer.model!.geometry.index?.array, vs = F ? [F[3 * h.tri], F[3 * h.tri + 1], F[3 * h.tri + 2]] : [3 * h.tri];
     const pl = state.features.find((f) => f.type === 'Ebene' && f.measured && vs.some((v) => f.indices.includes(v)));
@@ -634,7 +714,7 @@ function featureAtHit(h: Hit): FeatureView | null {
   // sonst: nächster Mittelpunkt in der Nähe
   let best: FeatureView | null = null, bd = (state.data?.diag ?? 100) / 30;
   for (const f of state.features) if (f.type !== 'Abstand' && !state.hidden.has(f.id)) {
-    const c = f.measured!.center, d = Math.hypot(c[0] - h.point[0], c[1] - h.point[1], c[2] - h.point[2]);
+    const c = shownFit(f)?.center; if (!c) continue; const d = Math.hypot(c[0] - h.point[0], c[1] - h.point[1], c[2] - h.point[2]);
     if (d < bd) { bd = d; best = f; }
   }
   return best;
@@ -711,18 +791,19 @@ function sizeRows(f: FitResult): [string, string][] {
 /** compact statistics of the current preview */
 function previewStats(p: Preview): string {
   if (p.method === 'Konstruiert') return '';
+  const role = p.role ?? (p.method === 'Klick' || p.method === 'Pinsel' ? 'ist' as const : null);
   // Phase 1 step 2: feedback is exactly point count, form deviation and standard deviation (sizes etc. after ✓ in the tree/dialog)
   const m = p.fit, std = m.nurbs ? m.nurbs.std : m.rms;
   const pts = p.aux ? `${p.indices.length} <small class="cp-aux-n" title="${tt('Points on the auxiliary plane')}">+ ${p.aux.refId ? nameOf(p.aux.refId) : p.aux.indices.length + ' ' + tt('aux.')}</small>` : String(p.indices.length);
-  const rows: [string, string, string][] = [[tt('Points'), pts, 'pts'], [m.nurbs ? tt('Surface profile') : formName(m.type), fmt(m.form), 'form'], [tt('Std. dev.'), fmt(std), 'std']];
-  return `<span class="cp-type">${ICON[m.type] ?? ''} ${typeName(m.type)}</span>` + rows.map(([k, v, c]) => `<span class="cp-kv" data-kv="${c}"><small>${k}</small><b>${v}</b></span>`).join('');
+  const rows: [string, string, string][] = [[tt('Points'), role === 'soll' ? '—' : pts, 'pts'], [m.nurbs ? tt('Surface profile') : formName(m.type), fmt(m.form), 'form'], [tt('Std. dev.'), fmt(std), 'std']];
+  return sideBadge(role, m.type) + `<span class="cp-type">${ICON[m.type] ?? ''} ${typeName(m.type)}</span>` + rows.map(([k, v, c]) => `<span class="cp-kv" data-kv="${c}"><small>${k}</small><b>${v}</b></span>`).join('');
 }
 let paintEx = false, exclStroke = new Set<number>();
 function renderModeBar() {
   const spec = ctxSpec(); setCtx('mesh', spec); setCtx('tool', analysisSpec()); placeFloaters();
 }
 function ctxSpec(): CtxSpec | null {
-  if (!state.data) return null;
+  if (!state.data && !cad.faces.length) return null;
   if (pe.tool === 'curve') return { title: `〰 ${tt('Draw curve')} · <b>${curveDraft.length}</b> ${tt('pts')}`,
     ok: { run: () => curveFinish(), disabled: curveDraft.length < 2, title: tt('Create curve') }, undo: { run: () => { curveDraft.pop(); renderAll(); }, disabled: !curveDraft.length }, cancel: { run: () => peExit() } };
   if (pe.tool === 'erase') return { title: `✧ ${tt('Magic eraser')}`, cls: 'brush',
@@ -767,15 +848,16 @@ function ctxSpec(): CtxSpec | null {
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
   const fullPars = !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
-  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
+  const sideCtl = `<label title="${tt('Auto: pointer on the CAD model creates a nominal (Soll), pointer on the polygon creates an actual (Ist). Override forces one of them.')}">${tt('Nominal / actual')} <select id="cp-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>Soll (${tt('from CAD')})</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>Ist (${tt('from scan')})</option></select></label>`;
+  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
     ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
     ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     ${m.method === 'Klick' ? `<label title="${tt('Normal angle: region growing from the click stops where the surface normal bends more than this angle (edge, fillet, chamfer, adjacent face). Smaller = stops earlier; larger = grows over soft transitions.')}">${tt('Normal angle')} <input id="cp-nang" data-num="abs" value="${state.opts.maxAngleDeg}" inputmode="decimal" style="width:3.5em">°<button type="button" class="help-q" data-doc-sec="nangle" title="${tt('Normal angle – documentation')}">?</button></label>` : ''}
     <label title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation; circumscribed / inscribed = tangential.')}">${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>
   ` : ''}</div></details>`;
   return {
-    title: `${tt('Feature Builder')} · ${p ? typeName(p.fit.type as GeomType) : m.method === 'Klick' ? (m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush')}`, cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
+    title: `${tt('Feature Builder')} · ${p?.role === 'soll' || (!p && hoverNominal?.role === 'soll') ? 'Soll' : p || hoverNominal?.role === 'ist' ? 'Ist' : ''} ${p ? typeName(p.fit.type as GeomType) : m.method === 'Klick' ? (hoverNominal?.type ? typeName(hoverNominal.type) : m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush')}`.replace('  ', ' '), cls: m.method === 'Pinsel' ? 'brush' : '',
+    controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${tt('Move over the CAD model or the polygon. Click to preview, ✓ creates the feature.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'pex') { paintEx = !paintEx; state.opts.multi = false; state.opts.addIsl = false; renderModeBar(); status(paintEx ? tt('Paint exclusion: paint the points to remove. They leave the selection exactly.') : ''); return; }
@@ -801,6 +883,7 @@ function ctxSpec(): CtxSpec | null {
       const cr = el.querySelector<HTMLSelectElement>('#cp-crit'); if (cr) cr.onchange = () => { state.opts.crit = cr.value as FitCrit; extractLive(); };
       bindIslands(el); bindSmooth(el, '#cp-smooth');
       const pd = el.querySelector<HTMLDetailsElement>('details.cp-params'); if (pd) pd.ontoggle = () => { cpParamsOpen = pd.open; };
+      const sd = el.querySelector<HTMLSelectElement>('#cp-side'); if (sd) sd.onchange = () => { state.opts.side = sd.value as SideMode; hoverNominal = null; if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else if (state.preview?.role !== 'soll' && state.opts.side === 'soll' && state.preview) discardPreview(); else renderAll(); };
       el.querySelectorAll<HTMLInputElement>('[data-exn]').forEach((c) => { c.onchange = () => { const v = parseNum(c.value); if (v != null && isFinite(v) && (v >= 0 || (c.dataset.exn === 'inset' && c.dataset.num === 'signed'))) { (state.opts.ex as any)[c.dataset.exn!] = v; extractLive(); } };
         c.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); c.onchange?.(new Event('change')); } }); });
       const na = el.querySelector<HTMLInputElement>('#cp-nang'); if (na) na.onchange = () => { const v = parseNum(na.value); if (v != null && v > 0 && v < 90) { state.opts.maxAngleDeg = v; const pv = state.preview; if (pv?.hit && pv.method === 'Klick' && !pv.regions) previewByClick(pv.hit); } };
@@ -1058,6 +1141,15 @@ async function previewFromBrush() {
 
 async function refitPreview(t: GeomType | 'auto') {
   const p = state.preview; if (!p || p.method === 'Konstruiert') return;
+  if (p.role === 'soll' && p.cadFace != null && p.cadPoint) {
+    const face = cad.faces[p.cadFace]; const geom = face?.geom;
+    if (!geom) return;
+    let nom = nominalFromCad(geom, p.cadPoint, t, edgeTol());
+    if (!nom) { status(tt('No {0} on this CAD face ({1}).', t === 'auto' ? tt('matching feature') : typeName(t), face.type)); return; }
+    if (nom.freeform) { try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; } catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; } }
+    state.preview = { ...p, fit: nom.fit, aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: 'soll' };
+    renderAll(); return;
+  }
   if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
   if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
@@ -1076,8 +1168,47 @@ async function refitPreview(t: GeomType | 'auto') {
   renderAll();
 }
 
+function commitNominal(p: Preview) {
+  const t = p.fit.type;
+  const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
+  const f: FeatureView = {
+    id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, pointCount: 0, method: '' as FeatureView['method'],
+    color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: new Uint32Array(0),
+  };
+  const node = asNode(f);
+  node.soll = { source: 'cad', fit: { ...p.fit, residuals: undefined }, method: 'aus CAD', faceId: p.cadFace, seed: p.cadSeed, aux: p.aux ? { plane: p.aux.plane, source: 'aus CAD' } : undefined };
+  state.features.push(node); touchProject();
+  state.preview = null; clearBrush(); resetIslands(); hoverNominal = null;
+  state.sel = [node.id]; state.selControl = null; state.addFeat = node.id;
+  renderAll();
+  const row = document.querySelector<HTMLElement>(`#tree [data-fid="${node.id}"]`);
+  row?.classList.add('flash'); row?.scrollIntoView({ block: 'nearest' });
+  toast(`✔ ${tt('{0} created', node.name)} (Soll · ${tt('From CAD')})`);
+}
+async function extractActualFromNominal(f: FeatureView) {
+  const fit = f.soll?.fit;
+  if (!fit) return;
+  if (!state.data || !viewer.model) { toast(tt('Load a polygon model in the same coordinate system as the CAD model first. This prototype does not align the scan.')); return; }
+  const g = viewer.model.geometry;
+  const pos = g.getAttribute('position').array as Float32Array;
+  const nrm = (g.getAttribute('normal')?.array as Float32Array | undefined) ?? null;
+  try {
+    const params = nominalReexParams(fit);
+    const r = await busy(engine.call<any>({ op: 'reex', fit, indices: new Uint32Array(0), params, seedPts: f.soll!.seed?.length ? f.soll!.seed : [fit.center], auxPlane: f.soll!.aux?.plane ?? null }));
+    f.measured = { ...r.fit, residuals: undefined, type: fit.type }; f.indices = r.indices; f.src = r.indices; f.pointCount = r.indices.length;
+    f.method = 'aus Soll' as FeatureView['method']; (f as any).ist.source = 'extracted';
+    if (f.soll!.aux) f.aux = { plane: f.soll!.aux.plane, pointCount: 0, source: tt('From CAD') };
+    f.type = f.measured!.type; ptsCache.delete(f.id);
+    toast(tt('{0}: actual extracted from the nominal ({1} points).', f.name, r.indices.length));
+    renderAll(); scheduleAutosave();
+  } catch (e: any) {
+    const m = String(e?.message ?? e);
+    toast(m.includes('Too few points') ? tt('Too few scan points near the nominal. Align the scan to the CAD model first (same coordinate system). This prototype does not run an alignment.') : tt('Re-extraction failed: {0}', m));
+  }
+}
 function commitPreview() {
   const p = state.preview; if (!p) return;
+  if (p.role === 'soll') { viewer.showCursor(null, 1); commitNominal(p); return; }
   viewer.showCursor(null, 1); // seed feedback ends with the preview
   const t = p.fit.type;
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
@@ -2064,12 +2195,12 @@ function renderTree() {
     fnode.ondblclick = (e) => { e.preventDefault(); openFeatureProps(f); };
     fnode.title = tt('Double-click: Properties (editable) · right-click: menu');
     attachContext(fnode, f.id);
-    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('Actual')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('Ist')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
       an.title = tt('Actual geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
       an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu(e.clientX, e.clientY, [[`ⓘ ${tt('Properties…')}`, () => showProperties(f)], [`⌖ ${tt('Center')}`, () => centerOn(f.id)]]); };
       an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
-    if (f.soll) node(`<span class="tw"></span>${ICON.soll}${tt('Nominal')}`, 'indent3', () => selectFeature(f.id));
+    if (f.soll?.fit) node(`<span class="tw"></span>${ICON.soll}${tt('Soll')} <span class="sub">${typeName(f.soll.fit.type)} · ${tt('From CAD')}</span>`, 'indent3', () => selectFeature(f.id));
   }
   if (state.curves.length) {
     const cv = state.curves.some((c) => c.visible);
@@ -2228,6 +2359,9 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   const dk = datumKind(f.type);
   d.innerHTML = `<h3><span style="color:${hex(f.color)}">${ico}</span> ${f.name}${f.refs?.length ? ' <span class="chain" title="' + tt('Depends on other features') + '">🔗</span>' : ''}</h3>
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
+    ${f.soll?.fit ? `<div class="note" data-soll="1"><b>Soll</b> · ${typeName(f.soll.fit.type)} · ${tt('From CAD')}${f.soll.faceId != null ? ` · ${tt('CAD face')} ${f.soll.faceId + 1}` : ''}</div>
+      <div class="row"><button class="btn primary" id="d-from-soll" ${state.data ? '' : 'disabled'} title="${tt('Collect scan points near this nominal and fit the actual. The scan and the CAD model must already share one coordinate system (alignment is not changed here).')}">${tt('Extract actual from nominal')}</button></div>
+      ${state.data ? '' : `<p class="note">${tt('Load a polygon model in the same coordinate system as the CAD model, then extract the actual. This prototype does not run an alignment.')}</p>`}` : ''}
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
     <div class="row chk"><label><input type="checkbox" id="d-vis" ${state.hidden.has(f.id) ? '' : 'checked'}> ${tt('Geometry visible')}</label><label><input type="checkbox" id="d-lab" ${state.hiddenLabels.has(f.id) ? '' : 'checked'}> ${tt('Annotation visible')}</label>${f.indices?.length && f.type !== 'Abstand' ? `<label title="${tt('Show the points used in the fit, in the feature colour')}"><input type="checkbox" id="d-pts" ${state.colorPts || state.usedPts.has(f.id) ? 'checked' : ''}> ${tt('Used points')}</label>` : ''}${auxDisplayIndices(f)?.length ? `<label title="${tt('Show the points of the auxiliary plane, in blue. An assigned plane shows that plane’s own points.')}"><input type="checkbox" id="d-auxpts" ${state.colorAux || state.usedAux.has(f.id) ? 'checked' : ''}> ${tt('Aux-plane points')}</label>` : ''}</div>
     ${dk ? dsec('datum', `<span class="dflag sm">${f.datum ?? '?'}</span> ${tt('Datum (ISO 5459)')}`, `<div class="row" id="dt-box"><select id="dt-letter">${DATUM_LETTERS.slice(0, 10).map((l) => { const o = state.features.find((g) => g.datum === l && g.id !== f.id);
@@ -2248,7 +2382,8 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   d.querySelector('#dt-training')?.addEventListener('click', () => startTraining());
   d.querySelector('#d-center')?.addEventListener('click', () => centerOn(f.id));
   d.querySelector('#d-props')?.addEventListener('click', () => showProperties(f));
-  d.querySelector('#d-an')?.addEventListener('click', () => { state.sel = [f.id]; analyze('form'); });
+  d.querySelector('#d-an')?.addEventListener('click', () => { if (!f.measured) { toast(tt('Extract an actual from the nominal first.')); return; } state.sel = [f.id]; analyze('form'); });
+  d.querySelector('#d-from-soll')?.addEventListener('click', () => { void extractActualFromNominal(f); });
   ($('#d-name') as HTMLInputElement).onchange = (e) => { f.name = (e.target as HTMLInputElement).value; renderAll(); };
   ($('#d-color') as HTMLInputElement).oninput = (e) => { f.color = parseInt((e.target as HTMLInputElement).value.slice(1), 16); f.colorSet = true; renderTree(); renderScene(); scheduleAutosave(); };
   ($('#d-vis') as HTMLInputElement).onchange = (e) => { (e.target as HTMLInputElement).checked ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderTree(); renderScene(); };
@@ -2302,6 +2437,7 @@ const CRIT_NAME: Record<FitCrit, string> = { lsq: 'Gauss (least squares)', mz: '
 const CRIT_SHORT: Record<FitCrit, string> = { lsq: 'Gauss', mz: 'Min. zone', mcc: 'Circumscribed', mic: 'Inscribed' };
 /** Point selection part of the feature dialog: how the points were found (region growing, aux plane, brush, file) */
 function selectionParamsHTML(f: FeatureView) {
+  if (!f.measured) return f.soll?.fit ? `<p class="note">${tt('Nominal from CAD ({0}). No scan points yet.', typeName(f.soll.fit.type))}</p>` : '';
   if (f.measured?.nurbs || f.derived || f.cons || f.type === 'Abstand') return '';
   const fp = (f.fp ??= defaultFp()); const grow = !!f.hit && f.method === 'Klick';
   const planes = state.features.filter((g) => g.type === 'Ebene' && g.id !== f.id);
@@ -2314,7 +2450,7 @@ function selectionParamsHTML(f: FeatureView) {
 }
 /** Filters – shown ONCE: in the Extraction section when it exists (re-extraction parameters), else here */
 function filterParamsHTML(f: FeatureView) {
-  if (f.measured?.nurbs || f.derived || f.cons || f.type === 'Abstand' || reexHTML(f)) return '';
+  if (!f.measured || f.measured?.nurbs || f.derived || f.cons || f.type === 'Abstand' || reexHTML(f)) return '';
   const fp = (f.fp ??= defaultFp()); const m = f.measured!;
   return `<div id="fp-flt">
     <div class="row" title="${tt('Outlier removal: points whose deviation from the fitted geometry is larger than n × the RMS (standard deviation) are removed – the points with the largest deviation. Unchecked = keep all points.')}"><label><input type="checkbox" id="fp-rob" ${fp.k ? 'checked' : ''}> ${tt('Exclude outliers beyond [n × RMS]')}</label><input id="fp-k" data-num="abs" value="${fp.k || 3}" inputmode="decimal" ${fp.k ? '' : 'disabled'}></div>
@@ -2328,6 +2464,7 @@ function filterParamsHTML(f: FeatureView) {
 }
 /** Fit – the LAST step: geometry type and fit criterion; form deviation under every criterion */
 function fitParamsHTML(f: FeatureView) {
+  if (!f.measured) return `<p class="note">${tt('No actual yet. The nominal (Soll) comes from the CAD model. Extract the actual when a scan in the same coordinate system is loaded.')}</p>`;
   if (f.measured?.nurbs) return nurbsParamsHTML(f);
   if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
   const fp = (f.fp ??= defaultFp()); const m = f.measured!; const crit = fp.crit ?? 'lsq';
@@ -2346,6 +2483,7 @@ function fitParamsHTML(f: FeatureView) {
   </div>`;
 }
 function bindFitParams(d: HTMLElement, f: FeatureView) {
+  if (!f.measured) return;
   if (f.measured?.nurbs) { bindNurbsParams(d, f); return; }
   const fp = f.fp!; const q = <T extends HTMLElement>(s: string) => d.querySelector<T>(s);
   const num = (id: string, set: (x: number) => void, min = 0) => { const el = q<HTMLInputElement>(id); if (el) el.onchange = () => { const x = Number(el.value.replace(',', '.')); if (isFinite(x) && x >= min) { set(x); refitFeature(f); } else el.value = ''; }; };
@@ -2474,8 +2612,9 @@ function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
       + `<td>${z ? '≤ ' + fmt(c.tolUp + (c.mod ? (r.members?.[r.worst ?? 0]?.bonus ?? r.bonus ?? 0) : 0), 3) : c.nominal == null ? '—' : fmt(c.nominal, 3)}</td><td>${z || r.deviation == null ? '' : sgn(r.deviation, 3)}</td></tr>`
       + (tolSum(c, r) ? `<tr class="lb"><td colspan="4">${MOD_SYM[c.mod!]} ${tolSum(c, r)}${r.members?.[r.worst ?? 0]?.bx?.beyond ? ' ⚠' : ''}</td></tr>` : '');
   }).join('');
-  const m = f.measured!, extra: string[] = [];
-  if (f.type !== 'Abstand') { if (state.annot.pts) extra.push(`${f.pointCount} ${tt('pts')}`); if (state.annot.std) extra.push(`σ ${fmt(m.nurbs?.std ?? m.rms, 4)}`); }
+  const m = shownFit(f), extra: string[] = [];
+  if (m && f.type !== 'Abstand') { if (state.annot.pts && f.measured) extra.push(`${f.pointCount} ${tt('pts')}`); if (state.annot.std) extra.push(`σ ${fmt(m.nurbs?.std ?? m.rms, 4)}`); }
+  if (!f.measured && f.soll) extra.push('Soll');
   return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${extra.length ? `<div class="lx">${extra.join(' · ')}</div>` : ''}`
     + `${cs.length ? `<table><tr class="lt"><th></th><th>${tt('Act.')}</th><th>${tt('Nom./Tol')}</th><th>${tt('Dev.')}</th></tr>${rows}</table>` : ''}`;
 }
@@ -2744,10 +2883,15 @@ function exitPointColoring() {
   if (state.preview || state.brushCount) discardPreview();
   else { renderRibbon(); renderAll(); }
 }
+const shownFit = (f: FeatureView) => f.measured ?? f.soll?.fit;
 function renderScene() {
-  if (!state.data) { viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); return; }
+  if (!state.data && !state.features.length && !state.preview && !hoverNominal && !cad.faces.length) {
+    viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); viewer.clearPrims(); return;
+  }
+  if (!state.data) { viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); }
   ovm().sync();
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
+  if (state.data) {
   viewer.resetColors();
   const peOn = paintPolyCompare() || paintLayout() || paintAnalysis();
   applySharedOpacity();
@@ -2755,6 +2899,7 @@ function renderScene() {
   if (!peOn) renderDevLegend(lg ?? null);
   syncPointMarks();
   viewer.commitColors();
+  }
   viewer.clearPrims();
   const p = ovm().on('preview') ? state.preview : null;
   renderCurves();
@@ -2769,6 +2914,8 @@ function renderScene() {
   if (state.showPrims) for (const f of state.features) {
     if (!vis(f)) continue;
     const sel = state.sel.includes(f.id);
+    const mShown = shownFit(f); if (!mShown) continue;
+    if (!f.measured || !viewer.model) { if (mShown.nurbs) viewer.addFreeform(mShown.nurbs, f.color, sel, sel && state.ctrlNet); else viewer.addPrimitive(mShown, f.color, sel); continue; }
     if (f.type === 'Winkel') viewer.addAngle(f.measured!, f.color, sel);
     else if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
     else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
@@ -2795,16 +2942,16 @@ function renderScene() {
     if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of boundaryShown(previewLoops(p), p.islands)) viewer.addContour(L, 0x1565c0);
     else for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
     (p.islands ?? []).forEach((I, i) => { if (I.drop || (I.inc && I.kind === 'hole' && i !== islSel)) return; /* dismissed bore: no blue contour */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.drop ? 0x78909c : 0xff8c1a); });
-  }
+  } else if (hoverNominal?.role === 'soll' && hoverNominal.fit && hoverNominal.fit.type !== 'Freiformfläche') viewer.addPrimitive(hoverNominal.fit, PREVIEW_COLOR, true);
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();
   // Labels
   const fm = featMap();
   const focus = anFocusIds();
-  const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id) && (!focus || focus.has(f.id))).map((f) => {
-    const m = f.measured!;
+  const specs: LabelSpec[] = state.showLabels ? state.features.filter((f) => vis(f) && !state.hiddenLabels.has(f.id) && (!focus || focus.has(f.id))).flatMap((f) => {
+    const m = shownFit(f); if (!m) return [];
     const anchor = (f.type === 'Abstand' ? m.p1!.map((v, i) => (v + m.p2![i]) / 2) : m.center) as V3;
-    return { id: f.id, anchor, html: labelHTML(f, fm), color: hex(f.color), offset: state.labelOffsets.get(f.id) ?? null, selected: state.sel.includes(f.id) };
+    return [{ id: f.id, anchor, html: labelHTML(f, fm), color: hex(f.color), offset: state.labelOffsets.get(f.id) ?? null, selected: state.sel.includes(f.id) }];
   }) : [];
   if (p && p.fit.type === 'Abstand' && state.mode?.kind === 'dist') {
     const m = p.fit, comp = state.mode.comp;
@@ -2837,7 +2984,7 @@ renderAll();
 
 // ------------------------------------------------------------------ Zentrieren
 function featureRadius(f: FeatureView): number {
-  const m = f.measured!;
+  const m = shownFit(f)!; if (!m) return 2;
   if (f.type === 'Abstand') return Math.max(m.distance! / 2, 1);
   const P = featPoints(f.id);
   if (P && P.length) { let r = 0; for (const q of P) r = Math.max(r, Math.hypot(q[0] - m.center[0], q[1] - m.center[1], q[2] - m.center[2])); return r; }
@@ -2847,7 +2994,7 @@ function featureRadius(f: FeatureView): number {
 /** Blickrichtung zum Zentrieren: Kamera auf der Vorderseite (+Normale), Blick entlang −Normale. Achsen ohne Vorzeichen
  *  (Zylinder, Kegel, Linie, Torus): Seite, die der aktuellen Ansicht am nächsten liegt. Abstand: senkrecht zur Maßlinie. */
 function viewDir(f: FeatureView): [number, number, number] | undefined {
-  const m = f.measured!; let n = (f.aux?.plane.normal ?? m.normal) as [number, number, number];
+  const m = shownFit(f)!; if (!m) return undefined; let n = (f.aux?.plane.normal ?? f.soll?.aux?.plane.normal ?? m.normal) as [number, number, number];
   if (f.type === 'Abstand' || f.type === 'Punkt' || f.type === 'Kugel' || f.type === 'Freiformfläche') return undefined;
   if (['Zylinder', 'Kegel', 'Linie', 'Torus'].includes(f.type) && !f.aux) {
     const c = viewer.getCamera(); const v = [c.position[0] - c.target[0], c.position[1] - c.target[1], c.position[2] - c.target[2]];
@@ -2862,7 +3009,8 @@ function centerOn(id?: number | null) {
   const fid = id === undefined ? state.sel[0] ?? null : id;
   const f = state.features.find((x) => x.id === fid);
   if (!f) { viewer.view('fit'); status(tt('Model centered.')); return; }
-  viewer.focus(f.measured!.center as [number, number, number], featureRadius(f), viewDir(f));
+  const cf = shownFit(f); if (!cf) { viewer.view('fit'); return; }
+  viewer.focus(cf.center as [number, number, number], featureRadius(f), viewDir(f));
   status(tt('{0} centered (view along −normal).', f.name));
 }
 {
@@ -3012,6 +3160,8 @@ function showMenu(x: number, y: number, items: ([string, (() => void) | null] | 
 }
 /** Properties of the ACTUAL geometry (read-only): type, method, points, RMS, form, max ±, position, direction, aux plane. */
 function propertiesHTML(f: FeatureView): string {
+  if (!f.measured && f.soll?.fit) return `<h4>${tt('Soll')}</h4>${kv([[tt('Type'), typeName(f.soll.fit.type)], [tt('Method'), methodName(f.soll.method ?? 'aus CAD')], ...fitRows(f.soll.fit, 0)])}`;
+  if (!f.measured) return `<p class="note">${tt('No geometry.')}</p>`;
   return `<h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}`;
@@ -3367,7 +3517,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, previewFromCad, nominalFromCad, creationSide, nearerTarget, extractActualFromNominal, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
@@ -3816,7 +3966,7 @@ function renderCurveDialog(d: HTMLElement) {
 /** Test-Hilfe: Projekt speichern und sofort wieder öffnen (Persistenz-Prüfung). */
 (window as any).__app.roundtrip = async () => { const bin = writeProject(projectJSON(), meshArrays(), featureIndexBlob()); const p = readProject(bin); await applyProject(p.json, p.mesh, p.idx); return bin.length; };
 
-initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data });
+initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data, featureTool: () => state.mode?.kind === 'fit' });
 
 
 // ------------------------------------------------------------------ Coordinate systems (3-2-1)
@@ -4163,11 +4313,13 @@ function methodSeg(out: GeomType | 'auto' | 'Abstand', cur: 'mesh' | 'con' | 'an
     + `<button data-meth="mesh" class="${cur === 'mesh' ? 'on' : ''}" ${mesh ? '' : 'disabled'} title="${out === 'Abstand' ? tt('Distance between two existing features') : tt('Fit the feature to mesh points (click & grow or brush)')}">${meshLbl}</button>`
     + `<button data-meth="con" class="${cur === 'con' ? 'on' : ''}" ${con ? '' : 'disabled'} title="${tt('Construct from other features (intersection, axis, mid plane …)')}">🔗 ${tt('Construction')}</button>`
     + `<button data-meth="anchor" class="${cur === 'anchor' ? 'on' : ''}" ${anc ? '' : 'disabled'} title="${anc ? tt('Pick the minimum number of points on the mesh: {0}', ANCHOR_N[out as GeomType]!) : tt('Not available for this type')}">📍 ${tt('Anchor')}</button>`
-    + `<button data-meth="cad" disabled title="${tt('From CAD reference – coming later')}">${tt('From CAD reference')}</button></span></div>`;
+    + `<button data-meth="cad" class="${state.opts.side === 'soll' ? 'on' : ''}" ${out !== 'Abstand' && out !== 'Winkel' ? '' : 'disabled'} title="${tt('Nominal from the CAD model (analytic face or edge). The scan is not used until you extract the actual.')}">${tt('From CAD')}</button></span></div>`;
 }
 function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto' | 'Abstand') {
   d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.meth;
+    if (k === 'cad') { startFitMode(out === 'auto' || out === 'Winkel' ? 'auto' : out as GeomType, 'soll'); return; }
+    if (k === 'mesh') state.opts.side = 'auto';
     if (k === 'con') startConstruct(out as GeomType); else if (k === 'anchor') startAnchor(out as GeomType | 'Abstand');
     else if (out === 'Abstand') startDistanceMode(); else startFitMode(out === 'Winkel' ? 'auto' : out);
   }));
@@ -4257,6 +4409,7 @@ function provenanceHTML(f: FeatureView): string {
   else if (p.kind === 'derived') { const d = DERIVES.find((x) => x.key === p.key); rows.push([tt('Method'), `🔗 ${tt('Derived from Analyze')}`], [tt('Derivation'), d ? tt(d.label) : p.key], [tt('Parent'), nameOf(p.parents[0])]);
     if (p.error) rows.push([tt('Error'), `⚠ ${p.error}`]); rows.push([tt('Update'), tt('recomputed automatically when the parent changes')]); }
   else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }
+  else if (p.kind === 'cad') { rows.push([tt('Method'), tt('From CAD')], [tt('Nominal'), 'Soll']); if (f.soll?.faceId != null) rows.push([tt('CAD face'), String(f.soll.faceId + 1)]); }
   else return '';
   if (f.reex) { const r = normReex(f.reex); rows.push([tt('Then: re-extraction'), tt('search distance ±{0} mm · lateral {1} mm · outliers > {2} × RMS · {3}°{4} → {5} pts ({6} before, {7} removed)', r.maxDist, fmt(lateralOf(r), 2) + (r.margin == null ? ' (' + tt('auto') + ')' : ''), r.sigma > 0 ? r.sigma : tt('off'), r.maxAngleDeg, r.fill ? ' · ' + tt('all inside boundary') : '', f.reex.points, f.reex.before, f.reex.removed)]); }
   return `<h4>${tt('Provenance')}</h4>${kv(rows)}`;

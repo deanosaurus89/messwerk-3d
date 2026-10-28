@@ -2,7 +2,7 @@
 //   Feature = placeholder node in the tree {id, name, type, deps (refs/cons/derived), datum, display}
 //     ├─ ist  (actual)  – source 'mesh' | 'extracted' (later: from the nominal) | 'constructed' (from other features):
 //     │                   selection + points, fit, aux plane, extraction params, re-extraction, stats
-//     └─ soll (nominal) – reserved: geometry only from CAD (no numeric entry), NOT implemented yet
+//     └─ soll (nominal) – geometry from CAD only (analytic face/edge, method „aus CAD“); no numeric entry
 // Controls, datums, coordinate systems, constructions, report and annotations reference the feature NODE (id) and use
 // its chosen state (today always Ist).
 //
@@ -10,6 +10,7 @@
 // properties on the node that read/write node.ist, so existing call sites keep working unchanged while the data lives in
 // Ist. New code should use node.ist (or actualOf) directly.
 import type { FitResult } from './fit';
+import type { Vec3 } from './linalg';
 
 export type IstSource = 'mesh' | 'extracted' | 'constructed';
 export interface IstState {
@@ -21,8 +22,17 @@ export interface IstState {
   method: string;
   [k: string]: unknown; // aux, reex, anchor, fp, hit + runtime point sets (indices, src, auxIndices, dev, candidates)
 }
-/** reserved for the CAD phase (P6): nominal geometry from CAD only */
-export interface SollState { source: 'cad'; fit?: FitResult }
+/** Nominal geometry from CAD only (no numeric entry of the nominal). */
+export interface SollState {
+  source: 'cad';
+  fit?: FitResult;
+  /** 'aus CAD' */
+  method?: string;
+  faceId?: number;
+  /** samples of the CAD face, world coordinates — seed of a later actual extraction */
+  seed?: Vec3[];
+  aux?: { plane: FitResult; source: string };
+}
 
 /** flat (pre-0.28) field name → Ist field name */
 export const IST_FIELDS: Record<string, string> = {
