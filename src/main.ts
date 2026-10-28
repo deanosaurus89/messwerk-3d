@@ -37,37 +37,37 @@ const shellCache = new Map<number, { key: string } & ReturnType<typeof analyticS
 let conePrev: { key: string; s: ReturnType<typeof analyticShell> } | null = null;
 /** Preview cone: full mesh frustum, cached so orbiting does not rescan the mesh every frame. */
 function previewAnalytic(p: Preview): boolean {
-  if (p.role === 'soll' || !GEOM_ZONE.includes(p.fit.type)) return false;
-  if (p.fit.type === 'Kegel' || p.fit.type === 'Kugel') return state.opts.ex.zoneSrc !== 'points';
-  return state.opts.ex.zoneSrc === 'geom';
+  if (p.role === 'soll') return false;
+  return boundaryKind(p.fit.type, state.opts.ex.zoneSrc) === 'analytic';
 }
 function drawAnalyticPreview(p: Preview) {
-  if (p.fit.type === 'Kegel' && viewer.model) {
-    const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
+  const pos = viewer.model?.geometry.getAttribute('position').array as Float32Array | undefined;
+  if (p.fit.type === 'Kegel' && pos) {
     const s = previewCone(p.fit, pos, p.indices);
+    viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
+  }
+  if (p.fit.type === 'Zylinder' && pos) {
+    const s = cylinderDisplayShell(p.fit, pos, p.indices);
     viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
   }
   if (p.fit.type === 'Kugel' && p.fit.radius) {
     const s = analyticSphere(p.fit); viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
   }
-  if (p.fit.type === 'Zylinder' && viewer.model) {
-    const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
-    const s = analyticShell(p.fit, pos, p.indices, 72);
-    viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR); return;
-  }
-  viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
+  // Torus (and any other analytic primitive): the full fitted solid, not the clicked patch.
+  viewer.addPrimitive(p.fit, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
 }
 function previewCone(fit: FitResult, pos: ArrayLike<number>, idx: Uint32Array) {
-  const key = fit.center.join(',') + '|' + fit.radius + '|' + fit.halfAngle + '|' + fit.length + '|' + idx.length + '|' + pos.length;
+  const key = fit.center.join(',') + '|' + fit.radius + '|' + fit.halfAngle + '|' + fit.length + '|' + idx.length + '|' + pos.length + '|disp';
   if (conePrev?.key === key) return conePrev.s;
-  const s = analyticShell(fit, pos, idx, 72, { span: 'surface' });
+  const s = coneDisplayShell(fit, pos, idx);
   conePrev = { key, s }; return s;
 }
 function shellFor(f: FeatureView) {
   const cone = f.type === 'Kegel';
-  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.measured!.length + '|' + f.indices.length + (cone ? '|surf' : '');
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.measured!.length + '|' + f.indices.length + (cone ? '|cone' : '|wall');
   const c = shellCache.get(f.id); if (c && c.key === key) return c;
-  const r = analyticShell(f.measured!, viewer.model!.geometry.getAttribute('position').array as Float32Array, f.indices, 72, cone ? { span: 'surface' } : undefined);
+  const pos = viewer.model!.geometry.getAttribute('position').array as Float32Array;
+  const r = cone ? coneDisplayShell(f.measured!, pos, f.indices) : cylinderDisplayShell(f.measured!, pos, f.indices);
   const e = { key, ...r }; shellCache.set(f.id, e); return e;
 }
 function trimFor(f: FeatureView) {
@@ -132,14 +132,17 @@ import { showWhatsNew, versionText, maybeShowWhatsNew } from './changelog';
 import { initProgress, progressBegin, progressEnd, progressUpdate } from './progress';
 import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
-import { FitResult, GeomType, anchorFit } from './core/fit';
+import { FitResult, GeomType, anchorFit, signedDistance } from './core/fit';
+import { boundaryKind, coneDisplayShell, cylinderDisplayShell, drawsPointHighlight, zoneSrcFor } from './core/geombound';
+import { detectBadge, featureClassWord, nominalAdvancedControls, orientationText, roleWord } from './core/nominalui';
+import { treeMenuIds, type TreeTarget } from './core/treemenu';
 import {
   Control, ControlKind, Feature, availableControls, computeDistance, controlLabel, controlsCSV,
   defaultTolerance, evaluate, featureCSV, DEG, FORM_NAME, AuxPlane, controlCatalog,
 } from './core/features';
 import { Report, buildReport, reportCSV, reportHTML, reportTablesHTML } from './core/report';
 import { evalBSpline } from './core/curves';
-import { initCad, cad, cadOpen, cadPickHit, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity, cadHighlight, cadClear } from './cadui';
+import { initCad, cad, cadOpen, cadPickHit, cadTree, cadDialog, cadActive, setCadEdges, cadEdgesOn, setCadOpacity, cadHighlight, cadClear, cadDropFace, cadCenter } from './cadui';
 import { simulateDatums, DatumAssoc } from './core/datumsim';
 import { DERIVES, derivesFor, runDerive } from './core/derive';
 import { axisColorScale } from './core/axisan';
@@ -153,7 +156,7 @@ import { Tour, TourStep } from './training';
 import { type Vec3, sub, scale, dot, norm, add, basis, cross, unit } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
-import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionsFor, recomputeOrder, runConstruction, slotFor } from './core/construct';
+import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionIsNominal, constructionsFor, parentFit, recomputeOrder, runConstruction, slotFor } from './core/construct';
 import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin, nextEmptyField, rotate90, smartAxis } from './core/csys';
 import { NurbsParams, evalSurface, fitFreeform, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 import { creationSide, nominalFromCad, nominalReexParams, nearerTarget, samplePositions, type SideMode } from './core/cadnominal';
@@ -167,7 +170,7 @@ type Mode = FitMode | DistMode | ConMode | AnchorMode | null;
 /** Anchor: mathematical minimum of picked points per feature type. */
 const ANCHOR_N: Partial<Record<GeomType | 'Abstand', number>> = { Punkt: 1, Linie: 2, Ebene: 3, Kreis: 3, Kugel: 4, Zylinder: 5, Kegel: 6, Abstand: 2 };
 interface FitParamsUI { /** fit criterion (default Gauss) */ crit?: FitCrit; /** Boundary from: 'geom' = zone around the fitted cylinder/cone/sphere/torus (not the grown triangles); zoneBand = its ± search distance */ zoneSrc?: 'points' | 'geom'; zoneBand?: number; /** dismissed islands on a curved surface: the opening is filled in the drawn geometry */ seals?: SealMark[]; fill?: { on: boolean; band: number; exRaised?: boolean; islands?: boolean; /** 0.31: per-island choices (not an island / refine) */ isl?: IslandChoice[] }; /** planes: boundary exclusion distance [mm] */ inset?: number; k: number; nf: { on: boolean; angleDeg: number; maxPct: number }; maxAngleDeg: number; radius: number; aux: 'auto' | 'ring' | 'none' | number; ring?: { gap: number; width: number }; }
-interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary (planes, set at ✓) */ frozen?: FrozenBoundary; /** 0.35: the frozen point set (creation selection) */ frozenIdx?: Uint32Array; colorSet?: boolean; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
+interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary (planes, set at ✓) */ frozen?: FrozenBoundary; /** 0.35: the frozen point set (creation selection) */ frozenIdx?: Uint32Array; colorSet?: boolean; /** feature surface opacity 0–1; unset = the default overlay */ alpha?: number; dim?: { comp: DimComp }; indices: Uint32Array; candidates?: { type: string; rms: number }[]; auxIndices?: Uint32Array;
   src?: Uint32Array; hit?: Hit; fp?: FitParamsUI; dev?: Float32Array; }
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
@@ -583,7 +586,9 @@ canvas.addEventListener('pointermove', (e) => {
       lastHit = h; viewer.showCursor(h, Math.max(pickR(), 1), !!viewer.model);
       clearTimeout(auxT); auxSeq++; viewer.showHoverSets([]); scheduleCadHover(aim.cad); return;
     }
+    const wasCad = hoverNominal?.role === 'soll';
     hoverNominal = aim.mesh ? { role: 'ist', type: '', fit: null } : null;
+    if (wasCad) { hoverType = null; renderModeBar(); renderDialog(); }
     const h = aim.mesh; lastHit = h;
     // Click & grow: pick circle = seed area of the region growing (also the plane/wall transition window for circles)
     viewer.showCursor(h, pickR(), true);
@@ -643,7 +648,7 @@ installPickMode(canvas.parentElement!, viewer.controls, () => navPaused);
 // ---- Live-Vorschau Hilfsebene (Kreis/Langloch per Klick): Ebenenpunkte blau, Wandpunkte orange
 let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
 /** Live nominal/actual label (and, for a CAD hit, the analytic preview) before the click confirms it. */
-let hoverNominal: { role: 'soll' | 'ist'; type: string; fit: FitResult | null } | null = null;
+let hoverNominal: { role: 'soll' | 'ist'; type: string; fit: FitResult | null; cadId?: number; cadPoint?: V3 } | null = null;
 let cadHoverT = 0, cadHoverSeq = 0;
 function clearAuxHover() { clearTimeout(auxT); clearTimeout(cadHoverT); auxSeq++; cadHoverSeq++; viewer.showHoverSets([]); if (state.preview?.role !== 'soll') cadHighlight(-1); const had = !!(hoverType || hoverNominal); hoverType = null; hoverNominal = null; if (had) renderModeBar(); }
 function edgeTol(): number {
@@ -667,9 +672,9 @@ function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
     if (!geom) { hoverNominal = { role: 'soll', type: face?.type ?? '', fit: null }; renderModeBar(); return; }
     const want = (state.mode as FitMode).type;
     const nom = nominalFromCad(geom, c.p, want, edgeTol());
-    const next = { role: 'soll' as const, type: nom?.fit.type ?? (face.type === 'NURBS' ? '' : face.type), fit: nom && !nom.freeform ? nom.fit : null };
-    const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type;
-    hoverNominal = next; hoverType = next.type; if (!same) renderModeBar(); renderScene();
+    const next = { role: 'soll' as const, type: nom?.fit.type ?? (face.type === 'NURBS' ? '' : face.type), fit: nom && !nom.freeform ? nom.fit : null, cadId: c.id, cadPoint: [...c.p] as V3 };
+    const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type && hoverNominal.cadId === c.id;
+    hoverNominal = next; hoverType = next.type; if (!same) { renderModeBar(); renderDialog(); } renderScene();
   }, 60);
 }
 function freeformNominal(positions: ArrayLike<number>, normals: ArrayLike<number>): FitResult {
@@ -695,13 +700,13 @@ async function previewFromCad(c: { id: number; p: V3 }) {
   state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: c.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
     aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
-  status(tt('Nominal (Soll) preview: {0}. ✓ creates the feature – the scan is not used yet.', typeName(nom.fit.type)));
+  status(tt('Nominal preview: {0}. Create nominal adds it to the tree – the scan is not used yet.', typeName(nom.fit.type)));
   renderAll();
 }
 function sideBadge(role: 'soll' | 'ist' | null | undefined, type?: string): string {
   if (!role) return '';
-  const label = role === 'soll' ? 'Soll' : 'Ist';
-  return `<span class="cp-side ${role}" data-side="${role}">${label}${type ? ' · ' + typeName(type) : ''}</span>`;
+  const label = roleWord(role);
+  return `<span class="cp-side ${role}" data-side="${role}" data-label="${label}">${label}${type ? ' · ' + typeName(type) : ''}</span>`;
 }
 function scheduleAuxHover(h: Hit | null) {
   clearTimeout(auxT); const m = state.mode as FitMode | null;
@@ -776,8 +781,17 @@ function featureAtHit(h: Hit): FeatureView | null {
   const has = (arr: Uint32Array, v: number) => { let lo = 0, hi = arr.length - 1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] === v) return true; arr[m] < v ? (lo = m + 1) : (hi = m - 1); } return false; };
   for (let i = state.features.length - 1; i >= 0; i--) {
     const f = state.features[i];
-    if (f.type !== 'Abstand' && !state.hidden.has(f.id) && vs.some((v) => has(f.indices, v))) return f;
+    if (f.type !== 'Abstand' && !state.hidden.has(f.id) && f.indices?.length && vs.some((v) => has(f.indices, v))) return f;
   }
+  // Nominal (and other features without mesh points): nearest analytic surface under the click.
+  let surf: FeatureView | null = null, sd = 0.8;
+  for (const f of state.features) {
+    if (f.type === 'Abstand' || state.hidden.has(f.id) || f.indices?.length) continue;
+    const m = shownFit(f); if (!m) continue;
+    const d = Math.abs(signedDistance(m, h.point));
+    if (d < sd) { sd = d; surf = f; }
+  }
+  if (surf) return surf;
   // sonst: nächster Mittelpunkt in der Nähe
   let best: FeatureView | null = null, bd = (state.data?.diag ?? 100) / 30;
   for (const f of state.features) if (f.type !== 'Abstand' && !state.hidden.has(f.id)) {
@@ -907,32 +921,42 @@ function ctxSpec(): CtxSpec | null {
   const dsel = p && p.fit.type !== 'Abstand' && p.fit.type !== 'Winkel' && p.fit.type !== 'Linienzug'
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
   const zType = (p ? p.fit.type : m.type) as string;
-  const sollUi = p?.role === 'soll' || (!p && state.opts.side === 'soll');
+  const nominalUi = p?.role === 'soll' || hoverNominal?.role === 'soll' || state.opts.side === 'soll';
+  const sollUi = nominalUi;
   const showB = !sollUi && m.method === 'Klick' && GEOM_ZONE.includes(zType) && !p?.aux;
   const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${bfromTip()}"><span class="cp-bl">${tt('Boundary from')}</span><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${bfromTip()}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${bfromTip()}">${tt('Points')}</button></span>` : '';
   const isl = !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || (GEOM_ZONE.includes(p.fit.type) && (p.islands?.length ?? 0) > 0)) ? islandsHTML(p.islands ?? []) : '';
   const scanCtl = `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}`;
+  const detected = (p?.fit.type || hoverNominal?.type || hoverType || '') as string;
+  const classHint = detected ? `<span class="cp-class" data-class="${featureClassWord(detected)}">${featureClassWord(detected)}</span>` : '';
+  const makeNom = sollUi && (p?.role === 'soll' || hoverNominal?.fit)
+    ? `<button type="button" data-a="makenom" class="primary" title="${tt('Create the nominal feature in the tree')}">${tt('Create nominal')}</button>` : '';
   const ctl = sollUi
-    ? `${type}<span class="cp-hint">${tt('CAD nominal: the recognised geometry stays highlighted. ✓ creates it. Freeform is only used when you pick that type.')}</span>`
-    : m.method === 'Klick' ? scanCtl
+    ? `${type}${detectBadge(detected)}${classHint}${makeNom}<span class="cp-hint">${tt('CAD nominal: the recognised geometry stays highlighted. Create nominal adds it to the tree. Freeform is only used when you pick that type.')}</span>`
+    : m.method === 'Klick' ? scanCtl + detectBadge(detected)
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
   const fullPars = !sollUi && !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
-  const sideCtl = `<label title="${tt('Auto: pointer on the CAD model creates a nominal (Soll), pointer on the polygon creates an actual (Ist). Override forces one of them.')}">${tt('Nominal / actual')} <select id="cp-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>Soll (${tt('from CAD')})</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>Ist (${tt('from scan')})</option></select></label>`;
+  const sideCtl = `<label title="${tt('Auto: pointer on the CAD model creates a nominal, pointer on the polygon creates a measured feature. Override forces one of them.')}">${tt('Nominal / actual')} <select id="cp-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('nominal')} (${tt('from CAD')})</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('measured')} (${tt('from scan')})</option></select></label>`;
   const scanPars = `${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
     ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
     ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     ${m.method === 'Klick' ? `<label title="${tt('Normal angle: region growing from the click stops where the surface normal bends more than this angle (edge, fillet, chamfer, adjacent face). Smaller = stops earlier; larger = grows over soft transitions.')}">${tt('Normal angle')} <input id="cp-nang" data-num="abs" value="${state.opts.maxAngleDeg}" inputmode="decimal" style="width:3.5em">°<button type="button" class="help-q" data-doc-sec="nangle" title="${tt('Normal angle – documentation')}">?</button></label>` : ''}
     <label title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation; circumscribed / inscribed = tangential.')}">${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>
   ` : ''}`;
-  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${sollUi ? tt('Nominal / actual. Scan fit parameters are not used for a CAD nominal.') : tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${sollUi ? '' : scanPars}</div></details>`;
+  const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${sollUi ? tt('Nominal / actual. Fit criterion and the normal angle are not used for a CAD nominal.') : tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${sollUi ? nominalAdvancedControls(state.opts.brush) : scanPars}</div></details>`;
+  const roleNow = detected
+    ? (p?.role ?? ((p && (p.method === 'Klick' || p.method === 'Pinsel')) ? 'ist' as const : hoverNominal?.role ?? null))
+    : (p?.role ?? null);
+  const headType = detected ? typeName(detected) : (m.method === 'Klick' ? (m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush'));
   return {
-    title: `${tt('Feature Builder')} · ${p?.role === 'soll' || (!p && hoverNominal?.role === 'soll') ? 'Soll' : p || hoverNominal?.role === 'ist' ? 'Ist' : ''} ${p ? typeName(p.fit.type as GeomType) : m.method === 'Klick' ? (hoverNominal?.type ? typeName(hoverNominal.type) : m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush')}`.replace('  ', ' '), cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Freeform is not in Auto. Pick Freeform surface to use this CAD face.') : tt('Click to highlight the recognised geometry, then ✓ creates the feature.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
+    title: `${tt('Feature Builder')} · ${[roleWord(roleNow), headType].filter(Boolean).join(' · ')}`, cls: m.method === 'Pinsel' ? 'brush' : '',
+    controls: ctl + pars, stats: (detected && !p ? detectBadge(detected) : '') + (p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Freeform is not in Auto. Pick Freeform surface to use this CAD face.') : tt('Recognised. Create nominal adds it to the tree.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : ''),
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
+        if (a === 'makenom') { void confirmNominal(); return; }
         if (a === 'pex') { paintEx = !paintEx; state.opts.multi = false; state.opts.addIsl = false; renderModeBar(); status(paintEx ? tt('Paint exclusion: paint the points to remove. They leave the selection exactly.') : ''); return; }
         if (a === 'lasso') { void lassoExclude(); return; }
         if (a === 'click' || a === 'addreg') { paintEx = false; const was = state.opts.multi; state.opts.multi = a === 'addreg'; if (m.method !== 'Klick') setMethod('Klick'); else if (was !== state.opts.multi) { renderModeBar(); renderHint(); } } else if (a === 'brush') setMethod('Pinsel'); else if (a === 'brushadd') brushAddToPreview(); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const snap = regionSnaps.pop(); if (snap) { if (regionOps.pop() === 'sub') removedSets.pop(); state.preview = snap; renderAll(); return; } const pv = state.preview!; const op = regionOps.pop() ?? 'add'; let rg = baseRegions(pv); if (op === 'sub') removedSets.pop(); else rg = rg.slice(0, -1); refitRegions(rg.length ? rg : baseRegions(pv), pv.hit).then(() => (extractActive() ? applyExtract() : undefined)).then(() => renderAll()); } }));
@@ -962,7 +986,9 @@ function ctxSpec(): CtxSpec | null {
       const na = el.querySelector<HTMLInputElement>('#cp-nang'); if (na) na.onchange = () => { const v = parseNum(na.value); if (v != null && v > 0 && v < 90) { state.opts.maxAngleDeg = v; const pv = state.preview; if (pv?.hit && pv.method === 'Klick' && !pv.regions) previewByClick(pv.hit); } };
       const br = el.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
     },
-    ok: p ? { run: commitPreview, title: tt('Create feature (Enter)') } : m.method === 'Pinsel' ? { run: brushCreate, disabled: !state.brushCount, title: tt('Create feature from the painted points (Enter)') } : null,
+    ok: p ? { run: () => { if (p.role === 'soll') void confirmNominal(); else commitPreview(); }, title: p.role === 'soll' ? tt('Create nominal') : tt('Create feature (Enter)') }
+      : (sollUi && hoverNominal?.fit) ? { run: () => void confirmNominal(), title: tt('Create nominal') }
+      : m.method === 'Pinsel' ? { run: brushCreate, disabled: !state.brushCount, title: tt('Create feature from the painted points (Enter)') } : null,
     undo: m.method === 'Pinsel' ? { run: undoBrush, disabled: !brushUndo.some((x) => x.length), title: tt('Undo brush stroke (Ctrl+Z)') } : null,
     cancel: p ? { run: discardPreview, title: tt('Discard preview (Esc)') } : { run: stopMode, title: tt('Exit mode (Esc)') },
   };
@@ -1263,6 +1289,13 @@ async function refitPreview(t: GeomType | 'auto') {
   renderAll();
 }
 
+async function confirmNominal() {
+  if (state.preview?.role !== 'soll') {
+    const h = hoverNominal;
+    if (h?.role === 'soll' && h.cadId != null && h.cadPoint) await previewFromCad({ id: h.cadId, p: h.cadPoint });
+  }
+  if (state.preview?.role === 'soll') commitPreview();
+}
 function commitNominal(p: Preview) {
   const t = p.fit.type;
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
@@ -1278,7 +1311,7 @@ function commitNominal(p: Preview) {
   renderAll();
   const row = document.querySelector<HTMLElement>(`#tree [data-fid="${node.id}"]`);
   row?.classList.add('flash'); row?.scrollIntoView({ block: 'nearest' });
-  toast(`✔ ${tt('{0} created', node.name)} (Soll · ${tt('From CAD')})`);
+  toast(`✔ ${tt('{0} created', node.name)} (${tt('nominal')} · ${tt('From CAD')})`);
 }
 async function extractActualFromNominal(f: FeatureView) {
   const fit = f.soll?.fit;
@@ -1301,8 +1334,32 @@ async function extractActualFromNominal(f: FeatureView) {
     toast(m.includes('Too few points') ? tt('Too few scan points near the nominal. Align the scan to the CAD model first (same coordinate system). This prototype does not run an alignment.') : tt('Re-extraction failed: {0}', m));
   }
 }
+function commitConstruction(p: Preview) {
+  const m = state.mode as ConMode;
+  const parents = m.refs.filter((id) => id != null).map((id) => state.features.find((f) => f.id === id)).filter((f): f is FeatureView => !!f);
+  const nominal = constructionIsNominal(parents);
+  const t = p.fit.type;
+  const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
+  const refs = m.refs.filter((x) => x != null) as number[];
+  const f: FeatureView = {
+    id: state.nextId++, name: `${typeName(t)} ${n}`, type: t, pointCount: nominal ? 0 : 0, method: 'Konstruiert',
+    color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: new Uint32Array(0), refs,
+  };
+  if (!nominal) f.measured = p.fit;
+  const node = asNode(f);
+  node.cons = { key: m.key, refs: [...refs], params: { ...m.params } };
+  if (nominal) node.soll = { source: 'constructed', fit: { ...p.fit, residuals: undefined }, method: 'Konstruiert' };
+  state.features.push(node); touchProject();
+  if (t === 'Winkel' && !nominal) addControl('Winkelwert', node.id);
+  if (!nominal && node.measured?.pattern) { addControl('Durchmesser', node.id); addControl('Teilung', node.id); }
+  state.mode = { ...m, refs: [], slot: 0 }; state.preview = null;
+  state.sel = [node.id]; state.selControl = null; state.addFeat = node.id;
+  renderAll();
+  toast(`✔ ${tt('{0} created', node.name)} (${nominal ? tt('nominal') : tt('measured')} · ${tt('constructed')})`);
+}
 function commitPreview() {
   const p = state.preview; if (!p) return;
+  if (p.method === 'Konstruiert' && state.mode?.kind === 'con') { viewer.showCursor(null, 1); commitConstruction(p); return; }
   if (p.role === 'soll') { viewer.showCursor(null, 1); commitNominal(p); return; }
   viewer.showCursor(null, 1); // seed feedback ends with the preview
   const t = p.fit.type;
@@ -1315,10 +1372,11 @@ function commitPreview() {
   if (f.fp) f.fp.crit = state.opts.crit;
   if (p.auxFill) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised };
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
-    if (p.zone && GEOM_ZONE.includes(t) && state.opts.ex.zoneSrc === 'geom') { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
-    else if (GEOM_ZONE.includes(t) && !p.aux) { f.fp!.zoneSrc = 'points'; }
+    const zChoice = zoneSrcFor(t, state.opts.ex.zoneSrc, !!p.aux);
+    if (zChoice) { f.fp!.zoneSrc = zChoice; if (zChoice === 'geom') { f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; } }
     if (GEOM_ZONE.includes(t) && !p.aux) { const seals = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: [...I.c], r: I.r })); if (seals.length) f.fp!.seals = seals; }
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
+  { const zChoice = zoneSrcFor(t, state.opts.ex.zoneSrc, !!p.aux); if (zChoice && f.fp && !f.fp.zoneSrc) f.fp.zoneSrc = zChoice; }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
     const g = viewer.model.geometry;
@@ -1456,7 +1514,9 @@ function recomputeDistances() {
   const byId = new Map(state.features.map((f) => [f.id, f]));
   const order = recomputeOrder(state.features.map((f) => ({ id: f.id, refs: hardParentsOf(f) })).filter((x) => x.refs.length));
   for (const id of order) {
-    const f = byId.get(id)!; const ps = hardParentsOf(f).map((r) => byId.get(r)?.measured);
+    const f = byId.get(id)!;
+    const nominalCon = f.soll?.source === 'constructed' && !f.measured;
+    const ps = hardParentsOf(f).map((r) => { const p = byId.get(r); return p ? parentFit(p, nominalCon) : undefined; });
     if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); if (f.derived) f.derived.error = tt('Parent feature missing'); continue; }
     if (f.derived) { const par = byId.get(f.derived.parent)!, P = featPoints(par.id), hit = deriveSrc.get(f);
       if (hit && hit.m === par.measured && hit.P === P) continue;
@@ -1464,7 +1524,11 @@ function recomputeDistances() {
       continue; }
     if (f.type === 'Abstand' && !f.cons) { f.measured = computeDistance(ps[0]!, ps[1]!); continue; }
     if (f.cons) {
-      try { const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params); f.measured = r; f.cons.error = undefined; }
+      try {
+        const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params);
+        if (nominalCon && f.soll) f.soll.fit = r; else f.measured = r;
+        f.cons.error = undefined;
+      }
       catch (e: any) { f.cons.error = tt(e.message); }
     }
   }
@@ -2166,7 +2230,10 @@ window.addEventListener('keydown', (e) => {
     else if (state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { if (state.brushCount) clearSelectionAll(); else setMethod('Klick'); }
     else stopMode();
   }
-  if (e.key === 'Enter' && state.preview) commitPreview();
+  if (e.key === 'Enter' && (state.preview || (hoverNominal?.role === 'soll' && hoverNominal.fit))) {
+    if (state.preview?.method === 'Konstruiert' || (state.preview && state.preview.role !== 'soll')) commitPreview();
+    else void confirmNominal();
+  }
   if (e.key === 'Delete') deleteSelected();
 });
 
@@ -2191,7 +2258,7 @@ for (const [id, p] of [['#tree-pane', 'tree'], ['#dialog-pane', 'dialog'], ['#ta
 
 // ------------------------------------------------------------------ Darstellung
 function refreshProps() { const el = document.getElementById('props-dlg'), b = el?.querySelector('#props-body'); if (!el || !b) return;
-  const f = state.features.find((x) => x.id === +el.dataset.fid!); if (!f?.measured) { el.remove(); return; } const h = propertiesHTML(f); if (b.innerHTML !== h) b.innerHTML = h; }
+  const f = state.features.find((x) => x.id === +el.dataset.fid!); if (!f?.measured && !f?.soll?.fit) { el.remove(); return; } const h = propertiesHTML(f); if (b.innerHTML !== h) b.innerHTML = h; }
 function renderAll() { refreshProps(); (document.getElementById('btn-props') as HTMLButtonElement | null)?.toggleAttribute('disabled', !csSelected() && (state.sel.length !== 1 || !state.features.some((x) => x.id === state.sel[0]))); (document.getElementById('btn-delete-feat') as HTMLButtonElement | null)?.toggleAttribute('disabled', !csSelected() && !state.sel.length && state.selControl == null); if (document.getElementById('cs-ind')) renderCsIndicator(); renderModeBar(); renderRibbon(); renderTree(); renderDialog(); renderTable(); renderScene(); renderHint(); renderReport(); scheduleAutosave(); }
 
 function renderRibbon() {
@@ -2270,6 +2337,7 @@ function renderTree() {
     const pin = treePins.has('data'), c = pin ? ' pin' : '';
     const n = pinBtn(node(`<span class="tw">▾</span>${ICON.data}${tt('Datenobjekte')}`, 'indent1 grp-data' + c, undefined, false, undefined, state.data ? eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderAll(); }) : undefined), 'data');
     n.title = tt('Data objects');
+    if (state.data) n.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'data', null); };
     if (state.data) {
       const mn = node(`<span class="tw"></span>${ICON.mesh}${state.data.name} <span class="sub">(${tt('polygon model')})</span>`, 'indent2 model-node' + c, () => selectModel(), state.selModel, undefined,
         eyeBtn(state.modelVisible, () => { state.modelVisible = !state.modelVisible; renderTree(); renderScene(); }));
@@ -2280,6 +2348,7 @@ function renderTree() {
     const sub = cad.faces.length ? '' : ` <span class="sub">(${tt('empty')})</span>`;
     const n = pinBtn(node(`<span class="tw">▾</span>${ICON.folder}${tt('Referenzobjekte')}${sub}`, 'indent1 grp-ref' + (treePins.has('ref') ? ' pin' : '')), 'ref');
     n.title = tt('Reference objects. CAD faces stay under the model and start collapsed.');
+    if (cad.faces.length) n.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'reference', null); };
     cadTree(node, q);
   };
   if (treePins.has('data')) dataGroup(); if (treePins.has('ref')) refGroup();
@@ -2301,12 +2370,16 @@ function renderTree() {
     fnode.ondblclick = (e) => { e.preventDefault(); openFeatureProps(f); };
     fnode.title = tt('Double-click: Properties (editable) · right-click: menu');
     attachContext(fnode, f.id);
-    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('Ist')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
-      an.title = tt('Actual geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
-      an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu(e.clientX, e.clientY, [[`ⓘ ${tt('Properties…')}`, () => showProperties(f)], [`⌖ ${tt('Center')}`, () => centerOn(f.id)]]); };
+    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('measured')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+      an.title = tt('Measured geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
+      an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'measured', f.id); };
       an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
     if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
-    if (f.soll?.fit) node(`<span class="tw"></span>${ICON.soll}${tt('Soll')} <span class="sub">${typeName(f.soll.fit.type)} · ${tt('From CAD')}</span>`, 'indent3', () => selectFeature(f.id));
+    if (f.soll?.fit) {
+      const sn = node(`<span class="tw"></span>${ICON.soll}${tt('nominal')} <span class="sub">${typeName(f.soll.fit.type)} · ${f.soll.source === 'constructed' ? tt('Construction') : tt('From CAD')}</span>`, 'indent3', () => selectFeature(f.id));
+      sn.title = tt('Nominal geometry');
+      sn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'nominal', f.id); };
+    }
   }
   if (state.curves.length) {
     const cv = state.curves.some((c) => c.visible);
@@ -2318,14 +2391,18 @@ function renderTree() {
         'indent2 curve-node' + (c.visible ? '' : ' hidden-feat'), () => { state.curveSel = state.curveSel === c.id ? null : c.id; renderTree(); renderScene(); renderDialog(); }, state.curveSel === c.id, undefined,
         eyeBtn(c.visible, () => { c.visible = !c.visible; renderTree(); renderScene(); scheduleAutosave(); }));
       cn.dataset.cid = String(c.id);
+      cn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'curve', c.id); };
     }
   }
   csTree(node);
   featHead.title = tt('Features');
   if (state.reports.length) {
     node(`<span class="tw">▾</span>${ICON.folder}${tt('Reports')} (${state.reports.length})`, 'indent1');
-    for (const r of state.reports) node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
-      () => { state.openReport = r.id; renderReport(); renderTree(); if (isPhone()) togglePanel('tree', false); }, state.openReport === r.id);
+    for (const r of state.reports) {
+      const rn = node(`<span class="tw"></span>${ICON.report}${r.name} <span class="sub">${r.created}</span>`, 'indent2 report-node',
+        () => { state.openReport = r.id; renderReport(); renderTree(); if (isPhone()) togglePanel('tree', false); }, state.openReport === r.id);
+      rn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'report', r.id); };
+    }
   }
   applyTreeGroups(t);
   // pinned groups: sticky at the top (stacked)
@@ -2373,6 +2450,7 @@ function fitRows(m: FitResult, pointCount: number, full = true): [string, string
   if (m.nurbs) { const nb = m.nurbs; rows.splice(full ? 1 : 0, 0, [tt('Std. dev. σ'), fmt(nb.std)]);
     rows.push([tt('Patch'), nb.kind === 'vierseitig' ? tt('four-sided (4 boundary curves)') : tt('trimmed (1 boundary curve)')], [tt('Control points'), `${nb.surface.nu} × ${nb.surface.nv}`], [tt('Degree'), `${nb.surface.degU} / ${nb.surface.degV}`], [tt('Smoothing λ'), String(nb.params.smooth)]); }
   if (full && m.type === 'Freiformfläche') return rows;
+  rows.push([tt('Orientation'), orientationText(m)]);
   if (full) {
     const fr = activeFrame(), C = fr ? csLocal(fr, m.center) : m.center, N = fr ? csDir(fr, m.normal) : m.normal;
     if (fr) rows.push([tt('Coordinate system'), activeCsName()]);
@@ -2441,16 +2519,23 @@ function renderDistDialog(d: HTMLElement) {
 }
 function renderFitDialog(d: HTMLElement) {
   const m = state.mode as FitMode; const p = state.preview;
-  const sollUi = p?.role === 'soll' || (!p && state.opts.side === 'soll');
+  const nominalUi = p?.role === 'soll' || hoverNominal?.role === 'soll' || state.opts.side === 'soll';
+  const sollUi = nominalUi;
   const showB = !sollUi && m.method === 'Klick' && (GEOM_ZONE.includes(p?.fit.type ?? '') || GEOM_ZONE.includes(m.type));
   if (sollUi) {
-    d.innerHTML = `<h3>${ICON[p?.fit.type ?? m.type] ?? ''} ${tt('Create feature')}: Soll</h3>
-      <p class="note">${tt('Click a CAD face to highlight the recognised geometry, then ✓ creates the nominal. Freeform is not chosen by Auto. Brush radius, fit criterion and scan parameters are not used — the CAD face is exact.')}</p>
-      <div class="row"><label>${tt('Type')}</label><select id="d-type">${typeOptions(p ? p.fit.type : m.type)}</select></div>
-      <div class="row"><label>${tt('Nominal / actual')}</label><select id="d-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>Soll</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>Ist</option></select></div>
-      ${p ? `<h4>${tt('Preview')}: ${typeName(p.fit.type)}</h4>${kv(fitRows(p.fit, 0, false))}` : `<p class="note">${tt('No nominal yet. Click the CAD model.')}</p>`}`;
+    const shown = p?.fit ?? hoverNominal?.fit ?? null;
+    const ready = !!(p?.role === 'soll' || hoverNominal?.fit);
+    d.innerHTML = `<h3>${ICON[shown?.type ?? m.type] ?? ''} ${tt('Create feature')}: ${tt('nominal')}</h3>
+      <p class="note">${tt('Click a CAD face to highlight the recognised geometry, then Create nominal adds it to the tree. Freeform is not chosen by Auto. Fit criterion and the normal angle are not used. Brush radius may stay.')}</p>
+      <div class="row"><label>${tt('Type')}</label><select id="d-type">${typeOptions(shown ? shown.type : m.type)}</select></div>
+      <div class="row"><label>${tt('Nominal / actual')}</label><select id="d-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('nominal')}</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('measured')}</option></select></div>
+      ${nominalAdvancedControls(state.opts.brush)}
+      ${shown ? `<h4>${tt('Preview')}: ${typeName(shown.type)} · ${featureClassWord(shown.type)}</h4>${detectBadge(shown.type)}${kv(fitRows(shown, 0, false))}` : `<p class="note">${tt('No nominal yet. Click the CAD model.')}</p>`}
+      ${ready ? `<div class="row"><button class="btn primary" id="d-create-nom">${tt('Create nominal')}</button></div>` : ''}`;
     d.querySelector<HTMLSelectElement>('#d-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; m.type = v; if (state.preview) refitPreview(v); else renderAll(); };
     d.querySelector<HTMLSelectElement>('#d-side')!.onchange = (e) => { state.opts.side = (e.target as HTMLSelectElement).value as SideMode; if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else renderAll(); };
+    d.querySelector('#d-create-nom')?.addEventListener('click', () => { void confirmNominal(); });
+    const br = d.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
     return;
   }
   const bRow = showB ? `<h4>${tt('Boundary from')}</h4><div class="seg" id="d-bfrom"><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}">${tt('Points')}</button></div><p class="note">${bfromTip()}</p>` : '';
@@ -2483,7 +2568,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   const dk = datumKind(f.type);
   d.innerHTML = `<h3><span style="color:${hex(f.color)}">${ico}</span> ${f.name}${f.refs?.length ? ' <span class="chain" title="' + tt('Depends on other features') + '">🔗</span>' : ''}</h3>
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
-    ${f.soll?.fit ? `<div class="note" data-soll="1"><b>Soll</b> · ${typeName(f.soll.fit.type)} · ${tt('From CAD')}${f.soll.faceId != null ? ` · ${tt('CAD face')} ${f.soll.faceId + 1}` : ''}</div>
+    ${f.soll?.fit ? `<div class="note" data-soll="1"><b>${tt('nominal')}</b> · ${typeName(f.soll.fit.type)} · ${featureClassWord(f.soll.fit.type)} · ${f.soll.source === 'constructed' ? tt('Construction') : tt('From CAD')}${f.soll.faceId != null ? ` · ${tt('CAD face')} ${f.soll.faceId + 1}` : ''}</div>
       <div class="row"><button class="btn primary" id="d-from-soll" ${state.data ? '' : 'disabled'} title="${tt('Collect scan points near this nominal and fit the actual. The scan and the CAD model must already share one coordinate system (alignment is not changed here).')}">${tt('Extract actual from nominal')}</button></div>
       ${state.data ? '' : `<p class="note">${tt('Load a polygon model in the same coordinate system as the CAD model, then extract the actual. This prototype does not run an alignment.')}</p>`}` : ''}
     <div class="row"><label>${tt('Color')}</label><input type="color" id="d-color" value="${hex(f.color)}"><span class="note">${state.colorMode === 'uniform' ? tt('(uniform color mode – see View › Options)') : ''}</span></div>
@@ -2588,7 +2673,7 @@ function filterParamsHTML(f: FeatureView) {
 }
 /** Fit – the LAST step: geometry type and fit criterion; form deviation under every criterion */
 function fitParamsHTML(f: FeatureView) {
-  if (!f.measured) return `<p class="note">${tt('No actual yet. The nominal (Soll) comes from the CAD model. Extract the actual when a scan in the same coordinate system is loaded.')}</p>`;
+  if (!f.measured) return `<p class="note">${tt('No measured geometry yet. The nominal comes from the CAD model. Extract the measured feature when a scan in the same coordinate system is loaded.')}</p>`;
   if (f.measured?.nurbs) return nurbsParamsHTML(f);
   if (f.derived) return `<div class="note">🔗 ${tt('Derived geometry has no own points: it is recomputed from the parent feature. Change extraction/filters/fit type on the parent – the change propagates here automatically.')}</div>`;
   const fp = (f.fp ??= defaultFp()); const m = f.measured!; const crit = fp.crit ?? 'lsq';
@@ -2738,7 +2823,7 @@ function labelHTML(f: FeatureView, fm: Map<number, Feature>): string {
   }).join('');
   const m = shownFit(f), extra: string[] = [];
   if (m && f.type !== 'Abstand') { if (state.annot.pts && f.measured) extra.push(`${f.pointCount} ${tt('pts')}`); if (state.annot.std) extra.push(`σ ${fmt(m.nurbs?.std ?? m.rms, 4)}`); }
-  if (!f.measured && f.soll) extra.push('Soll');
+  if (!f.measured && f.soll) extra.push(tt('nominal'));
   return `<div class="lh"><i></i>${f.name}${f.datum ? `<span class="dflag">${f.datum}</span>` : ''}</div>${extra.length ? `<div class="lx">${extra.join(' · ')}</div>` : ''}`
     + `${cs.length ? `<table><tr class="lt"><th></th><th>${tt('Act.')}</th><th>${tt('Nom./Tol')}</th><th>${tt('Dev.')}</th></tr>${rows}</table>` : ''}`;
 }
@@ -2940,6 +3025,13 @@ async function requestLoad(): Promise<boolean> {
   ]);
   return b === 'new';
 }
+function deleteDataObject() {
+  viewer.clearModel(); peReset();
+  state.data = null; state.selModel = false; meshKey = '';
+  $('#stats').textContent = '';
+  void idbDel('mesh'); void idbDel('project');
+  renderAll();
+}
 function emptyProject() {
   viewer.clearModel(); peReset(); curvesReset(); cadClear();
   clearAuxHover(); hoverNominal = null; hoverType = null; cadHighlight(-1);
@@ -2986,7 +3078,7 @@ function pointMarks(): PointMark[] {
     const ax = pv.aux.refId != null ? state.features.find((g) => g.id === pv.aux!.refId)?.indices : pv.aux.indices;
     if (ax?.length) out.push({ idx: ax, rgb: rgb(AUX_COLOR), label: tt('Auxiliary-plane points') });
   }
-  if (pv && pv.indices.length) {
+  if (pv && pv.indices.length && drawsPointHighlight(pv.fit.type, pv.role === 'soll' ? 'points' : state.opts.ex.zoneSrc)) {
     const dev = pv.dev && state.devMap ? pv.dev : undefined;
     out.push({ idx: pv.indices, rgb: rgb(PREVIEW_COLOR), label: tt('Preview points'), dev, devR: dev ? devRange(dev) : undefined });
   }
@@ -3055,20 +3147,18 @@ function renderScene() {
     else if (state.trimGeo && CURVE_TRIM_TYPES.includes(f.type) && f.indices.length >= 2 && viewer.model) {
       const seg = curveTrimFor(f); if (seg) { viewer.addTrimmed(new Float32Array(0), seg, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
-    else if (f.type === 'Kugel' && f.measured?.radius && f.fp?.zoneSrc !== 'points') { // Geometry: complete sphere
-      const s = analyticSphere(f.measured); viewer.addTrimmed(s.tri, s.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
-    }
-    else if (f.type === 'Kegel' && viewer.model && f.measured && f.fp?.zoneSrc !== 'points') { // Geometry: mesh frustum
-      const t = shellFor(f); viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
-    }
-    else if (f.fp?.zoneSrc === 'geom' && (f.type === 'Zylinder' || f.type === 'Torus')) { // cylinder: full turn over the point height; torus: full primitive
-      const t = f.type === 'Zylinder' && viewer.model ? shellFor(f) : null;
-      if (t) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+    else if (f.measured && boundaryKind(f.type, f.fp?.zoneSrc) === 'analytic' && viewer.model) {
+      const op = f.alpha;
+      if (f.type === 'Kugel' && f.measured.radius) {
+        const s = analyticSphere(f.measured); viewer.addTrimmed(s.tri, s.edges, f.color, sel, undefined, op); viewer.addPrimitiveMarkers(f.measured, f.color);
+      } else if (f.type === 'Kegel' || f.type === 'Zylinder') {
+        const t = shellFor(f); viewer.addTrimmed(t.tri, t.edges, f.color, sel, undefined, op); viewer.addPrimitiveMarkers(f.measured, f.color);
+      } else viewer.addPrimitive(f.measured, f.color, sel, op); // torus: full primitive
     }
     else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
-      const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel, shade(f.color)); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
+      const t = trimFor(f); if (t && t.tri.length) { viewer.addTrimmed(t.tri, t.edges, f.color, sel, shade(f.color), f.alpha); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel, f.alpha);
     }
-    else viewer.addPrimitive(f.measured!, f.color, sel);
+    else viewer.addPrimitive(f.measured!, f.color, sel, f.alpha);
   }
   if (p) {
     if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
@@ -3314,9 +3404,9 @@ function showMenu(x: number, y: number, items: ([string, (() => void) | null] | 
 }
 /** Properties of the ACTUAL geometry (read-only): type, method, points, RMS, form, max ±, position, direction, aux plane. */
 function propertiesHTML(f: FeatureView): string {
-  if (!f.measured && f.soll?.fit) return `<h4>${tt('Soll')}</h4>${kv([[tt('Type'), typeName(f.soll.fit.type)], [tt('Method'), methodName(f.soll.method ?? 'aus CAD')], ...fitRows(f.soll.fit, 0)])}`;
+  if (!f.measured && f.soll?.fit) return `<h4>${tt('nominal')}</h4>${kv([[tt('Type'), typeName(f.soll.fit.type)], [tt('Class'), featureClassWord(f.soll.fit.type)], [tt('Method'), methodName(f.soll.method ?? 'aus CAD')], ...fitRows(f.soll.fit, 0)])}`;
   if (!f.measured) return `<p class="note">${tt('No geometry.')}</p>`;
-  return `<h4>${tt('Actual')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
+  return `<h4>${tt('measured')}</h4>${kv([[tt('Type'), typeName(f.type)], [tt('Class'), featureClassWord(f.type)], [tt('Method'), methodName(f.method)], ...(f.cons ? conRows(f.measured!) : fitRows(f.measured!, f.pointCount))])}
     ${f.aux ? `<h4>${ICON.aux} ${tt('Auxiliary plane')}</h4>${kv([[tt('Source'), auxSourceText(f.aux)], [tt('Points'), f.aux.refId ? '—' : String(f.aux.pointCount)], [tt('RMS'), fmt(f.aux.plane.rms)], [tt('Flatness'), fmt(f.aux.plane.form)],
       [tt('Point'), f.aux.plane.center.map((v) => v.toFixed(3)).join(' ')], [tt('Normal'), f.aux.plane.normal.map((v) => v.toFixed(5)).join(' ')]])}` : ''}`;
 }
@@ -3338,20 +3428,49 @@ function showProperties(f: FeatureView) {
   bindSwipeClose(el.querySelector('.wn-box')!, close, el.querySelector('.wn-box'));
   document.body.appendChild(el);
 }
-function openContext(x: number, y: number, fid: number | null) {
-  const f = state.features.find((g) => g.id === fid);
-  const items: ([string, () => void] | null)[] = [];
-  if (f) {
-    state.sel = [f.id]; state.selModel = false; state.addFeat = f.id; renderAll();
-    items.push([`🛠 ${tt('Properties…')}`, () => openFeatureProps(f)]);
-    if (f.measured) items.push([`ⓘ ${tt('Actual – read-only info …')}`, () => showProperties(f)]);
-    items.push([`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
-    items.push([`⌖ ${tt('Center')}`, () => centerOn(fid)]);
+function toggleFeatureAlpha(f: FeatureView) {
+  f.alpha = f.alpha != null && f.alpha < 0.95 ? 1 : 0.4;
+  renderAll();
+}
+function openTreeMenu(x: number, y: number, target: TreeTarget, id: number | null) {
+  const f = target === 'feature' || target === 'measured' || target === 'nominal' ? state.features.find((g) => g.id === id) : undefined;
+  const items: ([string, (() => void) | null] | null)[] = [];
+  for (const act of treeMenuIds(target)) {
+    if (act === 'center') items.push([`⌖ ${tt('Center')}`, () => {
+      if (target === 'cad-face' && id != null) { const face = cad.faces.find((q) => q.id === id); if (face) viewer.focus(face.center, Math.max(20, Math.sqrt(face.area))); return; }
+      if (target === 'reference') { const c = cadCenter(); if (c) viewer.focus(c, Math.max(state.data?.diag ?? 80, 40) / 4); return; }
+      centerOn(target === 'data' || target === 'wcs' ? null : (f?.id ?? null));
+    }]);
+    else if (act === 'properties') items.push([`ⓘ ${tt('Properties…')}`, () => {
+      if (f) { if (target === 'feature') openFeatureProps(f); else showProperties(f); return; }
+      if (target === 'data') { selectModel(); setPaneOpen('dialog', true); togglePanel('dialog', true); return; }
+      if (target === 'reference' || target === 'cad-face') { setPaneOpen('dialog', true); togglePanel('dialog', true); renderDialog(); return; }
+      if (target === 'curve') { state.curveSel = id; setPaneOpen('dialog', true); togglePanel('dialog', true); renderAll(); return; }
+      if (target === 'report') { state.openReport = id; renderReport(); return; }
+      if (target === 'csys' || target === 'wcs') { state.csSel = id; setPaneOpen('dialog', true); togglePanel('dialog', true); renderAll(); }
+    }]);
+    else if (act === 'opacity') items.push([`◌ ${tt('Transparency')}`, () => {
+      if (f) { toggleFeatureAlpha(f); return; }
+      if (target === 'data') setViewTrans(!viewTrans.on);
+      else setCadTrans(!cadTrans.on);
+    }]);
+    else if (act === 'delete') items.push([`✕ ${tt('Delete')}`, () => {
+      if (f) { state.sel = [f.id]; state.selControl = null; deleteSelected(); return; }
+      if (target === 'data') deleteDataObject();
+      else if (target === 'reference') { cadClear(); renderAll(); }
+      else if (target === 'cad-face' && id != null) { cadDropFace(id); renderAll(); }
+      else if (target === 'curve' && id != null) curveDelete(id);
+      else if (target === 'report' && id != null) { state.reports = state.reports.filter((r) => r.id !== id); if (state.openReport === id) state.openReport = null; renderAll(); }
+      else if (target === 'csys' && id != null) csDelete(id);
+    }]);
+  }
+  if (target === 'feature' && f) {
+    items.splice(3, 0, [`🎨 ${tt('Color …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); setTimeout(() => $<HTMLInputElement>('#d-color')?.click(), 30); }]);
+    if (f.measured) items.push([`ⓘ ${tt('Measured – read-only info …')}`, () => showProperties(f)]);
     if (f.indices?.length && f.type !== 'Abstand') { const on = state.usedPts.has(f.id); items.push([`⁘ ${on ? tt('Hide used points') : tt('Show used points')}`, () => { if (on) state.usedPts.delete(f.id); else state.usedPts.add(f.id); renderAll(); }]);
-    if (auxDisplayIndices(f)?.length || f.aux) { const on = state.usedAux.has(f.id); items.push([`▱ ${on ? tt('Hide aux-plane points') : tt('Show aux-plane points')}`, () => { if (on) state.usedAux.delete(f.id); else state.usedAux.add(f.id); renderAll(); }]); } }
+      if (auxDisplayIndices(f)?.length || f.aux) { const onA = state.usedAux.has(f.id); items.push([`▱ ${onA ? tt('Hide aux-plane points') : tt('Show aux-plane points')}`, () => { if (onA) state.usedAux.delete(f.id); else state.usedAux.add(f.id); renderAll(); }]); } }
     for (const it of analyzeItems(f)) items.push(it as [string, () => void]);
-    if (!f.cons && REEX_TYPES.includes(f.type)) items.push([`🔁 ${tt('Re-extract …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); renderDialog(); setTimeout(() => { const el = document.querySelector<HTMLDetailsElement>('details.reex'); if (el) { el.open = true; el.scrollIntoView({ block: 'nearest' }); } }, 50); }]);
-    items.push(null);
+    if (!f.cons && REEX_TYPES.includes(f.type) && f.measured) items.push([`🔁 ${tt('Re-extract …')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); renderDialog(); setTimeout(() => { const el = document.querySelector<HTMLDetailsElement>('details.reex'); if (el) { el.open = true; el.scrollIntoView({ block: 'nearest' }); } }, 50); }]);
     items.push([state.hidden.has(f.id) ? `👁 ${tt('Show geometry')}` : `👁 ${tt('Hide geometry')}`, () => { state.hidden.has(f.id) ? state.hidden.delete(f.id) : state.hidden.add(f.id); renderAll(); }]);
     items.push([state.hiddenLabels.has(f.id) ? `🏷 ${tt('Show annotation')}` : `🏷 ${tt('Hide annotation')}`, () => { state.hiddenLabels.has(f.id) ? state.hiddenLabels.delete(f.id) : state.hiddenLabels.add(f.id); renderAll(); }]);
     if (datumKind(f.type)) {
@@ -3360,20 +3479,16 @@ function openContext(x: number, y: number, fid: number | null) {
       if (!f.datum) items.push([tt('Set as datum {0}', nextFreeLetter()), () => setDatum(f, nextFreeLetter())]);
       else items.push([tt('Remove datum {0}', f.datum), () => setDatum(f, null)]);
     }
-    items.push(null);
     items.push([tt('Controls (catalog)'), () => { state.ctab = 'katalog'; setPaneOpen('table', true); togglePanel('table', true); renderTable(); }]);
-    items.push([`✕ ${tt('Delete')}`, () => { state.selControl = null; deleteSelected(); }]);
-  } else {
-    selectModel();
-    items.push([`ⓘ ${tt('Properties')}`, () => { setPaneOpen('dialog', true); togglePanel('dialog', true); }]);
-    items.push([`⌖ ${tt('Center')}`, () => centerOn(null)]);
-    items.push([`◐ ${tt('Deviation to original')}`, () => analyze('mesh')]);
   }
-  ctxMenu.className = 'ctx-menu';
-  ctxMenu.innerHTML = items.map((it, i) => (it ? `<button data-i="${i}">${it[0]}</button>` : '<hr>')).join('');
-  ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => { ctxMenu.classList.add('hidden'); items[+b.dataset.i!]![1](); }));
-  const w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
-  ctxMenu.style.left = Math.min(x, innerWidth - w - 4) + 'px'; ctxMenu.style.top = Math.min(y, innerHeight - h - 4) + 'px';
+  if (target === 'data' && state.data) items.push([`◐ ${tt('Deviation to original')}`, () => analyze('mesh')]);
+  showMenu(x, y, items);
+}
+function openContext(x: number, y: number, fid: number | null) {
+  const f = state.features.find((g) => g.id === fid);
+  if (f) { state.sel = [f.id]; state.selModel = false; state.addFeat = f.id; renderAll(); openTreeMenu(x, y, 'feature', fid); return; }
+  if (state.data) { selectModel(); openTreeMenu(x, y, 'data', null); return; }
+  openTreeMenu(x, y, 'data', null);
 }
 window.addEventListener('pointerdown', (e) => { if (!ctxMenu.contains(e.target as Node)) ctxMenu.classList.add('hidden'); }, true);
 function attachContext(el: HTMLElement, fid: number | null) {
@@ -3671,7 +3786,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, previewFromCad, nominalFromCad, creationSide, nearerTarget, extractActualFromNominal, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, previewFromCad, nominalFromCad, creationSide, nearerTarget, extractActualFromNominal, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, boundaryKind, drawsPointHighlight, coneDisplayShell, cylinderDisplayShell, analyticShell, analyticSphere, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
@@ -4123,12 +4238,7 @@ function renderCurveDialog(d: HTMLElement) {
 initCad({ viewer, toast, status, renderTree, renderDialog, isPhone, togglePanel: (p, on) => togglePanel(p, on), eyeBtn, hasMesh: () => !!state.data, featureTool: () => state.mode?.kind === 'fit', cadOpacity: () => ({ on: cadTrans.on, amt: cadTrans.amt }), setCadOpacityUi: (on, amt) => setCadTrans(on, amt) });
 window.addEventListener('mw-cad-menu', (ev) => {
   const e = ev as CustomEvent<{ x: number; y: number; id: number | null }>;
-  showMenu(e.detail.x, e.detail.y, [
-    [cadTrans.on ? tt('CAD opaque') : tt('CAD transparent'), () => setCadTrans(!cadTrans.on)],
-    [tt('CAD transparency 30 %'), () => setCadTrans(true, 30)],
-    [tt('CAD transparency 60 %'), () => setCadTrans(true, 60)],
-    [tt('CAD transparency 90 %'), () => setCadTrans(true, 90)],
-  ]);
+  openTreeMenu(e.detail.x, e.detail.y, e.detail.id == null ? 'reference' : 'cad-face', e.detail.id);
 });
 
 
@@ -4403,7 +4513,7 @@ Object.assign((window as any).__app, { setWcsVisible, centerOnWcs, csNew, csActi
 // Method "Construction": the feature is computed from parent features (see core/construct.ts) and recomputed when a
 // parent changes (recomputeDistances handles all derived features in dependency order). Chain icon 🔗 in the tree.
 function startConstruct(out: GeomType, key?: string) {
-  if (!state.data) { toast(tt('Import a model and create features first.')); return; }
+  if (!state.data && !state.features.some((f) => f.measured || f.soll?.fit)) { toast(tt('Import a model and create features first.')); return; }
   const list = constructionsFor(out); if (!list.length) { toast(tt('{0} cannot be constructed.', typeName(out))); return; }
   pe.tool = null; state.csEdit = null;
   const c = (key ? conByKey(key) : null) ?? (state.mode?.kind === 'con' && state.mode.out === out ? conByKey(state.mode.key)! : list[0]);
@@ -4433,10 +4543,12 @@ function conPick(id: number) {
 let conError = '';
 function updateConPreview() {
   const m = state.mode as ConMode; conError = '';
-  const ps = m.refs.filter((x) => x != null).map((id) => state.features.find((f) => f.id === id)?.measured).filter(Boolean) as FitResult[];
+  const parents = m.refs.filter((x) => x != null).map((id) => state.features.find((f) => f.id === id)).filter((f): f is FeatureView => !!f);
+  const nominal = constructionIsNominal(parents);
+  const ps = parents.map((f) => parentFit(f, nominal)).filter((x): x is FitResult => !!x);
   const c = conByKey(m.key)!, need = c.slots.length + (c.multi?.min ?? 0);
-  if (ps.length < need) { state.preview = null; return; }
-  try { state.preview = { fit: runConstruction(m.key, ps, m.params), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: m.refs.filter((x) => x != null) as number[] }; }
+  if (ps.length < need || ps.length < parents.length) { state.preview = null; return; }
+  try { state.preview = { fit: runConstruction(m.key, ps, m.params), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: m.refs.filter((x) => x != null) as number[], role: nominal ? 'soll' : undefined }; }
   catch (e: any) { state.preview = null; conError = tt(e.message); }
 }
 function conStats(fit: FitResult): string {
@@ -4572,7 +4684,7 @@ function provenanceHTML(f: FeatureView): string {
   else if (p.kind === 'derived') { const d = DERIVES.find((x) => x.key === p.key); rows.push([tt('Method'), `🔗 ${tt('Derived from Analyze')}`], [tt('Derivation'), d ? tt(d.label) : p.key], [tt('Parent'), nameOf(p.parents[0])]);
     if (p.error) rows.push([tt('Error'), `⚠ ${p.error}`]); rows.push([tt('Update'), tt('recomputed automatically when the parent changes')]); }
   else if (p.kind === 'anchor') { rows.push([tt('Method'), tt('Anchor')]); p.pts.forEach((q, i) => rows.push([`P${i + 1}`, q.map((v) => fmt(v, 3)).join(' ')])); }
-  else if (p.kind === 'cad') { rows.push([tt('Method'), tt('From CAD')], [tt('Nominal'), 'Soll']); if (f.soll?.faceId != null) rows.push([tt('CAD face'), String(f.soll.faceId + 1)]); }
+  else if (p.kind === 'cad') { rows.push([tt('Method'), tt('From CAD')], [tt('Nominal'), tt('nominal')]); if (f.soll?.faceId != null) rows.push([tt('CAD face'), String(f.soll.faceId + 1)]); }
   else return '';
   if (f.reex) { const r = normReex(f.reex); rows.push([tt('Then: re-extraction'), tt('search distance ±{0} mm · lateral {1} mm · outliers > {2} × RMS · {3}°{4} → {5} pts ({6} before, {7} removed)', r.maxDist, fmt(lateralOf(r), 2) + (r.margin == null ? ' (' + tt('auto') + ')' : ''), r.sigma > 0 ? r.sigma : tt('off'), r.maxAngleDeg, r.fill ? ' · ' + tt('all inside boundary') : '', f.reex.points, f.reex.before, f.reex.removed)]); }
   return `<h4>${tt('Provenance')}</h4>${kv(rows)}`;
@@ -4583,7 +4695,7 @@ function conDefinitionHTML(f: FeatureView): string {
   const c = conByKey(f.cons.key);
   const refs = f.cons.refs, n = refs.length, min = c ? (c.multi ? c.slots.length + c.multi.min : c.slots.length) : n;
   const blocked = c ? dependentsOf(state.features, [f.id]) : new Set<number>();
-  const optsFor = (i: number) => { const s = c ? slotFor(c, i) : null; return state.features.filter((g) => g.id !== f.id && !blocked.has(g.id) && g.measured && (!s || accepts(s, g.type))); };
+  const optsFor = (i: number) => { const s = c ? slotFor(c, i) : null; return state.features.filter((g) => g.id !== f.id && !blocked.has(g.id) && !!(g.measured || g.soll?.fit) && (!s || accepts(s, g.type))); };
   const rows = refs.map((r, i) => { const s = c ? slotFor(c, i) : null;
     return `<div class="row con-in"><label>${s ? tt(s.label) : '#' + (i + 1)}</label><select data-cin="${i}">${optsFor(i).map((g) => `<option value="${g.id}" ${g.id === r ? 'selected' : ''}>${g.name}</option>`).join('')}</select>
       <button type="button" class="btn" data-cmv="${i}" ${i ? '' : 'disabled'} title="${tt('Swap with the input above')}">↑</button>${c?.multi && n > min ? `<button type="button" class="btn" data-crm="${i}" title="${tt('Remove this input')}">✕</button>` : ''}</div>`; }).join('');

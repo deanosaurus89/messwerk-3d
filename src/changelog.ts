@@ -7,6 +7,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.46', date: '2026-10-28', items: [
+    'Feature Builder, the tree and dialogs label the two components measured and nominal.',
+    'Smart Detect shows the recognised type again (plane, circle, cylinder, cone, sphere, torus, freeform, slot, line), including on hover before the click.',
+    'Boundary from Geometry for cone, cylinder, sphere and torus draws the fitted surface. Cone uses the full mesh frustum. Cylinder uses a full turn over the height of the points when the wall is closed, and an arc when the wall is open. Points still draws the clicked triangles. Dismissed islands still close openings in the point boundary.',
+    'Every tree object can be deleted from the right-click menu, including the data object and reference objects. Center, Properties and transparency are on data, reference and features.',
+    'CAD nominal: recognition can be confirmed with Create nominal (and ✓). The feature is added to the tree with its orientation stored. Fit criterion and the normal angle are not on this path; brush radius stays. Surface and curve features both confirm. Intersecting two nominal planes creates a nominal line that depends on them.',
+  ] },
   { version: '2026.0.45', date: '2026-10-28', items: [
     'New project clears the whole scene: features, annotations, CAD reference, data object and overlays. A label left on screen after Neues Projekt (seen on iOS) is removed with the rest.',
     'CAD opacity is separate from the data object and starts opaque. The gear above the view cube has a Data object control and a CAD control; the same split is in the View ribbon, the CAD context menu and the dialog (Options, polygon model, CAD).',

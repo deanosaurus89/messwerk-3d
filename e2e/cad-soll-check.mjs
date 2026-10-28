@@ -74,9 +74,9 @@ try {
     await app.previewByClick(h);
     const badge = document.querySelector('#ctx-panel [data-side]');
     const f = app.state.preview;
-    return { side: badge?.dataset.side ?? badge?.textContent ?? '', type: f?.fit?.type, role: f?.role ?? 'ist' };
+    return { side: badge?.dataset.side ?? '', label: badge?.dataset.label ?? badge?.textContent ?? '', type: f?.fit?.type, role: f?.role ?? 'ist' };
   });
-  ok(labelled.role === 'ist' && labelled.side === 'ist' && labelled.type, 'mesh preview is labelled Ist (' + JSON.stringify(labelled) + ')');
+  ok(labelled.role === 'ist' && labelled.side === 'ist' && labelled.label === 'measured' && labelled.type, 'mesh preview is labelled measured (' + JSON.stringify(labelled) + ')');
   ok(!errs.length, 'no page errors ' + errs.join(' | '));
 } finally {
   await b.close();
