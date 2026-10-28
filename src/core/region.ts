@@ -372,6 +372,11 @@ export class MeshTopology {
           const nm = nm0 && (!GUARD || this.consistent(nm0, seedModel!, seed, resid, angQ, tol0)) ? nm0 : null; if (nm0 && !nm) info.rejectedRefits = (info.rejectedRefits ?? 0) + 1; if (nm) { model = nm; info.refits++; const s2 = resid(nm, out);
             if (TIGHT) { // 0.38.1: Toleranzen aus der gewachsenen Region robust neu schätzen (Median statt 90 %) – nie weiter als die Saat
               tol = Math.min(tol0, Math.max(TFLOOR * h, 3 * s2)); angTol = Math.min(angTol0, Math.max((3 * Math.PI) / 180, TK * angRob(nm, out)));
+            } else if (nm.type === 'Zylinder' || nm.type === 'Kegel') {
+              // Form error along a cylinder or cone is larger than the seed noise. Follow it, but stay well short of a neighbouring face.
+              // The normal-angle test still stops at an edge. The seed-consistency check above rejects a refit that leaves the clicked surface.
+              const rad = Math.max(nm.radius ?? 0, 1), cap = Math.max(2 * tol0, Math.min(0.35, 0.025 * rad));
+              tol = Math.min(cap, Math.max(tol0, 3 * s2));
             } else tol = Math.min(2 * tol0, Math.max(tol0, 3 * s2)); }
           next = out.length * 1.6;
           // abgelehnte Nachbarn mit neuem Modell erneut prüfen

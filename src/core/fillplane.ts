@@ -37,10 +37,10 @@ export interface FillParams {
    *  zone). Supersedes `islands`. Choices are matched to islands by centre (≤ max(1 mm, ½ island radius)). */
   isl?: IslandChoice[];
 }
-export interface IslandChoice { c: number[]; inc?: boolean; m?: number }
+export interface IslandChoice { c: number[]; inc?: boolean; m?: number; /** user dismissed this island: bore/bump leaves the feature and its contour is closed */ drop?: boolean }
 export interface Island { id: number; kind: 'hole' | 'bump' | 'raised'; /** hole with a raised rim/spatter around it */ rim?: boolean;
   c: number[]; /** equivalent radius (mm) */ r: number; area: number; /** max height above the plane (mm) */ h: number; /** mesh points in it */ n: number;
-  inc: boolean; m: number; loops: number[][][] }
+  inc: boolean; m: number; /** dismissed: contour of a bore is closed, chip stays struck through */ drop?: boolean; loops: number[][][] }
 export const FILL_DEFAULT: FillParams = { band: 2, maxWallDeg: 75, closeMm: 2, excludeRaised: false, islands: true, inset: 0 };
 export interface FillResult { indices: Uint32Array; added: number; cell: number; insideCells: number;
   /** points belonging to raised features (in the result unless excludeRaised, else the excluded ones) */
@@ -196,8 +196,9 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
       const kind: Island['kind'] = nv >= 2 ? 'hole' : nr > 0 && hmx > 0.5 ? 'raised' : 'bump'; // a void (bore, countersink) is a hole even when its wall is steep; a flat swell of a few 0.1 mm is a bump
       let ch: IslandChoice | undefined, bd = Math.max(1, 0.5 * r);
       for (const o of choices) { const d = Math.hypot(o.c[0] - cc[0], o.c[1] - cc[1], o.c[2] - cc[2]); if (d < bd) { bd = d; ch = o; } }
-      const rim = kind === 'hole' && (nb >= 3 || nr > 0), inc = !!ch?.inc, m = ch?.m ?? 0;
-      if (inc && kind === 'hole') for (const k of cells) if (inside[k]) closeH[k] = 1;
+      const rim = kind === 'hole' && (nb >= 3 || nr > 0), drop = !!ch?.drop, inc = !!ch?.inc && !drop, m = ch?.m ?? 0;
+      // A dismissed bore is closed in the contour (no blue hole loop) and stays out of the point set.
+      if ((inc || drop) && kind === 'hole') for (const k of cells) if (inside[k]) closeH[k] = 1;
       // excluded zone = component refined by the margin (dilate / erode inside its bounding box)
       let i0 = W, i1 = 0, j0 = H, j1 = 0; for (const k of cells) { const i = k % W, j = (k - i) / W; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
       const rr = Math.round(Math.abs(m) / h), pad = rr + 2, bi = Math.max(0, i0 - pad), bj = Math.max(0, j0 - pad), bw = Math.min(W - 1, i1 + pad) - bi + 1, bh = Math.min(H - 1, j1 + pad) - bj + 1;
@@ -207,7 +208,7 @@ export function fillOuterBoundary(pos: ArrayLike<number>, nrm: ArrayLike<number>
       else if (m < 0 && rr > 0) { const inv = new Uint8Array(bw * bh); for (let k = 0; k < bw * bh; k++) inv[k] = sub[k] ? 0 : 1; const e = dilateBox(inv, bw, bh, rr); zone = new Uint8Array(bw * bh); for (let k = 0; k < bw * bh; k++) zone[k] = sub[k] && !e[k] ? 1 : 0; }
       if (!inc) for (let jj = 0; jj < bh; jj++) for (let ii = 0; ii < bw; ii++) if (zone[jj * bw + ii]) { const k = (jj + bj) * W + ii + bi; if (inside[k] && !island[k]) { island[k] = 1; islandCells++; } }
       const loops = maskLoops(zone, bw, bh).map((L) => L.map(([gi, gj]) => lift3((gi + bi - M) * h + x0, (gj + bj - M) * h + y0)));
-      islands.push({ id: islands.length + 1, kind, rim: rim || undefined, c: cc, r, area, h: hmx, n: npt, inc, m, loops });
+      islands.push({ id: islands.length + 1, kind, rim: rim || undefined, c: cc, r, area, h: hmx, n: npt, inc, m, drop: drop || undefined, loops });
     }
   }
   // boundary exclusion distance: inset from the outer contour, openings and (islands excluded) island edges

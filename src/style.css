@@ -224,6 +224,12 @@ body.thumb #btn-center, body.thumb #navcube, body.thumb #labels, body.thumb #hin
 .tc-list button.cur { background:#e6eef8; font-weight:700; } .tc-list button.done::after { content:' ✔'; color:var(--io); }
 .row.chk label{width:auto;flex:1;display:flex;gap:6px;align-items:center;max-width:none}
 #dev-legend{position:absolute;right:10px;top:44px;background:rgba(255,255,255,.92);border:1px solid #ccd;border-radius:6px;padding:5px 8px;font-size:11px;z-index:6;width:220px;pointer-events:none}
+#pt-legend{position:absolute;left:10px;top:10px;z-index:7;background:rgba(255,255,255,.94);border:1px solid #c5d0dc;border-radius:8px;padding:6px 8px;font-size:12px;max-width:260px;pointer-events:auto;box-shadow:0 1px 4px #0002}
+#pt-legend .pt-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#pt-legend button{width:auto;min-width:28px;padding:2px 8px;font-size:14px;background:#eceff1;color:#1b2633;border:1px solid #c5d3e3;border-radius:6px;cursor:pointer}
+#pt-legend .pt-row{display:flex;align-items:center;gap:6px;margin:3px 0}
+#pt-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+#pt-legend .pt-exit{color:#5b6b7c;font-size:11px;margin-top:2px}
 #dev-legend .bar{height:10px;margin:4px 0 2px;border-radius:3px;background:linear-gradient(90deg,#00f,#0bf 25%,#0c0 50%,#fc0 75%,#f00)}
 #dev-legend .ticks{display:flex;justify-content:space-between}
 @media (max-width:700px){#dev-legend{top:auto;bottom:8px;right:auto;left:50%;transform:translateX(-50%);width:150px}}
@@ -320,6 +326,9 @@ body.ctx-on #progress { bottom:80px; }
 #confirm-dlg h3 { margin:0 0 6px; font-size:15px; }
 #ctx-panel .cp-bfrom { margin-left:4px; }
 #ctx-panel .isl-x { margin-left:4px; font-weight:700; }
+#ctx-panel .isl-chip.drop { text-decoration:line-through; opacity:.55; }
+#ctx-panel .isl-note { display:block; width:100%; color:#5b6b7c; font-size:11px; }
+#ctx-panel button:disabled, #ctx-panel input:disabled { opacity:.45; cursor:default; }
 #ctx-panel .cp-excl { display:flex; flex-wrap:wrap; gap:4px; align-items:center; width:100%; }
 .dlg-empty { color:#5b6b7c; padding:24px 10px; text-align:center; font-style:italic; }
 .wip-note { align-self:center; margin:0 10px; padding:4px 8px; background:#fff4d6; border:1px solid #e0b43c; border-radius:4px; color:#7a5200; font-weight:600; font-size:12px; white-space:nowrap; }
