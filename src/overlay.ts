@@ -2,6 +2,7 @@
 // mit automatischer Platzierung, Führungslinie und Verschieben per Ziehen (Position als 3D-Versatz gespeichert).
 import * as THREE from 'three';
 import type { Viewer } from './viewer';
+import { placeLabels, type LabelLayoutMode } from './ui/labellayout';
 
 type V3 = [number, number, number];
 
@@ -136,7 +137,10 @@ export class Labels {
   onUnpin: (id: number) => void = () => {};
   /** tooltip of the lock icon (i18n from the app) */
   pinTitle = 'Pinned (dragged) – click to unpin: automatic placement again';
+  /** auto = short leaders; spread = fit more labels; grid = screen raster. Pinned labels are never moved. */
+  layoutMode: LabelLayoutMode = 'auto';
   private lastKey = '';
+  setLayout(mode: LabelLayoutMode) { if (this.layoutMode === mode) return; this.layoutMode = mode; this.lastKey = ''; this.update(); }
   private dragging: { id: number; dx: number; dy: number; moved: boolean; x0: number; y0: number } | null = null;
   constructor(private v: Viewer) {
     this.root = document.createElement('div'); this.root.id = 'labels';
@@ -198,40 +202,28 @@ export class Labels {
   /** Pro Frame: bei Kamera-/Größenänderung neu projizieren und platzieren. */
   update() {
     const cam = this.v.camera, W = this.v.el.clientWidth, H = this.v.el.clientHeight;
-    const key = cam.matrixWorld.elements.map((x) => x.toFixed(5)).join() + cam.projectionMatrix.elements[0].toFixed(5) + W + 'x' + H;
+    const key = cam.matrixWorld.elements.map((x) => x.toFixed(5)).join() + cam.projectionMatrix.elements[0].toFixed(5) + W + 'x' + H + '|' + this.layoutMode;
     if (key === this.lastKey) return; this.lastKey = key;
-    const placed: { x: number; y: number; w: number; h: number }[] = [];
     const anchors = [...this.items.values()].map((it) => ({ it, s: this.toScreen(new THREE.Vector3(...it.spec.anchor)) }));
-    for (const o of anchors) placed.push({ x: o.s.x - 6, y: o.s.y - 6, w: 12, h: 12 });
-    const overlap = (a: { x: number; y: number; w: number; h: number }, b: typeof a) =>
-      Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    const visible = anchors.filter((o) => o.s.ok);
+    const pinScreen = (it: LabelEl) => {
+      const a = new THREE.Vector3(...it.spec.anchor).add(new THREE.Vector3(...(it.spec.offset ?? [0, 0, 0])));
+      return this.toScreen(a);
+    };
+    const laid = placeLabels(visible.map(({ it, s }) => {
+      const pin = it.spec.offset ? pinScreen(it) : null;
+      return { id: it.spec.id, ax: s.x, ay: s.y, w: it.w, h: it.h, pinned: !!it.spec.offset, px: pin?.x ?? s.x, py: pin?.y ?? s.y, choice: it.choice };
+    }), W, H, this.layoutMode);
+    const byId = new Map(laid.map((p) => [p.id, p]));
     let lines = '';
-    // gezogene (feste) Labels zuerst, dann automatische
-    anchors.sort((a, b) => Number(!!b.it.spec.offset) - Number(!!a.it.spec.offset));
     for (const { it, s } of anchors) {
       if (!s.ok) { it.el.style.display = 'none'; continue; }
       it.el.style.display = '';
       const w = it.w, h = it.h;
-      let cx: number, cy: number;
-      if (it.spec.offset) {
-        const a = new THREE.Vector3(...it.spec.anchor).add(new THREE.Vector3(...it.spec.offset));
-        const p = this.toScreen(a); cx = p.x; cy = p.y;
-      } else {
-        let best = Infinity, bi = 0, bx = 0, by = 0;
-        for (let k = 0; k < 16; k++) {
-          const ang = (-Math.PI / 4) + (k % 8) * (Math.PI / 4), dist = k < 8 ? 46 : 96;
-          const dx = Math.cos(ang), dy = Math.sin(ang);
-          const x = s.x + dx * (dist + w / 2), y = s.y + dy * (dist + h / 2);
-          const r = { x: x - w / 2, y: y - h / 2, w, h };
-          let sc = 0; for (const p of placed) sc += overlap(r, p);
-          const out = Math.max(0, -r.x) + Math.max(0, r.x + w - W) + Math.max(0, -r.y) + Math.max(0, r.y + h - H);
-          sc += out * 400 + (k >= 8 ? 50 : 0) + k + (k === it.choice ? -30 : 0);
-          if (sc < best) { best = sc; bi = k; bx = x; by = y; }
-        }
-        it.choice = bi; cx = bx; cy = by;
-      }
+      const p = byId.get(it.spec.id)!;
+      it.choice = p.choice;
+      const cx = p.cx, cy = p.cy;
       it.cx = cx; it.cy = cy;
-      placed.push({ x: cx - w / 2, y: cy - h / 2, w, h });
       it.el.style.transform = `translate(${Math.round(cx - w / 2)}px, ${Math.round(cy - h / 2)}px)`;
       // Führungslinie zum nächsten Randpunkt des Labels
       const ex = Math.min(Math.max(s.x, cx - w / 2), cx + w / 2), ey = Math.min(Math.max(s.y, cy - h / 2), cy + h / 2);

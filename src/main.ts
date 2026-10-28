@@ -1,4 +1,5 @@
-import { registerPickTool, installPickMode } from './ui/pickmode';
+import { registerPickTool, installPickMode, pickModeActive } from './ui/pickmode';
+import { pickGesture } from './ui/pointertap';
 import { gunzipSync } from 'fflate';
 // MessWerk 3D – Benutzeroberfläche (Ribbon oben, Baumansicht links, 3D-Szene Mitte,
 // Dialogbereich rechts, Prüfmerkmal-Liste unten; auf Telefonen als Overlays).
@@ -212,8 +213,8 @@ const state = {
   hiddenLabels: new Set<number>(),
   /** model node selected in tree / 3D (dialog shows the polygon model) */
   selModel: false,
-  /** annotation contents (optional rows) */
-  annot: { pts: false, std: false },
+  /** annotation contents (optional rows) and screen layout (auto / spread / grid). A dragged label stays pinned in every layout. */
+  annot: { pts: false, std: false, layout: 'auto' as 'auto' | 'spread' | 'grid' },
   /** feature colors: sequential palette or one uniform color */
   colorMode: 'sequential' as 'sequential' | 'uniform', uniformColor: 0x1f77b4,
   /** filter of the All Controls list */
@@ -530,7 +531,7 @@ async function loadBuffer(name: string, buf: ArrayBuffer, askUnit = false, scale
 }
 
 // ------------------------------------------------------------------ 3D-Interaktion
-let down: { x: number; y: number; t: number } | null = null;
+let down: { x: number; y: number; t: number; id: number; type: string; multi: boolean; cam: { pos: [number, number, number]; tgt: [number, number, number] } | null } | null = null;
 let painting = false;
 /** Desktop navigation pause (Space): all interaction tools are suspended, the mouse only rotates/pans/zooms; Space
  *  again resumes exactly the same tool state (mode, panel, selection are not touched). */
@@ -554,9 +555,14 @@ window.addEventListener('keydown', (e) => {
 }, true);
 window.addEventListener('keyup', (e) => { if ((e.code === 'Space' || e.key === ' ') && !isTyping(e.target) && !isPhone()) e.preventDefault(); }, true);
 canvas.addEventListener('pointerdown', (e) => {
+  if ((e as PointerEvent & { __mwSynth?: boolean }).__mwSynth) return;
   if (navPaused) { down = null; return; }
   document.body.classList.remove('show-tree', 'show-dialog');
-  down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (down && e.pointerId !== down.id) { down.multi = true; return; }
+  const cam = e.pointerType !== 'mouse' && pickModeActive()
+    ? { pos: viewer.camera.position.toArray() as [number, number, number], tgt: viewer.controls.target.toArray() as [number, number, number] }
+    : null;
+  down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, type: e.pointerType, multi: false, cam };
   if (e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0) && curveDragStart(e.clientX, e.clientY)) return;
   if (pe.tool === 'erase' && e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
     const h = viewer.pick(e.clientX, e.clientY);
@@ -608,6 +614,7 @@ canvas.addEventListener('pointerup', () => { lastCanvasPointer = performance.now
 canvas.addEventListener('pointerup', (e) => { if (navPaused) { rdown = null; return; } if (e.button !== 2 || !rdown) return; const d = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y); rdown = null;
   if (d > 6) return; if (pe.tool === 'curve' && curveDraft.length > 1) { curveFinish(); return; } window.dispatchEvent(new CustomEvent('mw-rclick')); });
 canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.opts.addIsl) { state.opts.addIsl = false; status(tt('Add island area finished.')); renderModeBar(); } });
+canvas.addEventListener('pointercancel', (e) => { if (down?.id === e.pointerId) down = null; });
 canvas.addEventListener('pointerleave', (e) => { if ((e.pointerType !== 'mouse' || state.preview) && state.mode?.kind === 'fit' && state.mode.method === 'Klick') return; // keep the seed feedback of the tap/click (touch; busy overlay over the canvas)
   if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
@@ -657,8 +664,8 @@ function edgeTol(): number {
   const r = viewer.radius || cad.faces.reduce((s, f) => Math.max(s, Math.sqrt(f.area)), 0);
   return Math.min(8, Math.max(2, r * 0.015 || 2));
 }
-function creationAim(x: number, y: number) {
-  const c = cad.faces.length ? cadPickHit(x, y) : null;
+function creationAim(x: number, y: number, soften = false) {
+  const c = cad.faces.length ? cadPickHit(x, y, soften) : null;
   const mesh = viewer.pick(x, y);
   const which = nearerTarget(c ? c.dist : null, mesh?.dist ?? null);
   const side = creationSide({ cad: !!c, mesh: !!mesh, cadCloser: which === 'cad' }, state.opts.side);
@@ -688,16 +695,16 @@ function freeformNominal(positions: ArrayLike<number>, normals: ArrayLike<number
 }
 async function previewFromCad(c: { id: number; p: V3 }) {
   const face = cad.faces[c.id]; const geom = face?.geom;
-  if (!geom) { status(tt('This CAD face has no analytic geometry.')); return; }
+  cadHighlight(c.id);
+  if (!geom) { status(tt('This CAD face has no analytic geometry.')); renderAll(); return; }
   const want = (state.mode as FitMode).type;
   let nom = nominalFromCad(geom, c.p, want, edgeTol());
-  if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); return; }
+  if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
   if (nom.freeform) {
     try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; }
     catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; }
   }
   const tess = face.res?.tess ?? face.tess;
-  cadHighlight(c.id);
   state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: c.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
     aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
@@ -734,33 +741,52 @@ function scheduleAuxHover(h: Hit | null) {
   }, 220);
 }
 window.addEventListener('pointerup', async (e) => {
+  if ((e as PointerEvent & { __mwSynth?: boolean }).__mwSynth) return;
   if (navPaused) { down = null; return; }
   if ((e as any).cadHandled) { down = null; return; }
   if (painting && paintEx) { painting = false; viewer.controls.enabled = true; down = null; await commitPaintEx(); return; }
   if (painting) { painting = false; viewer.controls.enabled = true; down = null; scheduleBrushFit(); return; }
   if (cv.drag) { const d0 = down; down = null; const tap = d0 && Math.hypot(e.clientX - d0.x, e.clientY - d0.y) < 8; if (tap) cv.drag.moved = false; await curveDragEnd(); if (!tap) return; await curveClick(e.clientX, e.clientY); return; }
-  if (!down || e.target !== canvas) { down = null; return; }
+  if (!down) return;
+  const touch = down.type !== 'mouse';
+  const onCanvas = e.target === canvas;
+  // Touch pointerup is retargeted once orbit (or iOS) releases capture. The gesture still started on the canvas.
+  if (!onCanvas && !(touch && e.pointerId === down.id)) { down = null; return; }
+  if (!touch && e.button !== 0) { down = null; return; }
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
+  const multi = down.multi, ptype = down.type, ox = down.x, oy = down.y, cam = down.cam;
   down = null;
-  if (moved > 8 || dt > 700) return;
-  if (!state.mode && await curveClick(e.clientX, e.clientY)) return;
-  const aim = state.mode?.kind === 'fit' && state.mode.method === 'Klick' ? creationAim(e.clientX, e.clientY) : null;
-  const picked = aim?.mesh ?? viewer.pick(e.clientX, e.clientY);
-  // Forced Soll never falls through to a scan fit, even when the mesh is also under the pointer.
-  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && state.opts.side === 'soll') {
-    clearAuxHover(); hoverNominal = null;
-    if (aim?.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.'));
-    return;
+  const gesture = pickGesture({ pointerType: ptype, moved, dt, multi, dragged: false, wide: touch && !!cam });
+  if (gesture !== 'pick') return;
+  if (cam) {
+    viewer.camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+    viewer.controls.target.set(cam.tgt[0], cam.tgt[1], cam.tgt[2]);
+    viewer.controls.update();
+    viewer.camera.updateMatrixWorld();
   }
+  const x = touch ? ox : e.clientX, y = touch ? oy : e.clientY;
+  if (!state.mode && await curveClick(x, y)) return;
+  const aim = state.mode?.kind === 'fit' && state.mode.method === 'Klick' ? creationAim(x, y, touch) : null;
+  const picked = aim?.mesh ?? viewer.pick(x, y);
+  const takeNominal = async () => {
+    clearAuxHover(); hoverNominal = null;
+    if (!aim?.cad) { status(tt('No CAD face under the pointer.')); return; }
+    const h: Hit = { tri: -1, point: aim.cad.p, normal: aim.cad.normal, dist: aim.cad.dist };
+    lastHit = h;
+    await previewFromCad(aim.cad);
+    viewer.showCursor(h, Math.max(pickR(), 1), false);
+  };
+  // Forced Soll never falls through to a scan fit, even when the mesh is also under the pointer.
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && state.opts.side === 'soll') { await takeNominal(); return; }
   if (!picked) {
     const fitClick = state.mode?.kind === 'fit' && state.mode.method === 'Klick';
-    if (fitClick && (aim?.side === 'soll' || state.opts.side === 'soll')) { clearAuxHover(); hoverNominal = null; if (aim?.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.')); }
+    if (fitClick && (aim?.side === 'soll' || state.opts.side === 'soll')) await takeNominal();
     else if (fitClick) status(tt('No polygon under the pointer for an actual.'));
     else if (!state.mode && !pe.tool) clearSelection();
     return;
   }
   const h = picked;
-  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && aim?.side === 'soll') { clearAuxHover(); hoverNominal = null; if (aim.cad) await previewFromCad(aim.cad); else status(tt('No CAD face under the pointer.')); return; }
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && aim?.side === 'soll') { await takeNominal(); return; }
   if (pe.tool === 'curve') curveAddPoint(h);
   else if (state.mode?.kind === 'fit' && state.mode.method === 'Klick' && auxPickArm) { const F = viewer.model!.geometry.index?.array, vs = F ? [F[3 * h.tri], F[3 * h.tri + 1], F[3 * h.tri + 2]] : [3 * h.tri];
     const pl = state.features.find((f) => f.type === 'Ebene' && f.measured && vs.some((v) => f.indices.includes(v)));
@@ -2286,6 +2312,8 @@ function renderRibbon() {
 }
 
 function renderHint() {
+  const m0 = state.mode;
+  if (m0?.kind === 'fit' && m0.method === 'Klick' && state.opts.side === 'soll' && !state.preview) return hint(tt('Nominal: tap the CAD model. The recognised face or edge lights up, then ✓ creates it.'));
   if (!state.data) return hint('');
   if (state.csEdit) return hint(state.csEdit.field ? tt('Coordinate system: pick the feature for “{0}” in the 3D view or the tree.', csFieldName(state.csEdit.field)) : tt('Coordinate system: check the triad, then ✓ create or ✕ cancel.'));
   const m = state.mode;
@@ -3276,12 +3304,24 @@ function syncViewToggles() {
   for (const el of document.querySelectorAll('[data-vt="labels"]')) el.classList.toggle('on', state.showLabels);
   for (const el of document.querySelectorAll('[data-vt="apts"]')) el.classList.toggle('on', state.annot.pts);
   for (const el of document.querySelectorAll('[data-vt="astd"]')) el.classList.toggle('on', state.annot.std);
+  for (const el of document.querySelectorAll('[data-vt="aspread"]')) el.classList.toggle('on', state.annot.layout === 'spread');
+  for (const el of document.querySelectorAll('[data-vt="agrid"]')) el.classList.toggle('on', state.annot.layout === 'grid');
 }
 /** View ▸ Annotations: annotation content toggles (same preference as Options ▸ Annotation, persistent) */
 function setAnnot(k: 'pts' | 'std', on: boolean) { state.annot[k] = on; saveViewPrefs(); syncViewToggles(); renderAll();
   const o = document.getElementById(k === 'pts' ? 'od-pts' : 'od-std') as HTMLInputElement | null; if (o) o.checked = on; }
+function setAnnotLayout(mode: 'auto' | 'spread' | 'grid') {
+  state.annot.layout = state.annot.layout === mode ? 'auto' : mode;
+  viewer.labels.setLayout(state.annot.layout);
+  saveViewPrefs(); syncViewToggles();
+  status(state.annot.layout === 'spread' ? tt('Annotations spread so more of them fit. A label you dragged stays where you put it.')
+    : state.annot.layout === 'grid' ? tt('Annotations snap to a screen grid. A label you dragged stays fixed.')
+    : tt('Annotations use automatic placement again. Dragged labels stay pinned.'));
+}
 $('#btn-annot-pts').onclick = () => setAnnot('pts', !state.annot.pts);
 $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
+$('#btn-annot-spread').onclick = () => setAnnotLayout('spread');
+$('#btn-annot-grid').onclick = () => setAnnotLayout('grid');
 {
   const g = document.createElement('div'); g.id = 'view-gear';
   g.innerHTML = `<button class="vg-btn" title="${tt('View')}" aria-label="${tt('View menu')}">⚙</button><div class="vg-menu">
@@ -3291,6 +3331,8 @@ $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
     <div class="vg-sub"><button data-vg="cadtrans" title="${tt('CAD model transparency. Separate from the data object. Default is opaque.')}">◌ ${tt('CAD model')}</button>
     <label class="vg-amt" title="${tt('How transparent the CAD model is (5–95 %).')}">${tt('Transparency [%]')} <input id="vg-cad-trans" type="range" min="5" max="95" step="5" value="${cadTrans.amt}"></label></div>
     <button data-vg="prims" data-vt="prims">◎ ${tt('Geometries')}</button><button data-vg="labels" data-vt="labels">🏷 ${tt('Annotations')}</button><button data-vg="relabel" title="${tt('Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected')}">↺ ${tt('Reset positions')}</button>
+    <button data-vg="spread" data-vt="aspread" title="${tt('Maximize: spread annotations so more of them fit on screen without covering each other. A label you have dragged stays where you put it.')}">⤢ ${tt('Maximize')}</button>
+    <button data-vg="grid" data-vt="agrid" title="${tt('Grid: snap annotations onto a screen raster. A label you have dragged stays fixed and is not moved onto the grid.')}">⊞ ${tt('Grid')}</button>
     <button data-vg="zone" title="${tt('Show the extraction zone of the feature whose dialog is open (global preference, remembered)')}">⬚ ${tt('Extraction zone')}</button><button data-vg="wire" data-vt="wire">▦ ${tt('Mesh edges')}</button><button data-vg="curves" data-vt="curves" class="on">〰 ${tt('Curves/CAD edges')}</button>
     <button data-vg="opts">⚙ ${tt('Options …')}</button></div>`;
   g.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -3300,7 +3342,7 @@ $('#btn-annot-std').onclick = () => setAnnot('std', !state.annot.std);
   g.querySelector('[data-vg="cadtrans"]')!.classList.toggle('on', cadTrans.on);
   g.querySelectorAll<HTMLButtonElement>('[data-vg]').forEach((b) => (b.onclick = () => { const a = b.dataset.vg;
     if (a === 'center') centerOn(); else if (a === 'iso') viewer.view('iso'); else if (a === 'fit') { viewer.view('fit'); status(tt('Fitted to view.')); }
-    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'zone') setShowZone(!showZone); else if (a === 'trans') setViewTrans(!viewTrans.on); else if (a === 'cadtrans') setCadTrans(!cadTrans.on); else if (a === 'opts') openOptions(); else toggleCurves();
+    else if (a === 'wire') toggleWire(); else if (a === 'prims') $('#btn-toggle-prims').click(); else if (a === 'labels') $('#btn-toggle-labels').click(); else if (a === 'relabel') resetLabelPositions(); else if (a === 'spread') setAnnotLayout('spread'); else if (a === 'grid') setAnnotLayout('grid'); else if (a === 'zone') setShowZone(!showZone); else if (a === 'trans') setViewTrans(!viewTrans.on); else if (a === 'cadtrans') setCadTrans(!cadTrans.on); else if (a === 'opts') openOptions(); else toggleCurves();
     if (a !== 'trans' && a !== 'cadtrans') g.classList.remove('open'); }));
   g.querySelector<HTMLInputElement>('#vg-trans')!.oninput = (e) => { e.stopPropagation(); setViewTrans(viewTrans.on, Number((e.target as HTMLInputElement).value)); };
   g.querySelector<HTMLInputElement>('#vg-cad-trans')!.oninput = (e) => { e.stopPropagation(); setCadTrans(cadTrans.on, Number((e.target as HTMLInputElement).value)); };
@@ -3377,6 +3419,9 @@ function applyColorMode() {
 const PREF_KEY = 'mw-view-prefs';
 function saveViewPrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ colorMode: state.colorMode, uniformColor: state.uniformColor, annot: state.annot, tolTables: prefs.tolTables, dec: getDec(), dataTrans: viewTrans.on, transAmt: viewTrans.amt, cadTrans: cadTrans.on, cadAmt: cadTrans.amt, searchDist: REEX_DEFAULT.maxDist })); } catch { /* */ } }
 try { const pr = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null'); if (pr) { if (pr.searchDist > 0) setSearchDistDefault(pr.searchDist); state.colorMode = pr.colorMode ?? state.colorMode; state.uniformColor = pr.uniformColor ?? state.uniformColor; state.annot = { ...state.annot, ...pr.annot }; prefs.tolTables = !!pr.tolTables; if (pr.dec != null) setDec(+pr.dec); viewTrans.on = !!pr.dataTrans; if (pr.transAmt != null && isFinite(+pr.transAmt)) viewTrans.amt = Math.min(95, Math.max(5, +pr.transAmt)); if (pr.cadTrans != null) cadTrans.on = !!pr.cadTrans; if (pr.cadAmt != null && isFinite(+pr.cadAmt)) cadTrans.amt = Math.min(95, Math.max(5, +pr.cadAmt)); } } catch { /* */ }
+if (state.annot.layout !== 'spread' && state.annot.layout !== 'grid') state.annot.layout = 'auto';
+viewer.labels.setLayout(state.annot.layout);
+syncViewToggles();
 if (!viewTrans.on && localStorage.getItem('mw3d-trans') === '1') viewTrans.on = true;
 state.an.trans = viewTrans.on;
 applySharedOpacity(); syncTransUi();

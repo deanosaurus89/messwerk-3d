@@ -1,6 +1,8 @@
-/** 0.38 Pick-Modus (generisch, wiederverwendbar): solange ein registriertes Werkzeug aktiv ist, verändert die Maus
- *  auf dem Desktop die Ansicht NICHT (kein Drehen/Zoomen/Verschieben) – Klicks picken, das Mausrad ändert den
- *  Radius des Werkzeugs. Leertaste schaltet in den Navigationsmodus und zurück (navPaused). Touch bleibt unverändert. */
+/** 0.38 Pick mode: while a registered tool is active, the mouse does not orbit (clicks pick, the wheel
+ *  changes that tool's radius). Space pauses into navigation and back.
+ *  Touch keeps one-finger orbit and two-finger pan/zoom. A finger tap is recognised in the pointer-up
+ *  handler (a wider slop while a pick tool is active, and the camera is put back if that orbit nudged
+ *  the view during the tap) so nominal and measured picks are not swallowed. */
 export interface PickTool { name: string; active: () => boolean; wheel: (dir: 1 | -1, e: WheelEvent) => void; }
 const tools: PickTool[] = [];
 let paused = () => false;

@@ -7,6 +7,10 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.48', date: '2026-10-28', items: [
+    'Mobile CAD nominal: a finger tap on the CAD model highlights the recognised face or edge and opens ✓ / Create nominal, the same confirm step as a measured feature. The tap is read where the finger went down, including a small movement that used to be swallowed as orbit — the view returns to that moment so the face under the finger is the one that was hit. A real drag still orbits, and a second finger still pans and zooms. Nominal and Measured stay an explicit choice; there is no Auto. A face is still a surface feature and an edge is still a circle, slot or line.',
+    'View › Annotations: Maximize spreads labels so more of them fit on screen. Grid snaps them to a screen raster. A label you have dragged stays at that position (🔒) and is not moved by either layout. Reset positions still clears the pin.',
+  ] },
   { version: '2026.0.47', date: '2026-10-28', items: [
     'CAD import builds one display mesh for the whole model (chordal error at most 0.75 mm; previously each face at diagonal/1500, and an exact area on every face). On the included CAD sample the tessellation step goes from about 13 s to about 3.4 s. Picking and CAD nominals still use the analytic face. Reading the IGES/STEP file is unchanged (about 14 s on that sample).',
     'Plane on one wall of a slot stays on that wall. Choosing Plane no longer walks the round ends onto the opposite wall and fits a plane between them. Smart Detect in the middle of the wall is unchanged.',
