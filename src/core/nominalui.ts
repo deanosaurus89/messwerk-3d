@@ -35,10 +35,10 @@ export function featureClassWord(type: string): string {
   return c === 'curve' ? t('curve') : c === 'surface' ? t('surface') : '';
 }
 
-/** CAD / nominal create hides scan-only fit controls. Brush radius may stay. */
+/** CAD nominal is pointer-only: no brush, no fit criterion, no normal angle. Measured keeps all three. */
 export function scanControls(nominal: boolean): { fitCriterion: boolean; normalAngle: boolean; brushRadius: boolean } {
   return nominal
-    ? { fitCriterion: false, normalAngle: false, brushRadius: true }
+    ? { fitCriterion: false, normalAngle: false, brushRadius: false }
     : { fitCriterion: true, normalAngle: true, brushRadius: true };
 }
 

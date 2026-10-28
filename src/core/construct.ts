@@ -4,8 +4,9 @@
 // changes (see recomputeOrder). Best-fit constructions report a form deviation of the parent centers.
 import { FitResult, GeomType, fitCircle3D, fitLine, fitPlane, fitSphere, centroid } from './fit';
 import { Vec3, add, cross, dot, norm, scale, sub, unit, basis, solve } from './linalg';
+import { evalSurface, type BSplineSurface } from './nurbs';
 
-export type Cls = 'plane' | 'line' | 'point' | 'circle' | 'cyl' | 'cone' | 'sphere' | 'slot' | 'torus' | 'any';
+export type Cls = 'plane' | 'line' | 'point' | 'circle' | 'cyl' | 'cone' | 'sphere' | 'slot' | 'torus' | 'freeform' | 'any';
 /** Classes a feature type satisfies. Axis-like features (cylinder, cone, torus, slot, circle) also count as lines. */
 export function classesOf(t: GeomType): Cls[] {
   switch (t) {
@@ -18,7 +19,8 @@ export function classesOf(t: GeomType): Cls[] {
     case 'Kugel': return ['sphere', 'point', 'any'];
     case 'Langloch': return ['slot', 'point', 'line', 'any'];
     case 'Torus': return ['torus', 'line', 'point', 'any'];
-    case 'Abstand': case 'Winkel': case 'Freiformfläche': case 'Linienzug': return [];
+    case 'Freiformfläche': return ['freeform'];
+    case 'Abstand': case 'Winkel': case 'Linienzug': return [];
   }
 }
 export interface Slot { label: string; cls: Cls[] }
@@ -64,6 +66,61 @@ function planePlane(a: FitResult, b: FitResult): FitResult {
   if (!x) throw new Error('Planes are parallel');
   return L(x as Vec3, u, 0);
 }
+/** Straight section of a plane with a cylinder, cone, or a freeform whose section is a line. */
+function planeSectionLine(pl: FitResult, f: FitResult, side: number): FitResult {
+  const N = unit(pl.normal), pick = side ? -1 : 1;
+  if (f.type === 'Zylinder') {
+    const A = unit(f.normal), R = f.radius ?? 0;
+    if (Math.abs(dot(A, N)) > 0.02) throw new Error('Plane is not parallel to the cylinder axis (section is an ellipse, not a line)');
+    const d = dot(sub(f.center, pl.center), N);
+    if (Math.abs(d) > R + 1e-6) throw new Error('Plane misses the cylinder');
+    const h = Math.sqrt(Math.max(0, R * R - d * d));
+    const U = unit(cross(N, A));
+    const c = add(sub(f.center, scale(N, d)), scale(U, pick * h));
+    return L(c, A, f.length ?? 0);
+  }
+  if (f.type === 'Kegel') {
+    if (!f.apex || f.halfAngle == null) throw new Error('Cone without apex');
+    const V = f.apex, A = unit(f.normal), alpha = f.halfAngle;
+    if (Math.abs(dot(sub(V, pl.center), N)) > 1e-4) throw new Error('Plane does not pass through the cone apex (section is not a straight line)');
+    const Ap = sub(A, scale(N, dot(A, N))); const apLen = norm(Ap);
+    if (apLen < 1e-8) throw new Error('Plane is perpendicular to the cone axis');
+    const uhat = scale(Ap, 1 / apLen), what = cross(N, uhat);
+    const ct = Math.cos(alpha) / apLen;
+    if (Math.abs(ct) > 1 + 1e-9) throw new Error('Plane through the apex misses the cone');
+    const theta = Math.acos(Math.max(-1, Math.min(1, ct))) * pick;
+    const D = unit(add(scale(uhat, Math.cos(theta)), scale(what, Math.sin(theta))));
+    const hAx = dot(sub(f.center, V), A);
+    const along = Math.abs(hAx) > 1e-9 ? hAx / Math.cos(alpha) : (f.length ?? 0) || 1;
+    return L(add(V, scale(D, along)), D, f.length ? Math.abs(f.length / Math.cos(alpha)) : 0);
+  }
+  if (f.type === 'Torus') throw new Error('A plane cuts a torus in a curve, not a straight line. Use the torus axis for a line.');
+  if (f.type === 'Freiformfläche') return freeformSectionLine(pl, f);
+  throw new Error('This surface has no straight section with a plane');
+}
+function freeformSectionLine(pl: FitResult, f: FitResult): FitResult {
+  const S = f.nurbs?.surface as BSplineSurface | undefined;
+  if (!S) throw new Error('Freeform has no surface');
+  const N = unit(pl.normal), n = 28, pts: Vec3[] = [];
+  const at = (u: number, v: number) => evalSurface(S, u, v, 0)[0];
+  const sd = (q: Vec3) => dot(sub(q, pl.center), N);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const u0 = i / n, u1 = (i + 1) / n, v0 = j / n, v1 = (j + 1) / n;
+    const corners: [number, number][] = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+    const P = corners.map(([u, v]) => at(u, v));
+    const ds = P.map(sd);
+    for (let e = 0; e < 4; e++) {
+      const a = ds[e], b = ds[(e + 1) % 4];
+      if (a === 0) pts.push(P[e]);
+      else if (a * b < 0) { const t = a / (a - b); pts.push(add(P[e], scale(sub(P[(e + 1) % 4], P[e]), t))); }
+    }
+  }
+  if (pts.length < 2) throw new Error('Plane misses the freeform surface');
+  const line = fitLine(pts, planeOf(pl)); delete line.residuals;
+  const tol = Math.max(0.05, 0.01 * (line.length ?? 1));
+  if ((line.form ?? 0) > tol) throw new Error('Section is a curve, not a straight line');
+  return line;
+}
 const planeOf = (pl: FitResult) => ({ center: pl.center, normal: pl.normal });
 const center = (fs: FitResult[]) => fs.map(pt);
 const S = (label: string, ...cls: Cls[]): Slot => ({ label, cls });
@@ -84,6 +141,9 @@ export const CONSTRUCTIONS: Construction[] = [
   { key: 'pt-centroid', out: 'Punkt', label: 'Centroid of several features', slots: [], multi: { min: 2, slot: S('Feature', 'point', 'plane', 'line') }, compute: (fs) => P(centroid(center(fs))) },
   // ---------------- lines
   { key: 'ln-planes', out: 'Linie', label: 'Intersection plane ∩ plane', slots: [S('Plane 1', 'plane'), S('Plane 2', 'plane')], compute: ([a, b]) => planePlane(a, b) },
+  { key: 'ln-section', out: 'Linie', label: 'Intersection plane ∩ cylinder, cone, torus or freeform', slots: [S('Plane', 'plane'), S('Cylinder / cone / torus / freeform', 'cyl', 'cone', 'torus', 'freeform')],
+    params: [{ key: 'side', label: 'Side', def: 0, choices: ['one side', 'other side'] }],
+    compute: ([pl, f], p) => planeSectionLine(pl, f, p.side ? 1 : 0) },
   { key: 'ln-axis', out: 'Linie', label: 'Axis of cylinder, cone or torus', slots: [S('Feature', 'cyl', 'cone', 'torus')], compute: ([f]) => L(f.center, f.normal, f.length ?? 0) },
   { key: 'ln-slot', out: 'Linie', label: 'Slot center line', slots: [S('Slot', 'slot')], compute: ([f]) => L(f.center, f.direction ?? f.normal, Math.max(0, (f.length ?? 0) - (f.width ?? 0))) },
   { key: 'ln-normal', out: 'Linie', label: 'Circle normal (axis through center)', slots: [S('Circle', 'circle')], compute: ([f]) => L(f.center, f.normal, f.diameter ?? 0) },

@@ -25,11 +25,13 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
       const o = await getOC(); const tInit = performance.now() - t0;
       prog('Reading file …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
       orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
+      const defl = C.displayDeflection(diag);
       prog(`Tessellating ${orig.length} faces …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
-      const defl = diag / 1500; let lastP = 0; const fl = orig.map((f, i) => { if (performance.now() - lastP > 150) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${orig.length}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / orig.length }); } const t = C.tessellate(o, f, defl); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
-        let geom: any = null; try { geom = C.faceAnalytic(o, f); } catch { geom = null; }
-        return { ...C.faceInfo(o, f, i), geom, tess: t }; });
-      r = { faces: fl, diag, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
+      let lastP = 0;
+      const loaded = C.loadDisplayFaces(o, sh, (i, n) => { if (performance.now() - lastP > 200) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${n}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / Math.max(1, n) }); } });
+      diag = loaded.diag;
+      for (const f of loaded.faces) tr.push(f.tess.positions.buffer, f.tess.indices.buffer, f.tess.normals.buffer);
+      r = { faces: loaded.faces, diag, defl, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
     } else if (req.op === 'apply') {
       // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat
       const o = oc; const changed: any[] = []; const errors: (string | null)[] = req.ops.map(() => null);
@@ -42,7 +44,7 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
         let sh = orig[i];
         for (const { op, k } of chain) { try { sh = C.applyOne(o, sh, op, orig); } catch (err: any) { errors[k] = String(err?.message ?? err); } }
         if (!chain.length) { cache.delete(i); changed.push({ id: i, reset: true }); continue; }
-        const t = C.tessellate(o, sh, diag / 1500); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
+        const d = C.displayDeflection(diag); const t = C.tessellate(o, sh, d.linear, false, d.angular); tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
         const a = C.area(o, sh); cache.set(i, { key, shape: sh, area: a });
         changed.push({ id: i, tess: t, area: a, pieces: C.faces(o, sh).length });
       }

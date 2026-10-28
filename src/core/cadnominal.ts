@@ -8,16 +8,14 @@ import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
 import { ReexParams, ReexResult, normReex, reextract } from './reextract';
 
 export type { CadAnalytic, CadCurve };
-export type SideMode = 'auto' | 'soll' | 'ist';
+/** Session choice. There is no Auto: Nominal and Measured are explicit and stick until changed. */
+export type SideMode = 'soll' | 'ist';
 export interface SideHit { cad: boolean; mesh: boolean; /** CAD surface is in front of the mesh (or the mesh was missed) */ cadCloser: boolean }
 
-/** Auto: CAD in front → Soll, polygon in front → Ist. Override forces one side and ignores the other target. */
+/** Nominal uses the CAD hit only. Measured uses the polygon hit only. The choice is not inferred from which surface is closer. */
 export function creationSide(hit: SideHit, mode: SideMode): 'soll' | 'ist' | null {
   if (mode === 'soll') return hit.cad ? 'soll' : null;
-  if (mode === 'ist') return hit.mesh ? 'ist' : null;
-  if (hit.cad && (hit.cadCloser || !hit.mesh)) return 'soll';
-  if (hit.mesh) return 'ist';
-  return null;
+  return hit.mesh ? 'ist' : null;
 }
 /** Ray distances (null = miss). Equal distance prefers the CAD surface. */
 export function nearerTarget(cadDist: number | null, meshDist: number | null): 'cad' | 'mesh' | 'none' {
@@ -113,12 +111,21 @@ function surfaceFit(face: CadAnalytic, at: Vec3): FitResult | null {
 
 export interface NominalPick { fit: FitResult; aux?: FitResult; /** NURBS: fit is only a frame until the face samples are fitted */ freeform?: boolean }
 
+function nearestLine(face: CadAnalytic, point: Vec3): { e: CadCurve | null; d: number } {
+  const lines = face.edges.filter((e) => e.kind === 'line' && e.a && e.b);
+  let e: CadCurve | null = null, d = Infinity;
+  for (const L of lines) { const dd = distSeg(point, L.a!, L.b!); if (dd < d) { d = dd; e = L; } }
+  return { e, d };
+}
 /**
  * Analytic nominal under a hit on a CAD face.
- * Auto: near a slot contour → slot; near a circular edge → circle; otherwise the face type
- * (plane, cylinder, cone, sphere, torus, freeform). An explicit type uses that geometry when the face has it.
+ * Smart Detect: an edge hit (within edgeTol) is a curve — slot, circle or line.
+ * A face hit is the surface, including freeform. Polyline is only the explicit Polyline type:
+ * line segments joined while they stay tangent (G1), stopping at a corner.
+ * An explicit type uses that geometry when the face has it.
  */
 export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 'auto', edgeTol: number): NominalPick | null {
+  if (want === 'Linienzug') return nominalPolyline(face, point, edgeTol);
   const circles = face.edges.filter((e) => e.kind === 'circle' && e.center && e.normal && e.radius != null);
   let best: CadCurve | null = null, bestD = Infinity;
   for (const e of circles) { const d = distCircle(point, e.center!, e.normal!, e.radius!); if (d < bestD) { bestD = d; best = e; } }
@@ -126,11 +133,17 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
   const slotD = slot ? slotDist(point, slot) : Infinity;
   const surf = surfaceFit(face, point);
   const seamOnly = face.type === 'Kugel' || face.type === 'Torus';
+  const line = nearestLine(face, point);
   if (want === 'auto') {
-    if (!seamOnly && slot && slotD <= edgeTol && slotD <= bestD + 1e-6) return slotFit(slot);
-    if (!seamOnly && best && bestD <= edgeTol) return circleFit(best);
-    // Freeform is never an Auto result. A NURBS face stays unmatched until the user picks Freiformfläche.
-    if (!surf || surf.type === 'Freiformfläche') return null;
+    const edge = !seamOnly && ((slot && slotD <= edgeTol) || (best && bestD <= edgeTol) || (line.e && line.d <= edgeTol));
+    if (edge) {
+      if (slot && slotD <= edgeTol && slotD <= bestD + 1e-6 && slotD <= line.d + 1e-6) return slotFit(slot);
+      if (best && bestD <= edgeTol && bestD <= line.d + 1e-6) return circleFit(best);
+      if (line.e && line.d <= edgeTol) return lineFit(line.e);
+      return null;
+    }
+    if (!surf) return null;
+    if (surf.type === 'Freiformfläche') return { fit: surf, freeform: true };
     return { fit: surf };
   }
   if (want === 'Kreis') return best ? circleFit(best) : null;
@@ -144,6 +157,38 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
     return L && ld <= edgeTol ? lineFit(L) : null;
   }
   return null;
+}
+/** Polyline along CAD edges: the hit segment, extended through tangent (G1) joints, stopped at a corner. */
+export function nominalPolyline(face: CadAnalytic, point: Vec3, edgeTol: number): NominalPick | null {
+  const lines = face.edges.filter((e) => e.kind === 'line' && e.a && e.b);
+  let seedI = -1, bd = Infinity;
+  for (let i = 0; i < lines.length; i++) { const d = distSeg(point, lines[i].a!, lines[i].b!); if (d < bd) { bd = d; seedI = i; } }
+  if (seedI < 0 || bd > edgeTol) return null;
+  const ang = Math.cos((12 * Math.PI) / 180);
+  const tol = Math.max(0.05, 0.002 * (lines[seedI].length || 1));
+  const same = (p: Vec3, q: Vec3) => norm(sub(p, q)) < tol;
+  /** Next segment leaving `from` along `dir` (away from the chain). Returns the far point. */
+  const step = (from: Vec3, dir: Vec3, used: Set<number>): Vec3 | null => {
+    for (let i = 0; i < lines.length; i++) {
+      if (used.has(i)) continue;
+      const e = lines[i], d = unit(sub(e.b!, e.a!));
+      if (same(e.a!, from) && dot(d, dir) >= ang) { used.add(i); return e.b!; }
+      if (same(e.b!, from) && dot(scale(d, -1), dir) >= ang) { used.add(i); return e.a!; }
+    }
+    return null;
+  };
+  const used = new Set<number>([seedI]);
+  const seed = lines[seedI];
+  const fwd: Vec3[] = [seed.b!];
+  let from = seed.b!, dir = unit(sub(seed.b!, seed.a!));
+  for (;;) { const n = step(from, dir, used); if (!n) break; dir = unit(sub(n, from)); from = n; fwd.push(n); }
+  const back: Vec3[] = [seed.a!];
+  from = seed.a!; dir = unit(sub(seed.a!, seed.b!));
+  for (;;) { const n = step(from, dir, used); if (!n) break; dir = unit(sub(n, from)); from = n; back.push(n); }
+  const pts = [...back.reverse(), ...fwd];
+  const center = pts.reduce((s, q) => add(s, q), [0, 0, 0] as Vec3).map((v) => v / pts.length) as Vec3;
+  const span = norm(sub(pts[pts.length - 1], pts[0]));
+  return { fit: { type: 'Linienzug', center, normal: unit(face.normal), direction: span > 1e-9 ? unit(sub(pts[pts.length - 1], pts[0])) : [1, 0, 0], pts, length: span, ...ZERO } };
 }
 function lineFit(e: CadCurve): NominalPick {
   const a = e.a!, b = e.b!, d = unit(sub(b, a));

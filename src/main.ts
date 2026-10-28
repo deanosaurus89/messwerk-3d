@@ -204,8 +204,8 @@ const state = {
     crit: 'lsq' as FitCrit,
     ex: { islands: true, inset: 0, angleOn: false, angleDeg: 30, outlierOn: false, outlierK: 3, // Phase 1 step 3: Create = raw fit of the selection; filters optional
        zoneSrc: 'geom' as 'points' | 'geom' },
-    /** Auto: CAD hit → Soll, polygon hit → Ist. Override forces one of them. */
-    side: 'auto' as SideMode },
+    /** Nominal (CAD) or Measured (scan). Sticks for the next feature. No Auto. */
+    side: 'ist' as SideMode },
   an: { on: false, kind: 'form' as AnKind, ids: [] as number[], res: null as AnResult | null, whisk: false, exag: 50, axExag: 0, axLoc: 1, axHide: false, axEnv: true, axZones: true, otherLabels: false, axLab: { zone: true, env: true, nom: true, dev: true } as Record<'zone' | 'env' | 'nom' | 'dev', boolean>, derivePrev: null as { key: string; parent: number; fit: FitResult } | null, ctrl: null as number | null, trans: localStorage.getItem('mw3d-trans') === '1', scale: 0, steps: 0, center: 'zone' as 'zone' | 'zero' | 'custom', c0: 0, zones: false },
   hidden: new Set<number>(), modelVisible: true, showLabels: true,
   /** per-feature: annotation hidden (geometry stays) */
@@ -389,6 +389,7 @@ document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftyp
 function startFitMode(t: GeomType | 'auto', side?: SideMode) {
   if (!state.data && !cad.faces.length) { status(tt('Load a polygon model or a CAD model first.')); return; }
   if (side) state.opts.side = side;
+  else if (!state.data && cad.faces.length) state.opts.side = 'soll';
   pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
@@ -857,6 +858,7 @@ function brushAddToPreview() {
 }
 function setMethod(m: 'Klick' | 'Pinsel') {
   if (state.mode?.kind !== 'fit') return;
+  if (m === 'Pinsel' && state.opts.side === 'soll') { status(tt('A CAD nominal is picked with the pointer, not the brush.')); return; }
   state.mode.method = m; state.preview = null; clearBrush(); brushErase = false; viewer.showCursor(null, 1); clearAuxHover(); renderAll();
 }
 // ------------------------------------------------------------------ Bottom context panel (one for all modes and previews)
@@ -932,14 +934,14 @@ function ctxSpec(): CtxSpec | null {
   const makeNom = sollUi && (p?.role === 'soll' || hoverNominal?.fit)
     ? `<button type="button" data-a="makenom" class="primary" title="${tt('Create the nominal feature in the tree')}">${tt('Create nominal')}</button>` : '';
   const ctl = sollUi
-    ? `${type}${detectBadge(detected)}${classHint}${makeNom}<span class="cp-hint">${tt('CAD nominal: the recognised geometry stays highlighted. Create nominal adds it to the tree. Freeform is only used when you pick that type.')}</span>`
+    ? `${type}${detectBadge(detected)}${classHint}${makeNom}<span class="cp-hint">${tt('CAD nominal: click a face for a surface, or an edge for a circle, slot or line. Create nominal adds it to the tree. Polyline is only the Polyline type.')}</span>`
     : m.method === 'Klick' ? scanCtl + detectBadge(detected)
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
   const fullPars = !sollUi && !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
-  const sideCtl = `<label title="${tt('Auto: pointer on the CAD model creates a nominal, pointer on the polygon creates a measured feature. Override forces one of them.')}">${tt('Nominal / actual')} <select id="cp-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('nominal')} (${tt('from CAD')})</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('measured')} (${tt('from scan')})</option></select></label>`;
+  const sideCtl = `<label title="${tt('Nominal uses the CAD model (pointer only). Measured uses the scan (click and grow or brush). The choice stays for the next feature.')}">${tt('Nominal / measured')} <select id="cp-side"><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('Nominal')}</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('Measured')}</option></select></label>`;
   const scanPars = `${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
     ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
     ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
@@ -953,7 +955,7 @@ function ctxSpec(): CtxSpec | null {
   const headType = detected ? typeName(detected) : (m.method === 'Klick' ? (m.type === 'auto' ? tt('Smart Detect') : typeName(m.type)) : tt('Brush'));
   return {
     title: `${tt('Feature Builder')} · ${[roleWord(roleNow), headType].filter(Boolean).join(' · ')}`, cls: m.method === 'Pinsel' ? 'brush' : '',
-    controls: ctl + pars, stats: (detected && !p ? detectBadge(detected) : '') + (p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Freeform is not in Auto. Pick Freeform surface to use this CAD face.') : tt('Recognised. Create nominal adds it to the tree.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : ''),
+    controls: ctl + pars, stats: (detected && !p ? detectBadge(detected) : '') + (p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverNominal ? `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Click the CAD face, then Create nominal.') : tt('Recognised. Create nominal adds it to the tree.')}</span>` : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : ''),
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'makenom') { void confirmNominal(); return; }
@@ -980,7 +982,7 @@ function ctxSpec(): CtxSpec | null {
       const cr = el.querySelector<HTMLSelectElement>('#cp-crit'); if (cr) cr.onchange = () => { state.opts.crit = cr.value as FitCrit; extractLive(); };
       bindIslands(el); bindSmooth(el, '#cp-smooth');
       const pd = el.querySelector<HTMLDetailsElement>('details.cp-params'); if (pd) pd.ontoggle = () => { cpParamsOpen = pd.open; };
-      const sd = el.querySelector<HTMLSelectElement>('#cp-side'); if (sd) sd.onchange = () => { state.opts.side = sd.value as SideMode; hoverNominal = null; if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else if (state.preview?.role !== 'soll' && state.opts.side === 'soll' && state.preview) discardPreview(); else renderAll(); };
+      const sd = el.querySelector<HTMLSelectElement>('#cp-side'); if (sd) sd.onchange = () => { state.opts.side = sd.value as SideMode; hoverNominal = null; if (state.opts.side === 'soll' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { setMethod('Klick'); return; } if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else if (state.preview?.role !== 'soll' && state.opts.side === 'soll' && state.preview) discardPreview(); else renderAll(); };
       el.querySelectorAll<HTMLInputElement>('[data-exn]').forEach((c) => { c.onchange = () => { const v = parseNum(c.value); if (v != null && isFinite(v) && (v >= 0 || (c.dataset.exn === 'inset' && c.dataset.num === 'signed'))) { (state.opts.ex as any)[c.dataset.exn!] = v; extractLive(); } };
         c.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); c.onchange?.(new Event('change')); } }); });
       const na = el.querySelector<HTMLInputElement>('#cp-nang'); if (na) na.onchange = () => { const v = parseNum(na.value); if (v != null && v > 0 && v < 90) { state.opts.maxAngleDeg = v; const pv = state.preview; if (pv?.hit && pv.method === 'Klick' && !pv.regions) previewByClick(pv.hit); } };
@@ -1273,6 +1275,13 @@ async function refitPreview(t: GeomType | 'auto') {
   }
   if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
+  if (p.hit && t === 'Ebene' && p.method === 'Klick') {
+    const g = await busy(engine.call<any>({ op: 'grow', tri: p.hit.tri, point: p.hit.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: 'Ebene', seedR: state.opts.pick }));
+    state.preview = { ...p, aux: undefined, zone: undefined, fit: g.fit, indices: g.indices, grown: g.indices, candidates: g.candidates ?? [] };
+    if (extractActive()) await applyExtract();
+    status(tt('Refitted as {0}.', typeName('Ebene')));
+    renderAll(); return;
+  }
   if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
     try { await previewWithAux(p.hit, t); } catch (e: any) { status(tt('Auxiliary plane: {0}', e.message)); }
     renderAll(); return;
@@ -1294,7 +1303,8 @@ async function confirmNominal() {
     const h = hoverNominal;
     if (h?.role === 'soll' && h.cadId != null && h.cadPoint) await previewFromCad({ id: h.cadId, p: h.cadPoint });
   }
-  if (state.preview?.role === 'soll') commitPreview();
+  if (state.preview?.role === 'soll') { commitPreview(); return; }
+  status(tt('Click the CAD model first, then Create nominal.'));
 }
 function commitNominal(p: Preview) {
   const t = p.fit.type;
@@ -2526,14 +2536,14 @@ function renderFitDialog(d: HTMLElement) {
     const shown = p?.fit ?? hoverNominal?.fit ?? null;
     const ready = !!(p?.role === 'soll' || hoverNominal?.fit);
     d.innerHTML = `<h3>${ICON[shown?.type ?? m.type] ?? ''} ${tt('Create feature')}: ${tt('nominal')}</h3>
-      <p class="note">${tt('Click a CAD face to highlight the recognised geometry, then Create nominal adds it to the tree. Freeform is not chosen by Auto. Fit criterion and the normal angle are not used. Brush radius may stay.')}</p>
+      <p class="note">${tt('Nominal or Measured is chosen explicitly and stays for the next feature. A CAD nominal is the pointer only: a face is a surface (including freeform), an edge is a circle, slot or line. Create nominal adds it to the tree. Polyline is only the Polyline type.')}</p>
       <div class="row"><label>${tt('Type')}</label><select id="d-type">${typeOptions(shown ? shown.type : m.type)}</select></div>
-      <div class="row"><label>${tt('Nominal / actual')}</label><select id="d-side"><option value="auto" ${state.opts.side === 'auto' ? 'selected' : ''}>${tt('Auto')}</option><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('nominal')}</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('measured')}</option></select></div>
+      <div class="row"><label>${tt('Nominal / measured')}</label><select id="d-side"><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('Nominal')}</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('Measured')}</option></select></div>
       ${nominalAdvancedControls(state.opts.brush)}
       ${shown ? `<h4>${tt('Preview')}: ${typeName(shown.type)} · ${featureClassWord(shown.type)}</h4>${detectBadge(shown.type)}${kv(fitRows(shown, 0, false))}` : `<p class="note">${tt('No nominal yet. Click the CAD model.')}</p>`}
       ${ready ? `<div class="row"><button class="btn primary" id="d-create-nom">${tt('Create nominal')}</button></div>` : ''}`;
     d.querySelector<HTMLSelectElement>('#d-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; m.type = v; if (state.preview) refitPreview(v); else renderAll(); };
-    d.querySelector<HTMLSelectElement>('#d-side')!.onchange = (e) => { state.opts.side = (e.target as HTMLSelectElement).value as SideMode; if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else renderAll(); };
+    d.querySelector<HTMLSelectElement>('#d-side')!.onchange = (e) => { state.opts.side = (e.target as HTMLSelectElement).value as SideMode; if (state.opts.side === 'soll' && m.method === 'Pinsel') { setMethod('Klick'); return; } if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else renderAll(); };
     d.querySelector('#d-create-nom')?.addEventListener('click', () => { void confirmNominal(); });
     const br = d.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
     return;
@@ -4594,7 +4604,7 @@ function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto' | 'Abstand') {
   d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.meth;
     if (k === 'cad') { startFitMode(out === 'auto' || out === 'Winkel' ? 'auto' : out as GeomType, 'soll'); return; }
-    if (k === 'mesh') state.opts.side = 'auto';
+    if (k === 'mesh') state.opts.side = 'ist';
     if (k === 'con') startConstruct(out as GeomType); else if (k === 'anchor') startAnchor(out as GeomType | 'Abstand');
     else if (out === 'Abstand') startDistanceMode(); else startFitMode(out === 'Winkel' ? 'auto' : out);
   }));

@@ -208,7 +208,11 @@ export class MeshTopology {
     if (L && L.length >= 3) {
       const h = this.localEdge(seedTri);
       let a = 0; const fa = this.mesh.faceAreas!; for (const t of L) a += fa[t];
-      const r = a < 0.01 * this.totalArea ? 0 : this.regionRms(L, 0.3 * h, fitInfo?.model === 'Ebene');
+      // A slot wall is G1 into the round ends, so neighbour-angle growth walks onto the opposite wall.
+      // That whole loop still fits a prism, and a Plane fit through it sits between the two walls.
+      // Only an explicit Plane is kept on the seed face. Smart Detect still takes the slot surface.
+      const wantPlane = o.type === 'Ebene';
+      const r = a < 0.01 * this.totalArea ? 0 : this.regionRms(L, 0.3 * h, wantPlane);
       if (r !== null && r < 0.3 * h) { this.lastGrow = { model: 'keins', h, sigma: r, tol: 0.3 * h, angDeg: o.maxAngleDeg, seedTris: 0, refits: 0, capped: false, legacy: true }; return this.closeHoles(L); }
     }
     this.lastGrow = fitInfo; return o.strict ? new Uint32Array(0) : this.closeHoles(F);
@@ -261,7 +265,9 @@ export class MeshTopology {
     const step = Math.max(1, Math.floor(tris.length / 400));
     for (let i = 0; i < tris.length; i += step) { const t = tris[i]; for (let k = 0; k < 3; k++) { const v = f[3 * t + k]; if (seen.has(v)) continue; seen.add(v); P.push([p[3 * v], p[3 * v + 1], p[3 * v + 2]]); N.push([this.NF(t)[3 * t], this.NF(t)[3 * t + 1], this.NF(t)[3 * t + 2]]); } }
     if (P.length < 6) return 0;
-    try { const pl = fitType('Ebene', P, N); if (pl.rms < lim) return pl.rms;
+    try { const pl = fitType('Ebene', P, N);
+      if (planeOnly) return pl.rms < lim ? pl.rms : null;
+      if (pl.rms < lim) return pl.rms;
       // prismatisch (Zylinder, Langloch, beliebige Wand): alle Normalen ⟂ einer Achse
       const ax = axisFromNormals(N).axis; const d = N.map((q) => Math.abs(q[0] * ax[0] + q[1] * ax[1] + q[2] * ax[2])).sort((x, y) => x - y);
       if (d[Math.floor(d.length * 0.95)] < 0.05) return 0;
@@ -348,7 +354,11 @@ export class MeshTopology {
       // 0.36: Abstand zum mitwachsenden Fit < 3σ am Schwerpunkt (Rauschen /√3), jeder Knoten < 1,5 × Toleranz
       for (let k = 0; k < 3; k++) if (Math.abs(modelDist(model, vpos(f[3 * u + k]))) > 1.5 * tol) return false;
       if (Math.abs(modelDist(model, this.cen(u))) > tol) return false;
-      const mn = modelNormal(model, this.cen(u)); return Math.abs(mn[0] * this.GN(u)[3 * u] + mn[1] * this.GN(u)[3 * u + 1] + mn[2] * this.GN(u)[3 * u + 2]) > Math.cos(angTol);
+      const mn = modelNormal(model, this.cen(u));
+      const align = mn[0] * this.GN(u)[3 * u] + mn[1] * this.GN(u)[3 * u + 1] + mn[2] * this.GN(u)[3 * u + 2];
+      // A plane's opposite wall is parallel (dot ≈ −1). Unsigned alignment treated that as the same face.
+      const cosT = Math.cos(angTol);
+      return model.type === 'Ebene' ? align > cosT : Math.abs(align) > cosT;
     };
     const inR = new Uint8Array(nt); const out: number[] = [seedTri]; inR[seedTri] = 1; let area = fa[seedTri];
     const cap = 0.6 * this.totalArea; let next = Math.max(40, seed.length * 1.6);

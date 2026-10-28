@@ -130,10 +130,10 @@ describe('Boundary from Geometry does not fall back to the point highlight', () 
 });
 
 describe('CAD nominal confirm, class, orientation', () => {
-  it('hides fit criterion and the normal angle; brush radius stays', () => {
-    expect(scanControls(true)).toEqual({ fitCriterion: false, normalAngle: false, brushRadius: true });
+  it('hides fit criterion, the normal angle and the brush on a CAD nominal', () => {
+    expect(scanControls(true)).toEqual({ fitCriterion: false, normalAngle: false, brushRadius: false });
     const html = nominalAdvancedControls(3);
-    expect(html).toContain('cp-brush');
+    expect(html).not.toContain('cp-brush');
     expect(html).not.toContain('Fit criterion');
     expect(html).not.toContain('Normal angle');
     expect(scanControls(false).fitCriterion).toBe(true);

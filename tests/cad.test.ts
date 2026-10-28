@@ -42,6 +42,29 @@ describe('CAD-Beschnitt (synthetisch)', () => {
   });
 });
 
+describe('CAD display mesh', () => {
+  it('a cylinder wall stays within the display chordal error', () => {
+    const cyl = new oc.BRepPrimAPI_MakeCylinder_1(10, 40).Shape();
+    const wall = C.faces(oc, cyl).find((f) => C.faceClass(oc, f).type === 'Zylinder');
+    const diag = C.bboxDiag(oc, cyl);
+    const defl = C.displayDeflection(diag);
+    const t = C.tessellate(oc, wall, defl.linear, false, defl.angular);
+    expect(t.indices.length).toBeGreaterThan(12);
+    let worst = 0;
+    for (let i = 0; i < t.positions.length; i += 3) {
+      const r = Math.hypot(t.positions[i], t.positions[i + 1]);
+      worst = Math.max(worst, Math.abs(r - 10));
+    }
+    expect(worst).toBeLessThanOrEqual(defl.linear + 0.05);
+    const loaded = C.loadDisplayFaces(oc, cyl);
+    const wall2 = loaded.faces.find((f) => f.type === 'Zylinder')!;
+    let worst2 = 0;
+    for (let i = 0; i < wall2.tess.positions.length; i += 3) worst2 = Math.max(worst2, Math.abs(Math.hypot(wall2.tess.positions[i], wall2.tess.positions[i + 1]) - 10));
+    expect(worst2).toBeLessThanOrEqual(loaded.defl.linear + 0.05);
+    expect(Math.abs(wall2.area - 2 * Math.PI * 10 * 40) / (2 * Math.PI * 10 * 40)).toBeLessThan(0.05);
+  });
+});
+
 // Martins Testdateien liegen nur lokal (nicht im öffentlichen Repo, siehe .gitignore) – ohne sie wird übersprungen.
 describe.skipIf(!fs.existsSync(FX + 'motordeckel.stp'))('CAD-Beschnitt an Martins Testdateien', () => {
   for (const file of ['motordeckel.stp', 'deviated-cover.igs']) it(file, () => {

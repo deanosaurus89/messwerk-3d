@@ -164,7 +164,7 @@ export async function cadOpen(file: File) {
   const t0 = performance.now(); cad.busy = true; document.body.classList.add('busy');
   try {
     const bytes = new Uint8Array(await file.arrayBuffer()); const first = !eng.loaded;
-    const r = await eng.call<any>({ op: 'load', bytes, name: file.name }, (t) => { X.status(t); X.toast(t); }, [bytes.buffer]);
+    const r = await eng.call<any>({ op: 'load', bytes, name: file.name }, (t) => { X.status(t); if (!/face \d/i.test(t)) X.toast(t); }, [bytes.buffer]);
     for (const m of meshes) if (m) { group.remove(m); m.geometry.dispose(); } for (const g of ghosts) if (g) group.remove(g); meshes = []; ghosts = [];
     cad.name = file.name; cad.faces = r.faces.map((f: any) => ({ ...f, visible: true, res: null })); cad.sel.clear(); cad.ops = []; cad.undo = []; cad.redo = []; cad.errors = []; cad.tool = null; cad.draft = [];
     for (const f of cad.faces) buildFace(f); cadPaint();
