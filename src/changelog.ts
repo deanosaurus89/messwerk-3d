@@ -7,6 +7,18 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.42', date: '2026-10-28', items: [
+    'Coloured points are mesh vertices: used points, auxiliary-plane points, the creation preview, the brush and the re-extract preview are drawn as dots, not as coloured triangles. The brush selects vertices.',
+    'A legend at the top left of the 3D view names those colours. ✕ on the legend leaves that view.',
+    'Islands: Exclude is part of Islands. ✕ removes a bore and its blue contour; the chip stays struck through and can be restored. Click shows the island. Island (hole, countersink, bump) is not the same as a region (Add region). Right-click finishes Add island area.',
+    'Re-extract with Boundary from points stays inside the creation point set. Repeating it does not collect more points. Boundary from fitted geometry is unchanged.',
+    'Trim zone (Remove inside / Keep inside) is removed from re-extract.',
+    'Boundary, boundary exclusion distance and boundary smoothing are greyed out for a scan. They apply only to a CAD nominal, later. Islands, search distance and the normal angle stay.',
+    'Circle and slot: the auxiliary plane is the face at the wall end nearest the click, and the inner or outer contour nearest the cursor wins. Add region does not jump onto the other contour.',
+    'Cylinder and cone recognition follows form error along the same surface, and a clear taper is kept as a cone.',
+    'Training part (beispielteil) is listed in Load sample part.',
+    'Test page: marking ✅ archives the item. Archived items stay hidden until “Archivierte anzeigen”. The active list is the open items from 2026.0.41 plus the checks for this release.',
+  ] },
   { version: '2026.0.41', date: '2026-10-26', items: [
     'Feature Builder (3D view context window): before the first click only ✨ Smart Detect and ⚙. After detection: Add region (strictly additive), Brush add, Exclude. Smart Remove region is gone – paint exclusion and island chips cover it.',
     'Boundary [Geometry | Points] only for cylinder, cone, sphere and torus. Hidden for planes and for circle, slot and line.',

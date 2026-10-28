@@ -25,6 +25,8 @@ export class Viewer {
   model: THREE.Mesh | THREE.Points | null = null;
   colors: Float32Array | null = null;
   prims = new THREE.Group();
+  /** Mesh vertices drawn as points (used / preview / brush). Not triangle colours. */
+  private marks: THREE.Points | null = null;
   cursor: THREE.Mesh;
   private ray = new THREE.Raycaster();
   radius = 100;
@@ -98,7 +100,7 @@ export class Viewer {
   clearModel() {
     this.setWireframe(false);
     if (this.model) { this.scene.remove(this.model); this.model.geometry.dispose(); this.model = null; }
-    this.colors = null; this.clearPrims();
+    this.colors = null; this.clearPointMarks(); this.clearPrims();
   }
   setModel(positions: Float32Array, indices: Uint32Array, normals: Float32Array | null, keepView = false) {
     const hadWire = !!this.wire; this.setWireframe(false);
@@ -374,6 +376,33 @@ export class Viewer {
     }
   }
   commitColors() { if (this.model) (this.model.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true; }
+  clearPointMarks() {
+    if (!this.marks) return;
+    this.scene.remove(this.marks); this.marks.geometry.dispose(); (this.marks.material as THREE.Material).dispose(); this.marks = null;
+  }
+  /** Draw the given mesh vertices as dots. Does not colour triangle faces. */
+  setPointMarks(groups: { idx: ArrayLike<number>; rgb: number[]; dev?: Float32Array; devR?: number }[]) {
+    this.clearPointMarks();
+    const pos = this.model?.geometry.getAttribute('position')?.array as ArrayLike<number> | undefined;
+    if (!pos) return;
+    let n = 0; for (const g of groups) n += g.idx.length;
+    if (!n) return;
+    const P = new Float32Array(n * 3), C = new Float32Array(n * 3);
+    let w = 0;
+    for (const g of groups) for (let i = 0; i < g.idx.length; i++) {
+      const v = g.idx[i] | 0, o = 3 * v;
+      if (o < 0 || o + 2 >= pos.length) continue;
+      P[w] = pos[o]; P[w + 1] = pos[o + 1]; P[w + 2] = pos[o + 2];
+      const rgb = g.dev && g.devR ? devRGB(Math.max(-1, Math.min(1, g.dev[i] / g.devR))) : g.rgb;
+      C[w] = rgb[0]; C[w + 1] = rgb[1]; C[w + 2] = rgb[2]; w += 3;
+    }
+    if (!w) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(w === P.length ? P : P.slice(0, w), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(w === C.length ? C : C.slice(0, w), 3));
+    const mat = new THREE.PointsMaterial({ vertexColors: true, size: 6, sizeAttenuation: false, depthTest: true, depthWrite: false, transparent: true, opacity: 0.95 });
+    this.marks = new THREE.Points(geo, mat); this.marks.renderOrder = 6; this.marks.raycast = () => {}; this.scene.add(this.marks);
+  }
 
   /** Ansicht aus beliebiger Richtung (ViewCube: Flächen, Kanten, Ecken); Zielpunkt und Abstand bleiben erhalten. */
   viewDir(v: [number, number, number]) {

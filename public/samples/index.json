@@ -59,7 +59,6 @@
   "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
   "triangles": 183612,
   "bytes": 9180684,
-  "thumb": "thumb-beispielteil.jpg",
-  "hidden": true
+  "thumb": "thumb-beispielteil.jpg"
  }
 ]

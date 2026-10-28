@@ -529,7 +529,7 @@ let lastCanvasPointer = 0;
 canvas.addEventListener('pointerup', () => { lastCanvasPointer = performance.now(); }, true);
 canvas.addEventListener('pointerup', (e) => { if (navPaused) { rdown = null; return; } if (e.button !== 2 || !rdown) return; const d = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y); rdown = null;
   if (d > 6) return; if (pe.tool === 'curve' && curveDraft.length > 1) { curveFinish(); return; } window.dispatchEvent(new CustomEvent('mw-rclick')); });
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.opts.addIsl) { state.opts.addIsl = false; status(tt('Add island area finished.')); renderModeBar(); } });
 canvas.addEventListener('pointerleave', (e) => { if ((e.pointerType !== 'mouse' || state.preview) && state.mode?.kind === 'fit' && state.mode.method === 'Klick') return; // keep the seed feedback of the tap/click (touch; busy overlay over the canvas)
   if (!painting) { viewer.showCursor(null, 1); clearAuxHover(); } });
 let lastHit: Hit | null = null;
@@ -655,7 +655,7 @@ async function brushAt(h: Hit) {
       if (!strokeErase && !state.brushMask[v]) { state.brushMask[v] = 1; state.brushCount++; ch.push(v); stroke.push(v + 1); }
       else if (strokeErase && state.brushMask[v]) { state.brushMask[v] = 0; state.brushCount--; ch.push(v); stroke.push(-(v + 1)); }
     }
-    if (strokeErase) renderScene(); else { viewer.paint(Uint32Array.from(ch), [1, 0.85, 0]); viewer.commitColors(); }
+    if (strokeErase) renderScene(); else syncPointMarks();
     renderDialog(); renderModeBar();
   } finally { brushBusy = false; }
 }
@@ -717,7 +717,7 @@ function previewStats(p: Preview): string {
   const rows: [string, string, string][] = [[tt('Points'), pts, 'pts'], [m.nurbs ? tt('Surface profile') : formName(m.type), fmt(m.form), 'form'], [tt('Std. dev.'), fmt(std), 'std']];
   return `<span class="cp-type">${ICON[m.type] ?? ''} ${typeName(m.type)}</span>` + rows.map(([k, v, c]) => `<span class="cp-kv" data-kv="${c}"><small>${k}</small><b>${v}</b></span>`).join('');
 }
-let exclOpen = false, paintEx = false, exclStroke = new Set<number>();
+let paintEx = false, exclStroke = new Set<number>();
 function renderModeBar() {
   const spec = ctxSpec(); setCtx('mesh', spec); setCtx('tool', analysisSpec()); placeFloaters();
 }
@@ -744,9 +744,8 @@ function ctxSpec(): CtxSpec | null {
   // Before the first click: only Smart Detect + ⚙. After detection: Add region (strictly additive),
   // Brush add, Exclude. No Remove region. Boundary toggle only for cylinder/cone/sphere/torus.
   const smart = `<button data-a="click" class="cp-smart ${m.method === 'Klick' && !state.opts.multi && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
-  const exN = removedSets.length + (p?.islands?.filter((I) => !I.inc).length ?? 0);
   const seg = !p ? `<span class="cp-seg cp-selm">${smart}</span>`
-    : `<span class="cp-seg cp-selm">${smart}<button data-a="addreg" class="${m.method === 'Klick' && state.opts.multi ? 'on' : ''}" title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows.')}">＋ ${tt('Add region')}</button><button data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">🖌＋ ${tt('Brush add')}</button><button data-a="excl" class="${exclOpen ? 'on' : ''}" title="${tt('Exclude islands (bores, countersinks, bumps) or paint them out. ✕ on a chip excludes it; the chip stays and can be restored until ✓.')}">⊘ ${tt('Exclude')}${exN ? ' ' + exN : ''}</button>${p.regions || regionOps.length ? `<button data-a="unregion" title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button>` : ''}</span>`;
+    : `<span class="cp-seg cp-selm">${smart}<button data-a="addreg" class="${m.method === 'Klick' && state.opts.multi ? 'on' : ''}" title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button><button data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">🖌＋ ${tt('Brush add')}</button>${p.regions || regionOps.length ? `<button data-a="unregion" title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button>` : ''}</span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
   const AUXT = ['Kreis', 'Langloch', 'Linie'], auxable = m.method === 'Klick' && !!p && AUXT.includes(p.fit.type);
   const ao = state.opts.aux;
@@ -759,19 +758,18 @@ function ctxSpec(): CtxSpec | null {
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
   const zType = (p ? p.fit.type : m.type) as string;
   const showB = m.method === 'Klick' && GEOM_ZONE.includes(zType) && !p?.aux;
-  const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${tt('Boundary: Geometry = a zone around the fitted cylinder, cone, sphere or torus. Points = the clicked selection. Hidden for planes and for circle, slot and line.')}"><button type="button" data-zsrc="geom" class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${tt('Boundary from the fitted geometry')}">${tt('Geometry')}</button><button type="button" data-zsrc="points" class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${tt('Boundary from the point selection')}">${tt('Points')}</button></span>` : '';
+  const bfrom = showB ? `<span class="cp-bfrom cp-seg" title="${istBoundaryTip()}"><button type="button" data-zsrc="geom" disabled class="${state.opts.ex.zoneSrc === 'geom' ? 'on' : ''}" title="${istBoundaryTip()}">${tt('Geometry')}</button><button type="button" data-zsrc="points" disabled class="${state.opts.ex.zoneSrc !== 'geom' ? 'on' : ''}" title="${istBoundaryTip()}">${tt('Points')}</button></span>` : '';
   const isl = p && p.fit.type === 'Ebene' && !p.aux ? islandsHTML(p.islands ?? []) : '';
-  const excl = exclOpen && p ? `<div class="cp-excl"><button type="button" data-a="pex" class="${paintEx ? 'on' : ''}" title="${tt('Paint exclusion: the brush footprint is removed exactly, with no region growing.')}">🖌 ${tt('Paint exclusion')}</button><button type="button" data-a="lasso" title="${tt('Add island area: draw a lasso; the points inside are excluded.')}">⬚ ${tt('Add island area')}</button></div>` : '';
   const ctl = m.method === 'Klick'
-    ? `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}${excl}`
+    ? `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}`
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
        <span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`;
   const ptype = (p ? p.fit.type : m.type) as string, isPl = ptype === 'Ebene', x = state.opts.ex;
   const fullPars = !p?.aux && !['Abstand', 'Winkel', 'Linienzug', 'Freiformfläche'].includes(ptype) && (p ? p.method === 'Klick' : m.method === 'Klick');
   const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${!p && m.method === 'Klick' ? `<span class="cp-adv-first">${type}${pick}<button data-a="brush" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button></span>` : (m.method === 'Klick' ? type : '')}${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
-    ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth') : ''}
-    ${isPl || (GEOM_ZONE.includes(ptype) && x.zoneSrc === 'geom') ? `<label title="${exclTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}"> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
+    ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
+    ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm<button type="button" class="help-q" data-doc-sec="excl" title="${tt('Boundary exclusion distance – documentation')}">?</button></label>` : ''}
     ${m.method === 'Klick' ? `<label title="${tt('Normal angle: region growing from the click stops where the surface normal bends more than this angle (edge, fillet, chamfer, adjacent face). Smaller = stops earlier; larger = grows over soft transitions.')}">${tt('Normal angle')} <input id="cp-nang" data-num="abs" value="${state.opts.maxAngleDeg}" inputmode="decimal" style="width:3.5em">°<button type="button" class="help-q" data-doc-sec="nangle" title="${tt('Normal angle – documentation')}">?</button></label>` : ''}
     <label title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation; circumscribed / inscribed = tangential.')}">${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>
   ` : ''}</div></details>`;
@@ -780,8 +778,7 @@ function ctxSpec(): CtxSpec | null {
     controls: ctl + pars, stats: p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '',
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
-        if (a === 'excl') { exclOpen = !exclOpen; if (!exclOpen) paintEx = false; renderModeBar(); return; }
-        if (a === 'pex') { paintEx = !paintEx; state.opts.multi = false; renderModeBar(); status(paintEx ? tt('Paint exclusion: paint the points to remove. They leave the selection exactly.') : ''); return; }
+        if (a === 'pex') { paintEx = !paintEx; state.opts.multi = false; state.opts.addIsl = false; renderModeBar(); status(paintEx ? tt('Paint exclusion: paint the points to remove. They leave the selection exactly.') : ''); return; }
         if (a === 'lasso') { void lassoExclude(); return; }
         if (a === 'click' || a === 'addreg') { paintEx = false; const was = state.opts.multi; state.opts.multi = a === 'addreg'; if (m.method !== 'Klick') setMethod('Klick'); else if (was !== state.opts.multi) { renderModeBar(); renderHint(); } } else if (a === 'brush') setMethod('Pinsel'); else if (a === 'brushadd') brushAddToPreview(); else if (a === 'paint' || a === 'erase') { brushErase = a === 'erase'; renderModeBar(); renderDialog(); } else if (a === 'clear') clearSelectionAll(); else if (a === 'fillraised') { state.opts.fill.exRaised = !state.opts.fill.exRaised; applyExtract().then(() => renderAll()); } else if (a === 'unregion') { const snap = regionSnaps.pop(); if (snap) { if (regionOps.pop() === 'sub') removedSets.pop(); state.preview = snap; renderAll(); return; } const pv = state.preview!; const op = regionOps.pop() ?? 'add'; let rg = baseRegions(pv); if (op === 'sub') removedSets.pop(); else rg = rg.slice(0, -1); refitRegions(rg.length ? rg : baseRegions(pv), pv.hit).then(() => (extractActive() ? applyExtract() : undefined)).then(() => renderAll()); } }));
       el.querySelectorAll<HTMLButtonElement>('[data-zsrc]').forEach((b) => (b.onclick = () => { state.opts.ex.zoneSrc = b.dataset.zsrc === 'geom' ? 'geom' : 'points'; extractLive(); }));
@@ -815,9 +812,11 @@ function ctxSpec(): CtxSpec | null {
   };
 }
 
-/** Boundary smoothing input (Advanced): empty = auto, 0 = off */
-function smoothCtl(id: string) {
-  return `<label title="${tt('Boundary smoothing [mm] (display only): the boundary of the selection is drawn as a smooth contour on the fitted surface instead of the triangle zigzag; every point moves at most this far. Empty = automatic (0.7 × mesh edge length, max. 0.5 mm), 0 = off. Applies to the preview and all features.')}">${tt('Boundary smoothing')} <input id="${id}" class="smooth-in" data-num="abs" value="${smoothTol ?? ''}" placeholder="${tt('auto')}" inputmode="decimal"> mm</label>`;
+const istBoundaryTip = () => tt('Boundary, boundary exclusion distance and boundary smoothing apply only to a CAD nominal. They are greyed out for a scan (actual).');
+/** Boundary smoothing input (Advanced): empty = auto, 0 = off. Greyed out for a scan (actual). */
+function smoothCtl(id: string, disabled = false) {
+  const tip = disabled ? istBoundaryTip() : tt('Boundary smoothing [mm] (display only): the boundary of the selection is drawn as a smooth contour on the fitted surface instead of the triangle zigzag; every point moves at most this far. Empty = automatic (0.7 × mesh edge length, max. 0.5 mm), 0 = off. Applies to the preview and all features.');
+  return `<label title="${tip}">${tt('Boundary smoothing')} <input id="${id}" class="smooth-in" data-num="abs" value="${smoothTol ?? ''}" placeholder="${tt('auto')}" inputmode="decimal" ${disabled ? 'disabled' : ''}> mm</label>`;
 }
 function bindSmooth(el: ParentNode, id: string) {
   const i = el.querySelector<HTMLInputElement>(id); if (!i) return;
@@ -829,19 +828,17 @@ const islCanInc = (_I: Island) => true; // 0.38: every island removable (holes a
 const islHoleWarn = (I: Island) => I.kind === 'hole' && !I.rim;
 /** Plane · All inside boundary: detected islands (auto) – tap one (here or in 3D) → “Not an island” / refine its extent */
 function islandsHTML(list: Island[]) {
-  const ex = list.filter((I) => !I.inc).length, S = list[islSel];
-  const chips = list.map((I, i) => `<button type="button" class="isl-chip${I.inc ? ' inc' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${islKind(I)} · ${I.n} ${tt('pts')}${I.inc ? ' · ' + tt('not an island (points included)') : ''}">${islIcon(I)}${I.id}<span class="isl-x" data-islx="${i}" title="${tt('Exclude this island. The chip stays and can be clicked to restore it until ✓.')}">✕</span></button>`).join('');
-  const det = S ? `<div class="isl-det"><b>${tt('Island')} ${S.id}</b> ${islKind(S)} · Ø≈${fmt(2 * S.r, 1)} · h ${fmt(S.h, 2)} mm · ${S.n} ${tt('pts')}
-    <span class="cp-seg"><button type="button" data-islinc="0" class="${S.inc ? '' : 'on'}" title="${tt('Island: its points are excluded from the plane')}">${tt('Island')}</button><button type="button" data-islinc="1" class="${S.inc ? 'on' : ''}" title="${tt('Not an island: its points belong to the plane again (a hole is shown closed – the plane contour no longer has this opening)')}">${tt('Not an island')}</button></span>${islHoleWarn(S) ? `<span class="isl-warn" title="${tt('No surface points inside – this is probably a real hole/bore. Removing it closes the opening in the plane contour.')}">⚠ ${tt('probably a hole/bore')}</span>` : ''}
+  const dropped = list.filter((I) => I.drop).length, S = list[islSel];
+  const chips = list.map((I, i) => `<button type="button" class="isl-chip${I.drop ? ' drop' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${tt('Show this island in the 3D view. ✕ removes it (the blue contour goes away). Click again to use it.')} · ${islKind(I)} · ${I.n} ${tt('pts')}">${islIcon(I)}${I.id}<span class="isl-x" data-islx="${i}" title="${tt('Remove this island from the feature. The chip stays struck through and can be restored until ✓.')}">✕</span></button>`).join('');
+  const det = S ? `<div class="isl-det"><b>${tt('Island')} ${S.id}</b> ${islKind(S)} · Ø≈${fmt(2 * S.r, 1)} · h ${fmt(S.h, 2)} mm · ${S.n} ${tt('pts')}${S.drop ? ' · ' + tt('removed') : ''}${islHoleWarn(S) ? ` <span class="isl-warn" title="${tt('No surface points inside – this is probably a real hole/bore. Removing it closes the opening in the plane contour.')}">⚠ ${tt('probably a hole/bore')}</span>` : ''}
     <label title="${tt('Refine the island: grow (+) or shrink (−) its excluded zone by this distance [mm]')}">${tt('Refine')} ± <input id="cp-islm" data-num="signed" value="${S.m}" inputmode="text"> mm</label></div>` : '';
   const man = state.opts.fill.man.map((I, k) => `<button type="button" class="isl-chip man" data-islman="${k}" title="${tt('Island added by tap, Ø {0} mm – click to remove it', fmt(2 * I.r, 1))}">✚${k + 1} ✕</button>`).join('');
-  const addB = `<button type="button" class="isl-chip add${state.opts.addIsl ? ' on' : ''}" data-isladd="1" title="${tt('Add an island: tap the plane where detection was too generous – a disc of the brush diameter (Ø {0} mm) is excluded', fmt(2 * state.opts.brush, 1))}">＋ ${tt('Island')}</button>`;
-  // 0.38: collapsible (collapsed by default), summary = count in one line; expanded the chips wrap (no scrolling),
-  // beyond 20 islands a compact dropdown list replaces the chips
+  const tools = `<div class="cp-excl"><button type="button" data-a="pex" class="${paintEx ? 'on' : ''}" title="${tt('Paint exclusion: the brush footprint is removed exactly, with no region growing.')}">🖌 ${tt('Paint exclusion')}</button><button type="button" data-a="lasso" title="${tt('Add island area: draw a lasso; the points inside are excluded. Right-click finishes the area.')}">⬚ ${tt('Add island area')}</button></div>`;
+  const note = `<span class="isl-note">${tt('Island: a hole, countersink or bump inside this face. Region (Add region): more of the face itself.')}</span>`;
   const many = list.length > 20;
-  const pickL = many ? `<select class="isl-sel" data-islsel="1" title="${tt('Select an island')}"><option value="-1">${tt('Island…')}</option>${list.map((I, i) => `<option value="${i}" ${i === islSel ? 'selected' : ''}>${islIcon(I)}${I.id} ${islKind(I)}${I.inc ? ' · ' + tt('not an island') : ''}</option>`).join('')}</select>` : chips;
-  const sum = `🏝 ${tt('Islands')} ${list.length}${ex !== list.length ? ` (${tt('{0} excluded', ex)})` : ''}`;
-  return `<details class="cp-isl" ${islOpen || islSel >= 0 ? 'open' : ''}><summary class="cp-isl-h" title="${tt('Islands inside the outer contour, detected automatically: ◯ hole/opening, ◎ hole with raised rim, ▲ local bump, ▮ raised feature. Excluded from the plane unless marked “Not an island”. Tap an island (here or in the 3D view) to change it.')}">${sum}</summary><div class="cp-isl-b">${pickL}${man}${addB}${det}</div></details>`;
+  const pickL = many ? `<select class="isl-sel" data-islsel="1" title="${tt('Select an island')}"><option value="-1">${tt('Island…')}</option>${list.map((I, i) => `<option value="${i}" ${i === islSel ? 'selected' : ''}>${islIcon(I)}${I.id} ${islKind(I)}${I.drop ? ' · ' + tt('removed') : ''}</option>`).join('')}</select>` : chips;
+  const sum = `🏝 ${tt('Islands')} ${list.length}${dropped ? ` (${tt('{0} removed', dropped)})` : ''}`;
+  return `<div class="cp-islands">${note}${tools}<details class="cp-isl" ${islOpen || islSel >= 0 ? 'open' : ''}><summary class="cp-isl-h" title="${tt('Islands are holes, countersinks and bumps inside the face. Click a chip to show it. ✕ removes it and its blue contour. A region (Add region) is more of the face, not an island.')}">${sum}</summary><div class="cp-isl-b">${pickL}${man}${det}</div></details></div>`;
 }
 let islOpen = false;
 function islandChoice(I: Island): IslandChoice {
@@ -854,9 +851,8 @@ function bindIslands(el: ParentNode) {
   const dt = el.querySelector<HTMLDetailsElement>('details.cp-isl'); if (dt) dt.ontoggle = () => { islOpen = dt.open; };
   const list = state.preview?.islands; if (!list) return;
   const sel = el.querySelector<HTMLSelectElement>('[data-islsel]'); if (sel) sel.onchange = () => { islSel = Number(sel.value); renderAll(); };
-  el.querySelectorAll<HTMLElement>('[data-islx]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); e.preventDefault(); const I = list[Number((b as HTMLElement).dataset.islx)]; if (!I) return; islandChoice(I).inc = false; extractLive(); }));
-  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-islx]')) return; const i = Number(b.dataset.isl); if (islSel !== i) { islSel = i; renderAll(); return; } const I = list[i]; if (I && !I.inc) { islandChoice(I).inc = true; extractLive(); return; } islSel = -1; renderAll(); }));
-  el.querySelectorAll<HTMLButtonElement>('[data-islinc]').forEach((b) => (b.onclick = () => { const I = list[islSel]; if (!I) return; islandChoice(I).inc = b.dataset.islinc === '1'; extractLive(); }));
+  el.querySelectorAll<HTMLElement>('[data-islx]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); e.preventDefault(); const I = list[Number((b as HTMLElement).dataset.islx)]; if (!I) return; const c = islandChoice(I); c.drop = !I.drop; if (c.drop) c.inc = false; extractLive(); }));
+  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-islx]')) return; const i = Number(b.dataset.isl); const I = list[i]; if (!I) return; if (I.drop) { const c = islandChoice(I); c.drop = false; extractLive(); return; } islSel = i; viewer.focus(I.c as [number, number, number], Math.max(I.r * 4, 8)); renderAll(); }));
   const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; extractLive(); };
 }
 /** island under a tap in the 3D view (ray from the camera through the hit, intersected with the preview plane) */
@@ -1094,6 +1090,7 @@ function commitPreview() {
   if (p.auxFill) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised };
   if (p.grown || p.seed) { const x = state.opts.ex; f.src = p.zone ? p.indices : (p.grown ?? p.seed!); f.fp!.k = 0; f.fp!.nf = { on: x.angleOn, angleDeg: x.angleDeg, maxPct: 100 };
     if (p.zone && GEOM_ZONE.includes(t)) { f.fp!.zoneSrc = 'geom'; f.fp!.zoneBand = p.bandUsed; f.fp!.inset = x.inset; f.src = p.grown ?? p.indices; }
+    else if (GEOM_ZONE.includes(t) && !p.aux) { f.fp!.zoneSrc = 'points'; }
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
@@ -1101,7 +1098,9 @@ function commitPreview() {
     if (f.frozen) { if (p.bandUsed) f.frozen.band = p.bandUsed; f.src = p.indices; f.frozenIdx = p.indices; f.hit = undefined; if (f.fp?.fill) f.fp.fill = { ...f.fp.fill, on: false }; } }
   // 0.38 (F11): other surface types with “Boundary from: Point selection” keep their creation point set as well – re-extraction
   // then works from it (stable, identical count on repeat) instead of growing from its own last result
-  if (t !== 'Ebene' && !p.aux && f.fp?.zoneSrc !== 'geom' && p.method !== 'Konstruiert' && p.indices.length >= 3 && GEOM_ZONE.includes(t)) f.frozenIdx = p.indices;
+  if (GEOM_ZONE.includes(t) && !p.aux && p.method !== 'Konstruiert' && p.indices.length >= 3 && f.fp?.zoneSrc !== 'geom') {
+    f.fp!.zoneSrc = 'points'; f.frozenIdx = Uint32Array.from(p.indices);
+  }
   if (state.mode?.kind === 'con') f.cons = { key: state.mode.key, refs: p.refs!, params: { ...state.mode.params } };
   if (p.aux) {
     f.aux = { plane: p.aux.plane, pointCount: p.aux.indices.length, source: p.aux.source, refId: p.aux.refId } as AuxPlane;
@@ -1169,7 +1168,7 @@ async function refitFeature(f: FeatureView, type: GeomType = f.type) {
   } catch (e: any) { status(tt('Fit failed: {0}', e.message)); toast(tt('Fit failed: {0}', e.message)); }
   renderAll(); scheduleAutosave();
 }
-function resetIslands() { state.opts.fill.isl = []; state.opts.fill.man = []; state.opts.addIsl = false; islSel = -1; removedSets = []; regionOps = []; regionSnaps = []; state.opts.sub = false; paintEx = false; exclOpen = false; }
+function resetIslands() { state.opts.fill.isl = []; state.opts.fill.man = []; state.opts.addIsl = false; islSel = -1; removedSets = []; regionOps = []; regionSnaps = []; state.opts.sub = false; paintEx = false; }
 /** Remove region (0.32): grown regions removed from the selection, and the order of add/remove steps (↶ Region) */
 let removedSets: Uint32Array[] = [], regionOps: ('add' | 'sub')[] = [], regionSnaps: Preview[] = []; // snapshots: ↶ Region restores the exact previous preview
 function minusRemoved(idx: Uint32Array): Uint32Array {
@@ -2240,7 +2239,7 @@ function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
     ${dsec('sel', '① ' + tt('Point selection'), `${f.refs && !f.cons ? `<div class="note">${tt('References')}: ${nameOf(f.refs[0])} → ${nameOf(f.refs[1])}</div>` : ''}${conDefinitionHTML(f)}${provenanceHTML(f)}${selectionParamsHTML(f)}`, true)}
     ${reexHTML(f) ? '' : dsec('flt', '② ' + tt('Filters'), filterParamsHTML(f), true)}
     ${f.type !== 'Abstand' && !f.cons ? dsec('fit', (reexHTML(f) ? '② ' : '③ ') + tt('Fit'), fitParamsHTML(f), true) : ''}
-    ${reexHTML(f) || TRIM_TYPES.includes(f.type) ? dsec('adv', '⚙ ' + (reexHTML(f) ? tt('Advanced · Re-extraction') : tt('Advanced')), `${TRIM_TYPES.includes(f.type) ? `<div class="row">${smoothCtl('fp-smooth')}</div>` : ''}${reexHTML(f) ? `<p class="note">${tt('Rarely needed: re-extract the points of this actual feature with other parameters.')}</p>${reexHTML(f)}` : ''}`, false) : ''}
+    ${reexHTML(f) || TRIM_TYPES.includes(f.type) ? dsec('adv', '⚙ ' + (reexHTML(f) ? tt('Advanced · Re-extraction') : tt('Advanced')), `${TRIM_TYPES.includes(f.type) ? `<div class="row">${smoothCtl('fp-smooth', true)}</div>` : ''}${reexHTML(f) ? `<p class="note">${tt('Rarely needed: re-extract the points of this actual feature with other parameters.')}</p>${reexHTML(f)}` : ''}`, false) : ''}
     <div class="row"><button class="linkbtn" id="d-props" title="${tt('Geometric properties of the actual feature – points, RMS, form deviation, position, direction … (read-only info window)')}">${tt('Geometric properties')} ›</button></div>
     <div><button class="btn" id="d-center">⌖ ${tt('Center')}</button><button class="btn" id="d-addctrl">＋ ${tt('Control …')}</button><button class="btn" id="d-an">◐ ${tt('Analyze deviation')}</button><button class="btn" id="d-del">${tt('Delete feature')}</button></div>`;
   d.querySelector('#dt-apply')?.addEventListener('click', () => setDatum(f, ($('#dt-letter') as HTMLSelectElement).value));
@@ -2497,7 +2496,7 @@ function lassoPick(): Promise<{ m: number[]; poly: [number, number][] } | null> 
     const svg = document.createElementNS(NS, 'svg'); svg.id = 'lasso'; svg.setAttribute('width', String(R.width)); svg.setAttribute('height', String(R.height));
     svg.style.cssText = 'position:absolute;left:0;top:0;z-index:30;cursor:crosshair;touch-action:none';
     const pl = document.createElementNS(NS, 'polygon'); pl.setAttribute('style', 'fill:rgba(216,27,96,.12);stroke:#d81b60;stroke-width:2;stroke-dasharray:6 4'); svg.appendChild(pl);
-    const tip = document.createElement('div'); tip.id = 'lasso-tip'; tip.innerHTML = `${matchMedia('(pointer: coarse)').matches ? tt('Lasso: tap the corners · ✓ = finish · ✕ = cancel') : tt('Lasso: click the corners · double-click or Enter = finish · Esc = cancel')} <button type="button" data-l="ok">✓</button> <button type="button" data-l="x">✕</button>`; host.append(svg, tip);
+    const tip = document.createElement('div'); tip.id = 'lasso-tip'; tip.innerHTML = `${matchMedia('(pointer: coarse)').matches ? tt('Lasso: tap the corners · ✓ = finish · ✕ = cancel') : tt('Lasso: click the corners · right-click, double-click or Enter = finish · Esc = cancel')} <button type="button" data-l="ok">✓</button> <button type="button" data-l="x">✕</button>`; host.append(svg, tip);
     tip.querySelector<HTMLButtonElement>('[data-l="ok"]')!.onclick = () => end(true); tip.querySelector<HTMLButtonElement>('[data-l="x"]')!.onclick = () => end(false);
     // phone: the bottom sheets would cover most of the 3D view – hide them while drawing (state unchanged)
     document.body.classList.add('lasso-on');
@@ -2508,7 +2507,8 @@ function lassoPick(): Promise<{ m: number[]; poly: [number, number][] } | null> 
       const cam = viewer.camera; cam.updateMatrixWorld(); const M = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
       res({ m: Array.from(M.elements), poly: pts.map(([x, y]) => [(x / R.width) * 2 - 1, 1 - (y / R.height) * 2] as [number, number]) }); };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); end(false); } else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); end(true); } };
-    svg.addEventListener('pointerdown', (e) => { e.stopPropagation(); const r = svg.getBoundingClientRect(); pts.push([e.clientX - r.left, e.clientY - r.top]); draw(); });
+    svg.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.button === 2) { end(pts.length >= 3); return; } const r = svg.getBoundingClientRect(); pts.push([e.clientX - r.left, e.clientY - r.top]); draw(); });
+    svg.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); end(pts.length >= 3); });
     svg.addEventListener('dblclick', (e) => { e.stopPropagation(); pts.pop(); end(true); });
     document.addEventListener('keydown', key, true);
   });
@@ -2672,38 +2672,91 @@ function emptyProject() {
   renderAll();
 }
 async function newProject() { if (!(await confirmDiscard())) return; emptyProject(); }
+/** Hole loops of a dismissed bore are not drawn, so the blue contour at that opening goes away. The outer loop stays. */
+function boundaryShown(loops: number[][][], islands?: Island[]) {
+  if (!islands?.length || loops.length < 2) return loops;
+  const closed = islands.filter((I) => I.kind === 'hole' && (I.drop || I.inc));
+  if (!closed.length) return loops;
+  let longest = 0; for (const L of loops) if (L.length > longest) longest = L.length;
+  return loops.filter((L) => {
+    if (L.length >= longest) return true;
+    let x = 0, y = 0, z = 0; for (const q of L) { x += q[0]; y += q[1]; z += q[2]; }
+    const n = L.length || 1; x /= n; y /= n; z /= n;
+    return !closed.some((I) => Math.hypot(x - I.c[0], y - I.c[1], z - I.c[2]) < Math.max(1.5, I.r * 1.6));
+  });
+}
+type PointMark = { idx: ArrayLike<number>; rgb: number[]; label: string; dev?: Float32Array; devR?: number };
+function pointMarks(): PointMark[] {
+  if (!state.data) return [];
+  const peOn = paintPolyCompare() || paintLayout() || paintAnalysis();
+  const vis = (f: FeatureView) => !state.hidden.has(f.id);
+  const out: PointMark[] = [];
+  if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) {
+    const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i));
+    if (ids.length) out.push({ idx: Uint32Array.from(ids), rgb: [0.62, 0.2, 0.95], label: tt('Eraser') });
+  }
+  if (!peOn) for (const f of state.features) {
+    if (f.type === 'Abstand' || !vis(f) || !(state.colorPts || state.usedPts.has(f.id)) || !f.indices.length) continue;
+    const c = rgb(f.color), s = state.sel.includes(f.id);
+    const dev = s && f.dev && state.devMap && f.dev.length === f.indices.length ? f.dev : undefined;
+    out.push({ idx: f.indices, rgb: s ? c : c.map((v) => 0.55 * v + 0.45 * 0.68), label: tt('Used points'), dev, devR: dev ? devRange(dev) : undefined });
+  }
+  if (!peOn) for (const f of state.features) {
+    const ax = auxDisplayIndices(f); if (!ax?.length || !vis(f) || !(state.colorAux || state.usedAux.has(f.id))) continue;
+    out.push({ idx: ax, rgb: rgb(AUX_COLOR), label: tt('Auxiliary-plane points') });
+  }
+  if (ovm().on('brush') && state.brushMask && state.brushCount) {
+    const idx: number[] = []; state.brushMask.forEach((v, i) => v && idx.push(i));
+    out.push({ idx: Uint32Array.from(idx), rgb: [1, 0.85, 0], label: tt('Brush selection') });
+  }
+  const pv = ovm().on('preview') ? state.preview : null;
+  if (pv?.aux) {
+    const ax = pv.aux.refId != null ? state.features.find((g) => g.id === pv.aux!.refId)?.indices : pv.aux.indices;
+    if (ax?.length) out.push({ idx: ax, rgb: rgb(AUX_COLOR), label: tt('Auxiliary-plane points') });
+  }
+  if (pv && pv.indices.length) {
+    const dev = pv.dev && state.devMap ? pv.dev : undefined;
+    out.push({ idx: pv.indices, rgb: rgb(PREVIEW_COLOR), label: tt('Preview points'), dev, devR: dev ? devRange(dev) : undefined });
+  }
+  if (pv?.raised?.length) out.push({ idx: pv.raised, rgb: [0.85, 0.1, 0.55], label: tt('Raised features') });
+  { const rx = ovm().on('zone') ? reexPreviewPts(zoneAlive) : null; if (rx?.length) out.push({ idx: rx, rgb: rgb(PREVIEW_COLOR), label: tt('Re-extract preview') }); }
+  if (state.an.on && state.an.otherLabels) for (const i of anControl()?.datumIds ?? []) {
+    const d = state.features.find((x) => x.id === i); if (d?.indices.length && vis(d)) out.push({ idx: d.indices, rgb: [0.12, 0.53, 0.9], label: tt('Datum points') });
+  }
+  return out;
+}
+function syncPointMarks() { const marks = pointMarks(); viewer.setPointMarks(marks); renderPointLegend(marks); }
+function renderPointLegend(marks: PointMark[]) {
+  let el = document.getElementById('pt-legend');
+  if (!marks.length) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'pt-legend'; viewer.el.appendChild(el); }
+  const rows: { label: string; rgb: number[] }[] = [];
+  for (const m of marks) if (!rows.some((r) => r.label === m.label)) rows.push({ label: m.label, rgb: m.dev ? [0.1, 0.75, 0.2] : m.rgb });
+  el.innerHTML = `<div class="pt-h"><b>${tt('Coloured points')}</b><button type="button" id="pt-legend-x" title="${tt('Exit this colouring')}">✕</button></div>`
+    + rows.map((r) => `<div class="pt-row"><i style="background:rgb(${r.rgb.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255)).join(',')})"></i><span>${r.label}</span></div>`).join('')
+    + `<div class="pt-exit">${tt('Mesh vertices, not triangles. ✕ leaves this view.')}</div>`;
+  el.querySelector('#pt-legend-x')!.addEventListener('click', (e) => { e.stopPropagation(); exitPointColoring(); });
+}
+function exitPointColoring() {
+  state.colorPts = false; state.usedPts.clear(); state.colorAux = false; state.usedAux.clear();
+  clearReexPreview();
+  document.querySelectorAll('details.reex').forEach((d) => { (d as HTMLDetailsElement).open = false; });
+  if (state.preview || state.brushCount) discardPreview();
+  else { renderRibbon(); renderAll(); }
+}
 function renderScene() {
-  if (!state.data) return;
+  if (!state.data) { viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); return; }
   ovm().sync();
   const vis = (f: FeatureView) => !state.hidden.has(f.id);
   viewer.resetColors();
   const peOn = paintPolyCompare() || paintLayout() || paintAnalysis();
   applySharedOpacity();
-  if (pe.tool === 'erase' && peMask && peCount && peMask.length === state.data.vertexCount) { const ids: number[] = []; peMask.forEach((v, i) => v && ids.push(i)); viewer.paint(Uint32Array.from(ids), [0.62, 0.2, 0.95]); }
-  if (!peOn) for (const f of state.features) { // used points: all (View ribbon) or per feature (tree right-click)
-    if (f.type === 'Abstand' || !vis(f) || !(state.colorPts || state.usedPts.has(f.id))) continue;
-    const c = rgb(f.color), s = state.sel.includes(f.id);
-    if (s && f.dev && state.devMap && f.dev.length === f.indices.length) viewer.paintScalar(f.indices, f.dev, devRange(f.dev));
-    else viewer.paint(f.indices, s ? c : c.map((v) => 0.55 * v + 0.45 * 0.68));
-  }
-  if (!peOn) for (const f of state.features) { // 0.32: aux-plane points in their own colour, independent of the feature points
-    const ax = auxDisplayIndices(f); if (!ax?.length || !vis(f) || !(state.colorAux || state.usedAux.has(f.id))) continue;
-    viewer.paint(ax, rgb(AUX_COLOR));
-  }
-  if (ovm().on('brush') && state.brushMask && state.brushCount) {
-    const idx: number[] = []; state.brushMask.forEach((v, i) => v && idx.push(i));
-    viewer.paint(Uint32Array.from(idx), [1, 0.85, 0]);
-  }
-  const p = ovm().on('preview') ? state.preview : null;
-  if (p?.aux) { const ax = p.aux.refId != null ? state.features.find((g) => g.id === p.aux!.refId)?.indices : p.aux.indices; if (ax?.length) viewer.paint(ax, rgb(AUX_COLOR)); }
-  if (p && p.indices.length) { if (p.dev && state.devMap) viewer.paintScalar(p.indices, p.dev, devRange(p.dev)); else viewer.paint(p.indices, rgb(PREVIEW_COLOR)); }
-  if (p?.raised?.length) viewer.paint(p.raised, [0.85, 0.1, 0.55]);
-  { const rx = ovm().on('zone') ? reexPreviewPts(zoneAlive) : null; if (rx) viewer.paint(rx, rgb(PREVIEW_COLOR)); }
-  const lg = [p?.dev && state.devMap ? p.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
+  const lg = [ovm().on('preview') && state.preview?.dev && state.devMap ? state.preview.dev : null, ...state.features.filter((f) => state.sel.includes(f.id) && f.dev && state.devMap && vis(f)).map((f) => f.dev!)].find(Boolean);
   if (!peOn) renderDevLegend(lg ?? null);
-  if (state.an.on && state.an.otherLabels) for (const i of anControl()?.datumIds ?? []) { const d = state.features.find((x) => x.id === i); if (d?.indices.length && vis(d)) viewer.paint(d.indices, [0.12, 0.53, 0.9]); }
+  syncPointMarks();
   viewer.commitColors();
   viewer.clearPrims();
+  const p = ovm().on('preview') ? state.preview : null;
   renderCurves();
   if (state.an.on && state.an.whisk && state.an.res?.pos && state.an.res.dir) { const g = anRange(state.an.res); viewer.addArrows(state.an.res.pos, state.an.res.dir, state.an.res.dev, state.an.exag, g.h, g.c); }
   { const R = showZone && ovm().on('zone') ? reexPreview(zoneAlive) : null; if (R) viewer.addRegion(R); }
@@ -2739,9 +2792,9 @@ function renderScene() {
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
     if (p.aux && state.opts.aux === 'ring' && (p.fit.type === 'Kreis' || p.fit.type === 'Langloch')) for (const L of zoneLoops(p.fit, p.aux.plane, state.opts.ring.gap, state.opts.ring.width)) viewer.addContour(L, AUX_COLOR); // ring / band zone, live
     // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands
-    if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of previewLoops(p)) viewer.addContour(L, 0x1565c0);
+    if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of boundaryShown(previewLoops(p), p.islands)) viewer.addContour(L, 0x1565c0);
     else for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
-    (p.islands ?? []).forEach((I, i) => { if (I.inc && I.kind === 'hole' && i !== islSel) return; /* 0.38: removed hole = shown closed */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.inc ? 0x2e7d32 : !islCanInc(I) ? 0x78909c : 0xff8c1a); });
+    (p.islands ?? []).forEach((I, i) => { if (I.drop || (I.inc && I.kind === 'hole' && i !== islSel)) return; /* dismissed bore: no blue contour */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.drop ? 0x78909c : 0xff8c1a); });
   }
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();

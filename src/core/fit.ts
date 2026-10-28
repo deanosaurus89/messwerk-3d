@@ -478,7 +478,12 @@ function autoFitAll(p: Vec3[], n: Vec3[]): { best: FitResult; candidates: FitRes
   const valid = cands.filter((c) => {
     if (!isFinite(c.rms)) return false;
     if (c.type === 'Kugel' || c.type === 'Zylinder') return (c.radius ?? 0) < 3 * ext;
-    if (c.type === 'Kegel') return (c.halfAngle ?? 0) > 0.035 && (c.halfAngle ?? 0) < 1.4 && nCen.ratio < 0.2;
+    if (c.type === 'Kegel') {
+      const cyl = cands.find((x) => x.type === 'Zylinder' && isFinite(x.rms));
+      // A clear taper (cone RMS well below the cylinder) is a cone even when the normal axis is a bit noisy.
+      const clearer = !!cyl && c.rms < 0.6 * cyl.rms && (c.halfAngle ?? 0) > 0.05;
+      return (c.halfAngle ?? 0) > 0.035 && (c.halfAngle ?? 0) < 1.4 && nCen.ratio < (clearer ? 0.45 : 0.2);
+    }
     if (c.type === 'Torus') return (c.radius ?? 0) > 0.3 * (c.minorRadius ?? 0) && (c.radius ?? 0) < 3 * ext && (c.minorRadius ?? 0) < ext && (c.minorRadius ?? 0) > 1e-3 * ext;
     if (c.type === 'Langloch') return (c.length ?? 0) - (c.width ?? 0) > 0.2 * (c.width ?? 0) && (c.width ?? 0) < 3 * ext;
     return true;

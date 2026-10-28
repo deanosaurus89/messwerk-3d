@@ -310,13 +310,19 @@ export function tryExtractWithAuxPlane(mesh: MeshData, topo: MeshTopology, seedT
   /** Kontur-Wand; mit Lückensprung nur, wenn der Fit damit plausibel bleibt (sonst z. B. Stufe/zweiter Ring mitgenommen) */
   // Gap-bridging prefers the larger wall, but only when that wall still contains the click (inner vs outer edge).
   // Completing the same slot also moves the centroid; the seed-on-fit test keeps that, and rejects a bridge onto a different contour.
+  // Inner vs outer: the contour nearest the click wins. Size only breaks a near-tie, so a click on the outer edge
+  // does not jump to the larger inner wall (stepped slot, boss vs hole).
   const contourBest = (seeds: Uint32Array, axis: Vec3) => {
     const a = contourWall(seeds, axis); if (!WALL_GAP) return a;
     const g = contourWall(seeds, axis, true);
-    const fg = g && (!a || g.verts.length > a.verts.length) ? fitOk(g) : null;
-    if (!fg) return a;
-    if (a && fitOk(a) && Math.abs(signedDistance(fg, seedPoint)) > Math.max(1.5, 4 * topo.medianEdge())) return a;
-    return g;
+    const fa = a ? fitOk(a) : null, fg = g ? fitOk(g) : null;
+    if (!g || !fg) return a;
+    if (!a || !fa) return g;
+    const da = Math.abs(signedDistance(fa, seedPoint)), dg = Math.abs(signedDistance(fg, seedPoint));
+    const tol = Math.max(0.6, 2 * topo.medianEdge());
+    if (dg + tol < da) return g;
+    if (da + tol < dg) return a;
+    return g.verts.length > a.verts.length ? g : a;
   };
   if (_env.DBGW) console.log('AX0', wall.verts.length, plane.normal.map((x) => x.toFixed(5)).join(','), planeReg?.verts.length, limF);
   if (CONTOUR) { const full = contourBest(wall.tris, plane.normal); if (_env.DBGW) console.log('AX1', full?.verts.length);
@@ -553,9 +559,30 @@ export function mergeAuxWall(mesh: MeshData, topo: MeshTopology, seedTri: number
   try { add = extractWithAuxPlane(mesh, topo, seedTri, seedPoint, { ...o, radius: 0 }, type, plane).wallIdx; }
   catch { // Klick direkt auf die Wand ohne erkennbare Ebene daneben: Wand an der Klickstelle prismatisch (Achse = Ebenennormale)
     const tr = topo.growFit(seedTri, seedPoint, { ...o, radius: 0, prismAxis: plane.normal }); add = topo.regionVertices(tr).all; }
+  const P = mesh.positions;
+  const ptsOf = (id: Uint32Array) => Array.from(id, (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3);
+  const rad = (f: FitResult) => f.radius ?? (f.width ?? 0) / 2;
+  if (wallIdx.length >= 8 && add.length >= 8) {
+    try {
+      const oldF = fitInPlane(type, ptsOf(wallIdx), plane, false), addF = fitInPlane(type, ptsOf(add), plane, false);
+      const ro = Math.max(rad(oldF), 1);
+      const span = Math.max(oldF.length ?? 0, addF.length ?? 0, ro * 2);
+      // Opposite end of the SAME slot/circle: centres may sit a length apart, widths stay close.
+      // Inner vs outer (or hole vs boss): the width changes. A wild fit is ignored and the points are united as before.
+      const sane = span < 400 && span > 0.5;
+      const same = !sane || (Math.hypot(addF.center[0] - oldF.center[0], addF.center[1] - oldF.center[1], addF.center[2] - oldF.center[2]) < Math.max(8, 0.65 * span)
+        && Math.abs(rad(addF) - rad(oldF)) < Math.max(2, 0.4 * ro));
+      if (!same) {
+        // Other contour (inner vs outer, hole vs boss): keep only points that still lie on the current feature.
+        const near: number[] = []; const lim = Math.max(1.2, 0.08 * ro);
+        for (const v of add) { const q: Vec3 = [P[3 * v], P[3 * v + 1], P[3 * v + 2]]; if (Math.abs(signedDistance(oldF, q)) <= lim) near.push(v); }
+        if (near.length < 8) throw new Error('That click is the other contour (inner/outer) — not added');
+        add = Uint32Array.from(near);
+      }
+    } catch (e) { if (e instanceof Error && /other contour/.test(e.message)) throw e; }
+  }
   const set = new Set<number>(wallIdx); for (const v of add) set.add(v);
-  const idx = Uint32Array.from(set).sort(); const P = mesh.positions;
-  const pts = Array.from(idx, (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]] as Vec3);
-  const fit = fitInPlane(type, pts, plane); fit.n = idx.length; delete fit.residuals;
+  const idx = Uint32Array.from(set).sort();
+  const fit = fitInPlane(type, ptsOf(idx), plane); fit.n = idx.length; delete fit.residuals;
   return { fit, plane, wallIdx: idx, planeIdx: new Uint32Array(0) };
 }

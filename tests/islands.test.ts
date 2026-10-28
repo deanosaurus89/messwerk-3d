@@ -41,6 +41,15 @@ describe('Islands at creation (inseldemo)', () => {
     expect(g.islands!.find((i) => Math.hypot(i.c[0] - 40, i.c[1] - 30) < 1.5)!.inc).toBe(true);
     const gh = fill({ isl: [{ c: h.c, inc: true }] }); expect(Math.abs(gh.indices.length - auto.indices.length)).toBeLessThan(0.02 * auto.indices.length);
   });
+  it('dismissing a bore (drop) keeps it out of the points and marks the island removed', () => {
+    const h = at(40, 30);
+    const g = fill({ isl: [{ c: h.c, drop: true }] });
+    const isle = g.islands!.find((i) => Math.hypot(i.c[0] - h.c[0], i.c[1] - h.c[1]) < 1.5)!;
+    expect(isle.drop).toBe(true);
+    expect(isle.inc).toBe(false);
+    expect(isle.kind).toBe('hole');
+    expect(g.indices.length).toBeLessThanOrEqual(auto.indices.length + 5);
+  });
   it('refine: + grows, − shrinks the excluded zone of one island', () => {
     const h = at(40, 30), n0 = auto.indices.length;
     const grow = fill({ isl: [{ c: h.c, m: 2 }] }).indices.length, shrink = fill({ isl: [{ c: at(60, 30).c, m: -0.7 }] }).indices.length;

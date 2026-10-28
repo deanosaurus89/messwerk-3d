@@ -26,11 +26,11 @@ export interface SollState { source: 'cad'; fit?: FitResult }
 
 /** flat (pre-0.28) field name → Ist field name */
 export const IST_FIELDS: Record<string, string> = {
-  measured: 'fit', pointCount: 'pointCount', method: 'method', aux: 'aux', reex: 'reex', anchor: 'anchor', fp: 'fp', hit: 'hit', frozen: 'frozen',
+  measured: 'fit', pointCount: 'pointCount', method: 'method', aux: 'aux', reex: 'reex', anchor: 'anchor', fp: 'fp', hit: 'hit', frozen: 'frozen', frozenIdx: 'frozenIdx',
   indices: 'indices', src: 'src', auxIndices: 'auxIndices', dev: 'dev', candidates: 'candidates',
 };
 /** Ist fields that are runtime point sets (stored in the binary index blob, not in the project JSON) */
-export const IST_RUNTIME = ['indices', 'src', 'auxIndices', 'dev', 'candidates'];
+export const IST_RUNTIME = ['indices', 'src', 'auxIndices', 'dev', 'candidates', 'frozenIdx'];
 /** feature model of the project JSON (also in autosaves): 1 = flat features (≤ 0.27), 2 = feature node + ist (0.28).
  *  The project file version (project.ts VERSION) was bumped to 2 with it. */
 export const FEATURE_MODEL = 2;

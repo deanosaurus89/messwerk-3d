@@ -40,6 +40,8 @@ export interface ReexParams {
   frozen?: FrozenBoundary | null;
   /** 0.35: the frozen point set itself (union of all regions after island edits, at creation) – exclusion 0 gives exactly it */
   frozenIdx?: Uint32Array | number[] | null;
+  /** Boundary from the point selection: candidates stay inside frozenIdx. A lateral margin must not pull in more points. */
+  pointBound?: boolean;
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
@@ -185,7 +187,10 @@ export function reextract(fit0: FitResult, pos: ArrayLike<number>, nrm: ArrayLik
   if (Rc.kind === 'prism' && tris && current.length >= 3 && offR <= 1e-9 && !p.frozen) { own = new Uint8Array(N); for (let i = 0; i < current.length; i++) own[current[i]] = 1; }
   // 0.38 (F11): non-planes with “Boundary from: Point selection” also keep their creation point set – before, the zone was
   // rebuilt from the LAST result, so every re-extract grew the set until it saturated.
-  const fset = p.frozenIdx && p.frozenIdx.length >= 3 && lateralOf(p) <= 1e-9 && (type === 'Ebene' ? !!p.frozen : true) ? p.frozenIdx : null;
+  // Point boundary (F11): the creation set is the whole candidate list, even when a lateral margin would otherwise
+  // rebuild a shell and collect more of the surface on every re-extract.
+  const pointLock = p.pointBound === true && !!p.frozenIdx && p.frozenIdx.length >= 3 && type !== 'Ebene';
+  const fset = pointLock || (p.frozenIdx && p.frozenIdx.length >= 3 && lateralOf(p) <= 1e-9 && (type === 'Ebene' ? !!p.frozen : true)) ? p.frozenIdx : null;
   const ft = p.frozen && type === 'Ebene' ? frozenTester(p.frozen, p.maxDist, lateralOf(p) - (p.inset ?? 0), !!fset) : null; // exact frozen boundary (no raster)
   const cands: number[] = [];
   if (fset) { for (const v of fset) { if (v >= N) continue; const q = P3(pos, v); if ((ft ? ft(q) : true) && trimPass(p.trims, q)) cands.push(v); } cands.sort((a, b) => a - b); } // 0.35: frozen point set

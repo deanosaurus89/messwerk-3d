@@ -48,7 +48,7 @@ for (const v of [{ name: 'desktop', viewport: { width: 1400, height: 900 } }, { 
     S.preview = null; S.mode = null; S.opts.multi = false; S.opts.sub = false; A.renderAll();
     p = await prev('Ebene', [70, 52, 20], [0, 0, 1]); const nBefore = p.indices.length;
     const det = document.querySelector('#ctx-panel details.cp-params');
-    out.order = { datum: !!document.querySelector('#cp-datum'), noRemove: !document.querySelector('[data-a="subreg"]'), hasExcl: !!document.querySelector('[data-a="excl"]'), boundaryVisible: false, searchInAdv: !!det && /Search distance/.test(det.textContent) };
+    out.order = { datum: !!document.querySelector('#cp-datum'), noRemove: !document.querySelector('[data-a="subreg"]'), hasExcl: !!document.querySelector('.cp-islands'), boundaryVisible: false, searchInAdv: !!det && /Search distance/.test(det.textContent) };
     out.remove = { nBefore, still: S.preview?.indices.length === nBefore, btn: !!document.querySelector('[data-a="subreg"]') };
     { const pr = document.querySelector('#ctx-panel').getBoundingClientRect(), sc = document.querySelector('#ctx-panel').parentElement.getBoundingClientRect(); out.width = pr.width; out.avail = sc.width; out.h = pr.height; }
     // Boundary (Geometry | Points) for a cylinder is in the bar, not inside Advanced. No Remove region.
