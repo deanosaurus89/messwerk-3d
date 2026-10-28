@@ -22,9 +22,10 @@ export interface IstState {
   method: string;
   [k: string]: unknown; // aux, reex, anchor, fp, hit + runtime point sets (indices, src, auxIndices, dev, candidates)
 }
-/** Nominal geometry from CAD only (no numeric entry of the nominal). */
+/** Nominal geometry: from a CAD face, or constructed from other nominal features. */
+export type SollSource = 'cad' | 'constructed';
 export interface SollState {
-  source: 'cad';
+  source: SollSource;
   fit?: FitResult;
   /** 'aus CAD' */
   method?: string;

@@ -78,8 +78,10 @@ export function trimmedSurface(f: FitResult, pos: ArrayLike<number>, tris: Array
 export interface ShellOpt {
   /** 'points' (default): axial and angular extent of `verts` only.
    *  'surface': every mesh vertex within `band` of the fitted surface — the frustum the mesh actually covers,
-   *  not the click-grown patch. Open ends stay at that mesh/CAD limit. */
-  span?: 'points' | 'surface';
+   *  not the click-grown patch. Open ends stay at that mesh/CAD limit.
+   *  'wall': axial extent of `verts` (cylinder height of the points) but the full turn when the mesh at that
+   *  height goes all the way round. An open wall stays an arc. */
+  span?: 'points' | 'surface' | 'wall';
   band?: number;
 }
 /** Axial extent [mm] along the fitted axis of mesh vertices within `band` of the surface, or null when too few. */
@@ -102,18 +104,39 @@ export function surfaceAxial(f: FitResult, pos: ArrayLike<number>, band = SURFAC
  */
 export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint32Array, bins = 72, opt?: ShellOpt): { tri: Float32Array; edges: Float32Array; closed: boolean; t0: number; t1: number; a0: number; a1: number } {
   const n = unit(f.normal), c = f.center, [u, v] = basis(n), occ = new Uint8Array(bins);
-  const ts: number[] = [], surf = opt?.span === 'surface', band = opt?.band ?? SURFACE_SPAN_BAND;
-  const take = (k: number) => {
-    const p: Vec3 = [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]];
-    if (surf && Math.abs(signedDistance(f, p)) > band) return;
+  const ts: number[] = [], surf = opt?.span === 'surface', wall = opt?.span === 'wall', band = opt?.band ?? SURFACE_SPAN_BAND;
+  const mark = (p: Vec3, angular: boolean) => {
     const q: Vec3 = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
-    ts.push(dot(q, n)); const a = Math.atan2(dot(q, v), dot(q, u)); occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
+    ts.push(dot(q, n));
+    if (!angular) return;
+    const a = Math.atan2(dot(q, v), dot(q, u)); occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
   };
-  if (surf) { for (let k = 0; k < pos.length / 3; k++) take(k); if (ts.length < 8) { ts.length = 0; occ.fill(0); for (let i = 0; i < verts.length; i++) take(verts[i]); } }
-  else for (let i = 0; i < verts.length; i++) take(verts[i]);
+  const at = (k: number): Vec3 => [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]];
+  if (surf) {
+    for (let k = 0; k < pos.length / 3; k++) { const p = at(k); if (Math.abs(signedDistance(f, p)) > band) continue; mark(p, true); }
+    if (ts.length < 8) { ts.length = 0; occ.fill(0); for (let i = 0; i < verts.length; i++) mark(at(verts[i]), true); }
+  } else for (let i = 0; i < verts.length; i++) mark(at(verts[i]), !wall);
   ts.sort((a, b) => a - b);
   const qn = (p: number) => ts.length ? ts[Math.min(ts.length - 1, Math.max(0, Math.round(p * (ts.length - 1))))] : 0;
   const t0 = qn(0.001), t1 = qn(0.999);
+  if (wall) {
+    occ.fill(0);
+    let hit = 0;
+    for (let k = 0; k < pos.length / 3; k++) {
+      const p = at(k);
+      if (Math.abs(signedDistance(f, p)) > band) continue;
+      const t = (p[0] - c[0]) * n[0] + (p[1] - c[1]) * n[1] + (p[2] - c[2]) * n[2];
+      if (t < t0 - band || t > t1 + band) continue;
+      const a = Math.atan2(dot(sub(p, c), v), dot(sub(p, c), u));
+      occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
+      hit++;
+    }
+    if (hit < 8) for (let i = 0; i < verts.length; i++) {
+      const p = at(verts[i]);
+      const a = Math.atan2(dot(sub(p, c), v), dot(sub(p, c), u));
+      occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
+    }
+  }
   // largest run of empty bins (cyclic)
   let best = 0, bestEnd = -1, run = 0;
   for (let i = 0; i < 2 * bins; i++) { if (!occ[i % bins]) { run++; if (run > best && run <= bins) { best = run; bestEnd = i; } } else run = 0; }

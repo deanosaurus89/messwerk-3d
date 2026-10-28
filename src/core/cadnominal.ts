@@ -92,10 +92,11 @@ function surfaceFit(face: CadAnalytic, at: Vec3): FitResult | null {
   if (face.type === 'Ebene') return planeFit(face.origin, n, at);
   if (face.type === 'Zylinder' && face.radius != null) {
     const t0 = face.t0 ?? 0, t1 = face.t1 ?? t0, mid = (t0 + t1) / 2;
-    return { type: 'Zylinder', center: add(face.origin, scale(n, mid)), normal: canonical(n), radius: face.radius, diameter: 2 * face.radius, length: Math.abs(t1 - t0) || face.radius, ...ZERO };
+    // Keep the face axis. canonical() would flip a downward axis and drop the stored orientation.
+    return { type: 'Zylinder', center: add(face.origin, scale(n, mid)), normal: n, radius: face.radius, diameter: 2 * face.radius, length: Math.abs(t1 - t0) || face.radius, ...ZERO };
   }
   if (face.type === 'Kegel' && face.halfAngle != null && face.apex) {
-    const d = canonical(n), t0 = face.t0 ?? 0, t1 = face.t1 ?? 0, tm = (t0 + t1) / 2;
+    const d = n, t0 = face.t0 ?? 0, t1 = face.t1 ?? 0, tm = (t0 + t1) / 2;
     const r = Math.abs(tm * Math.tan(face.halfAngle));
     return { type: 'Kegel', center: add(face.apex, scale(d, tm)), normal: d, apex: face.apex, halfAngle: face.halfAngle, radius: r, diameter: 2 * r, length: Math.abs(t1 - t0), ...ZERO };
   }
@@ -104,7 +105,7 @@ function surfaceFit(face: CadAnalytic, at: Vec3): FitResult | null {
     return { type: 'Kugel', center: face.origin, normal: nn, radius: face.radius, diameter: 2 * face.radius, ...ZERO };
   }
   if (face.type === 'Torus' && face.radius != null && face.minor != null)
-    return { type: 'Torus', center: face.origin, normal: canonical(n), radius: face.radius, diameter: 2 * face.radius, minorRadius: face.minor, ...ZERO };
+    return { type: 'Torus', center: face.origin, normal: n, radius: face.radius, diameter: 2 * face.radius, minorRadius: face.minor, ...ZERO };
   if (face.type === 'NURBS')
     return { type: 'Freiformfläche', center: face.origin, normal: n, ...ZERO };
   return null;
@@ -147,7 +148,7 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
 function lineFit(e: CadCurve): NominalPick {
   const a = e.a!, b = e.b!, d = unit(sub(b, a));
   const center = add(a, scale(d, norm(sub(b, a)) / 2));
-  const dir = canonical(d);
+  const dir = unit(d);
   const n = faceNormalForLine(e);
   return { fit: { type: 'Linie', center, normal: dir, direction: dir, length: norm(sub(b, a)), ...ZERO }, aux: { type: 'Ebene', center, normal: n, ...ZERO } };
 }

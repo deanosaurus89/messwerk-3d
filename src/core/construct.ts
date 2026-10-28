@@ -156,6 +156,16 @@ export const CONSTRUCTIONS: Construction[] = [
 ];
 export const conByKey = (k: string) => CONSTRUCTIONS.find((c) => c.key === k);
 export const constructionsFor = (out: GeomType) => CONSTRUCTIONS.filter((c) => c.out === out);
+
+/** Geometry a construction reads: a nominal construction stays on the nominal; otherwise measured, then nominal. */
+export function parentFit(f: { measured?: FitResult | null; soll?: { fit?: FitResult } | null }, nominal: boolean): FitResult | null {
+  if (nominal) return f.soll?.fit ?? f.measured ?? null;
+  return f.measured ?? f.soll?.fit ?? null;
+}
+/** Every parent is nominal-only → the result is a nominal feature (e.g. nominal plane ∩ nominal plane → nominal line). */
+export function constructionIsNominal(parents: { measured?: FitResult | null; soll?: { fit?: FitResult } | null }[]): boolean {
+  return parents.length > 0 && parents.every((p) => !p.measured && !!p.soll?.fit);
+}
 /** Output types that can be constructed (ribbon order). */
 export const CON_OUTS: { out: GeomType; label: string; key?: string }[] = [
   { out: 'Punkt', label: 'Point' }, { out: 'Linie', label: 'Line / axis' }, { out: 'Ebene', label: 'Plane' }, { out: 'Kreis', label: 'Circle' },

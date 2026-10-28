@@ -26,7 +26,7 @@ class CadEngine {
     return new Promise<T>((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }).finally(progressEnd); }
 }
 
-interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; tess: Tess; geom?: CadAnalytic | null; res: null | { tess: Tess; area: number; pieces: number }; }
+interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; dropped?: boolean; tess: Tess; geom?: CadAnalytic | null; res: null | { tess: Tess; area: number; pieces: number }; }
 type Tool = null | 'offset' | 'cut' | 'circle' | 'rect' | 'export';
 export interface CadCtx {
   viewer: Viewer; toast: (t: string) => void; status: (t: string) => void; renderTree: () => void; renderDialog: () => void;
@@ -72,6 +72,21 @@ export function getCadOpacity() { return cadOpacity; }
 /** Face under the pointer during nominal creation (does not change the trim selection). */
 export function cadHighlight(id: number) { if (cad.hover === id) return; cad.hover = id; cadPaint(); }
 /** Remove every CAD face, trim and the worker shape. Used by New project. */
+/** Hide one CAD face and drop it from the reference tree. The stored nominals keep their geometry. */
+export function cadDropFace(id: number) {
+  const f = cad.faces.find((x) => x.id === id); if (!f) return;
+  f.dropped = true; f.visible = false; cad.sel.delete(id);
+  if (cad.hover === id) cad.hover = -1;
+  cadPaint();
+}
+/** Centre of the visible CAD faces, for Center in the reference menu. */
+export function cadCenter(): V3 | null {
+  const fs = cad.faces.filter((f) => f.visible && !f.dropped);
+  if (!fs.length) return null;
+  const c: V3 = [0, 0, 0];
+  for (const f of fs) { c[0] += f.center[0]; c[1] += f.center[1]; c[2] += f.center[2]; }
+  return [c[0] / fs.length, c[1] / fs.length, c[2] / fs.length];
+}
 export function cadClear() {
   for (const m of meshes) if (m) { group.remove(m); m.geometry.dispose(); (m.material as THREE.Material).dispose?.(); }
   for (const g of ghosts) if (g) { group.remove(g); g.geometry.dispose(); (g.material as THREE.Material).dispose?.(); }
@@ -250,6 +265,7 @@ export function cadTree(node: (html: string, cls: string, onClick?: (e: MouseEve
       if ((e.target as HTMLElement).classList.contains('cad-op-del')) { removeOp(k); return; } cad.opSel = cad.opSel === k ? -1 : k; cad.sel = new Set(o.faces); cadPaint(); X.renderTree(); X.renderDialog(); }, cad.opSel === k); n.title = cad.errors[k] ?? ''; });
   }
   for (const f of cad.faces) {
+    if (f.dropped) continue;
     const label = `Face ${f.id + 1}`; if (q && !(`${label} ${f.type} ${f.detail}`.toLowerCase().includes(q))) continue;
     const d = node(`<span class="tw"></span><span style="color:#${TYPE_COLOR[f.type].toString(16)}">${TYPE_ICON[f.type]}</span>${label} <span class="sub">${f.type}${f.detail ? ' · ' + f.detail : ''} · ${fmtA(f.res ? f.res.area : f.area)}${f.res ? ' ✂' : ''}</span>`, 'indent3 cad-face' + (f.visible ? '' : ' hidden-feat'),
       (e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) { cad.sel.has(f.id) ? cad.sel.delete(f.id) : cad.sel.add(f.id); } else { const only = cad.sel.size === 1 && cad.sel.has(f.id); cad.sel.clear(); if (!only) cad.sel.add(f.id); } cadPaint(); X.renderTree(); X.renderDialog(); },
