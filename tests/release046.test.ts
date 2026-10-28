@@ -44,36 +44,38 @@ describe('Boundary from Geometry does not fall back to the point highlight', () 
     });
   }
 
-  it('cone Geometry is the mesh frustum, not the selected ring', () => {
+  it('cone Geometry is the mesh frustum, not the selected ring, and ignores a nearby offset', () => {
     const a = (18 * Math.PI) / 180, na = 36, hs = [10, 14, 18, 22, 26, 30];
-    const pos: number[] = []; const rows: number[][] = [];
+    const on: number[] = [], off: number[] = [], rows: number[][] = [];
     for (const h of hs) {
       const row: number[] = [], r = h * Math.tan(a);
-      const off = h === 22 ? 0 : 0.6; // only the click ring sits inside the tight 0.35 mm band
       for (let i = 0; i < na; i++) {
         const t = (2 * Math.PI * i) / na;
-        row.push(pos.length / 3);
-        pos.push((r + off) * Math.cos(t), (r + off) * Math.sin(t), h);
+        row.push(on.length / 3);
+        on.push(r * Math.cos(t), r * Math.sin(t), h);
+        off.push((r + 0.6) * Math.cos(t), (r + 0.6) * Math.sin(t), h);
       }
       rows.push(row);
     }
     const tm = 20;
     const fit: FitResult = {
       type: 'Kegel', center: [0, 0, tm], normal: [0, 0, 1], apex: [0, 0, 0], halfAngle: a,
-      radius: tm * Math.tan(a), length: 4, ...Z, n: na,
+      radius: tm * Math.tan(a), length: 20, ...Z, n: na,
     };
     const mid = Uint32Array.from(rows[3]);
-    const P = new Float32Array(pos);
-    const ring = analyticShell(fit, P, mid);
-    const geom = coneDisplayShell(fit, P, mid);
+    const mesh = new Float32Array(on);
+    const ring = analyticShell(fit, mesh, mid);
+    const geom = coneDisplayShell(fit, mesh, mid);
     expect(ring.t1 - ring.t0).toBeLessThan(2);
     expect(geom.t1 - geom.t0).toBeGreaterThan(15);
     expect(geom.closed).toBe(true);
-    // the point-highlight surface is only the selected triangles; Geometry is not that patch
+    const stray = new Float32Array(off);
+    const leaked = coneDisplayShell(fit, stray, mid);
+    expect(leaked.t1 - leaked.t0).toBeLessThan(2);
     const tris: number[] = [];
     for (let i = 0; i < na; i++) tris.push(rows[3][i], rows[3][(i + 1) % na], rows[2][i]);
     const band = Uint32Array.from([...rows[2], ...rows[3]]);
-    const sel = trimmedSurface(fit, P, Uint32Array.from(tris), band);
+    const sel = trimmedSurface(fit, mesh, Uint32Array.from(tris), band);
     expect(sel.tri.length).toBeGreaterThan(0);
     expect(geom.tri.length).toBeGreaterThan(sel.tri.length * 2);
     expect(drawsPointHighlight('Kegel', 'geom')).toBe(false);

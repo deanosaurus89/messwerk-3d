@@ -36,16 +36,22 @@ export function zoneSrcFor(type: string, choice: 'points' | 'geom', aux: boolean
 }
 
 /**
- * Cone display for Boundary from Geometry: the mesh frustum, not the click ring.
- * A tight band that only sees the selected ring is widened once (1 mm, same as the extract search)
- * so a slightly off fit still draws the full surface. Open ends stay at the mesh limit.
+ * Cone display for Boundary from Geometry: mesh vertices within 0.35 mm of the fit,
+ * not the click ring. A looser band is not used — it runs onto blends and neighbouring faces.
+ * Open ends stay at the mesh. If that band is shorter than the selection, the selection span is kept.
  */
 export function coneDisplayShell(fit: FitResult, pos: ArrayLike<number>, verts: Uint32Array, bins = 72) {
   const pts = analyticShell(fit, pos, verts, bins);
-  const tight = analyticShell(fit, pos, verts, bins, { span: 'surface', band: SURFACE_SPAN_BAND });
-  if (tight.t1 - tight.t0 > pts.t1 - pts.t0 + 1) return tight;
-  const wide = analyticShell(fit, pos, verts, bins, { span: 'surface', band: 1 });
-  return wide.t1 - wide.t0 > tight.t1 - tight.t0 + 1 ? wide : tight;
+  const band = { span: 'surface' as const, band: SURFACE_SPAN_BAND };
+  let surf = analyticShell(fit, pos, verts, bins, band);
+  const len = fit.length ?? 0;
+  // The 0.35 mm band follows the infinite cone. Clamp to the fitted segment when that
+  // band runs far past it (a neighbouring face grazing the same cone).
+  if (len > 1 && surf.t1 - surf.t0 > len + 4) {
+    const pad = 1.5;
+    surf = analyticShell(fit, pos, verts, bins, { ...band, axial0: -len / 2 - pad, axial1: len / 2 + pad });
+  }
+  return surf.t1 - surf.t0 + 0.25 >= pts.t1 - pts.t0 ? surf : pts;
 }
 
 /** Cylinder display for Boundary from Geometry: full turn over the height of the points when the mesh wall is closed. */

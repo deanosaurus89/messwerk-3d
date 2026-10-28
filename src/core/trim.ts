@@ -83,6 +83,9 @@ export interface ShellOpt {
    *  height goes all the way round. An open wall stays an arc. */
   span?: 'points' | 'surface' | 'wall';
   band?: number;
+  /** Keep only samples whose axial coordinate (from the fit centre) lies in this window. */
+  axial0?: number;
+  axial1?: number;
 }
 /** Axial extent [mm] along the fitted axis of mesh vertices within `band` of the surface, or null when too few. */
 export function surfaceAxial(f: FitResult, pos: ArrayLike<number>, band = SURFACE_SPAN_BAND): [number, number] | null {
@@ -107,7 +110,10 @@ export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint3
   const ts: number[] = [], surf = opt?.span === 'surface', wall = opt?.span === 'wall', band = opt?.band ?? SURFACE_SPAN_BAND;
   const mark = (p: Vec3, angular: boolean) => {
     const q: Vec3 = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
-    ts.push(dot(q, n));
+    const t = dot(q, n);
+    if (opt?.axial0 != null && t < opt.axial0) return;
+    if (opt?.axial1 != null && t > opt.axial1) return;
+    ts.push(t);
     if (!angular) return;
     const a = Math.atan2(dot(q, v), dot(q, u)); occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
   };
