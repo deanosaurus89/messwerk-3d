@@ -6,6 +6,7 @@ import type { Viewer } from './viewer';
 import type { CadReq } from './cadworker';
 import type { CadAnalytic } from './cad/analytic';
 import type { TrimOp, V3, FaceType, Tess } from './cad/occcore';
+import { cadPickSamples } from './ui/cadpick';
 
 class CadEngine {
   private w: Worker | null = null; private seq = 0;
@@ -129,13 +130,18 @@ function outline(kind: 'circle' | 'rect', a: V3, b: V3): V3[] {
   const x = w.dot(R), y = w.dot(U); return [A, A.clone().addScaledVector(R, x), A.clone().addScaledVector(R, x).addScaledVector(U, y), A.clone().addScaledVector(U, y), A].map((p) => p.toArray() as V3);
 }
 function setRay(x: number, y: number) { const r = X.viewer.renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), X.viewer.camera); }
-export function cadPickHit(x: number, y: number): { id: number; p: V3; dist: number; normal: V3 } | null {
+function rayHit(x: number, y: number): { id: number; p: V3; dist: number; normal: V3 } | null {
   setRay(x, y); const h = ray.intersectObjects(meshes.filter((m) => m && m.visible), false)[0];
   if (!h) return null;
   const n = h.face?.normal;
   let normal: V3 = n ? [n.x, n.y, n.z] : [0, 0, 1];
   if (n && ray.ray.direction.dot(n) > 0) normal = [-normal[0], -normal[1], -normal[2]];
   return { id: h.object.userData.face, p: h.point.toArray() as V3, dist: h.distance, normal };
+}
+/** `soften`: also try a few pixels around the point (touch). The first hit wins, so an exact hit is kept. */
+export function cadPickHit(x: number, y: number, soften = false): { id: number; p: V3; dist: number; normal: V3 } | null {
+  for (const [dx, dy] of cadPickSamples(soften)) { const h = rayHit(x + dx, y + dy); if (h) return h; }
+  return null;
 }
 function pickFace(x: number, y: number): { id: number; p: V3 } | null { const h = cadPickHit(x, y); return h ? { id: h.id, p: h.p } : null; }
 /** Weltpunkt unter dem Zeiger: auf der Fläche, sonst auf der Ebene durch das Drehzentrum senkrecht zur Blickrichtung. */
