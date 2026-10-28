@@ -2,6 +2,7 @@
 // (Rand-Offset, Schnittlinie, Inseln) auf die Originalflächen anwenden, Ergebnis als STEP AP214 / IGES (144) schreiben.
 // Reine Funktionen auf dem OC-Modul `oc` – laufen im Worker (Browser) und in vitest (Node).
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type { CadAnalytic, CadCurve } from './analytic';
 type OC = any;
 export type V3 = [number, number, number];
 export type FaceType = 'Ebene' | 'Zylinder' | 'Kegel' | 'Kugel' | 'Torus' | 'NURBS';
@@ -44,6 +45,96 @@ function edgesOf(oc: OC, sh: any): any[] {
 export function perimeter(oc: OC, f: any): number { let s = 0; for (const e of edgesOf(oc, f)) { if (oc.BRep_Tool.Degenerated(e) || oc.BRep_Tool.IsClosed_2(e, f)) continue; const g = new oc.GProp_GProps_1(); oc.BRepGProp.LinearProperties(e, g, false, false); s += g.Mass(); g.delete(); } return s; }
 export function area(oc: OC, sh: any): number { const g = new oc.GProp_GProps_1(); oc.BRepGProp.SurfaceProperties_1(sh, g, false, false); const a = g.Mass(); g.delete(); return a; }
 export function isValid(oc: OC, sh: any): boolean { const a = new oc.BRepCheck_Analyzer(sh, true, false); const v = a.IsValid_2(); a.delete(); return v; }
+const p3 = (p: any): V3 => [p.X(), p.Y(), p.Z()];
+const d3 = (p: any): V3 => { const n = norm([p.X(), p.Y(), p.Z()]); return n; };
+function curvePoint(c: any, oc: OC, u: number): any {
+  if (typeof c.Value === 'function') { try { const q = c.Value(u); if (q && typeof q.X === 'function') return q; } catch { /* overload */ } }
+  const p = new oc.gp_Pnt_1();
+  if (typeof c.D0 === 'function') c.D0(u, p); else c.D0_1?.(u, p);
+  return p;
+}
+function edgeLen(oc: OC, e: any): number {
+  try { const g = new oc.GProp_GProps_1(); oc.BRepGProp.LinearProperties(e, g, false, false); const m = g.Mass(); g.delete(); return m; } catch { return 0; }
+}
+function faceCurves(oc: OC, f: any): CadCurve[] {
+  const out: CadCurve[] = [];
+  const CT = oc.GeomAbs_CurveType;
+  for (const e of edgesOf(oc, f)) {
+    if (oc.BRep_Tool.Degenerated(e) || oc.BRep_Tool.IsClosed_2(e, f)) continue;
+    const c = new oc.BRepAdaptor_Curve_2(e);
+    try {
+      const u0 = c.FirstParameter(), u1 = c.LastParameter(), mid = p3(curvePoint(c, oc, (u0 + u1) / 2));
+      const ty = c.GetType(); const length = edgeLen(oc, e);
+      if (ty === CT.GeomAbs_Circle) {
+        const circ = c.Circle(); const ax = circ.Axis();
+        out.push({ kind: 'circle', mid, length, center: p3(circ.Location()), normal: d3(ax.Direction()), radius: circ.Radius() });
+      } else if (ty === CT.GeomAbs_Line) {
+        out.push({ kind: 'line', mid, length, a: p3(curvePoint(c, oc, u0)), b: p3(curvePoint(c, oc, u1)) });
+      } else out.push({ kind: 'other', mid, length });
+    } finally { c.delete?.(); }
+  }
+  return out;
+}
+/** Extent of the face along `axis`, measured from `origin` (samples of the UV corners). */
+function axisExtent(a: any, oc: OC, origin: V3, axis: V3, u0: number, u1: number, v0: number, v1: number): [number, number] {
+  let t0 = Infinity, t1 = -Infinity;
+  for (const u of [u0, (u0 + u1) / 2, u1]) for (const v of [v0, (v0 + v1) / 2, v1]) {
+    let q: V3;
+    try { q = p3(a.Value(u, v)); } catch { const p = new oc.gp_Pnt_1(); a.D0(u, v, p); q = p3(p); }
+    const t = (q[0] - origin[0]) * axis[0] + (q[1] - origin[1]) * axis[1] + (q[2] - origin[2]) * axis[2];
+    if (t < t0) t0 = t; if (t > t1) t1 = t;
+  }
+  return [t0, t1];
+}
+/** Analytic geometry of one face (plane / cylinder / cone / sphere / torus / freeform) plus its edges. */
+export function faceAnalytic(oc: OC, f: any): CadAnalytic {
+  const a = new oc.BRepAdaptor_Surface_2(f, true);
+  const T = oc.GeomAbs_SurfaceType; const ty = a.GetType();
+  const u0 = a.FirstUParameter(), u1 = a.LastUParameter(), v0 = a.FirstVParameter(), v1 = a.LastVParameter();
+  const rev = f.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+  const edges = faceCurves(oc, f);
+  const blank = (): CadAnalytic => ({ type: 'NURBS', origin: [0, 0, 0], normal: [0, 0, 1], edges });
+  try {
+    if (ty === T.GeomAbs_Plane) {
+      const pl = a.Plane(); let n = d3(pl.Axis().Direction()); if (rev) n = [-n[0], -n[1], -n[2]];
+      return { type: 'Ebene', origin: p3(pl.Location()), normal: n, edges };
+    }
+    if (ty === T.GeomAbs_Cylinder) {
+      const cy = a.Cylinder(); const ax = cy.Axis(); const origin = p3(ax.Location()); const n = d3(ax.Direction());
+      const [t0, t1] = axisExtent(a, oc, origin, n, u0, u1, v0, v1);
+      return { type: 'Zylinder', origin, normal: n, radius: cy.Radius(), t0, t1, edges };
+    }
+    if (ty === T.GeomAbs_Cone) {
+      const co = a.Cone(); const ax = co.Axis(); const apex = p3(co.Apex()); let n = d3(ax.Direction());
+      const ha = Math.abs(co.SemiAngle());
+      const [t0, t1] = axisExtent(a, oc, apex, n, u0, u1, v0, v1);
+      // axis points away from the apex towards the face
+      if (t1 < 0 && t0 < 0) n = [-n[0], -n[1], -n[2]];
+      const tt = axisExtent(a, oc, apex, n, u0, u1, v0, v1);
+      return { type: 'Kegel', origin: apex, apex, normal: n, halfAngle: ha, t0: tt[0], t1: tt[1], edges };
+    }
+    if (ty === T.GeomAbs_Sphere) {
+      const s = a.Sphere(); const origin = p3(s.Location());
+      let q: V3; try { q = p3(a.Value((u0 + u1) / 2, (v0 + v1) / 2)); } catch { q = origin; }
+      const w = sub(q, origin); const n = norm(w);
+      return { type: 'Kugel', origin, normal: n, radius: s.Radius(), edges };
+    }
+    if (ty === T.GeomAbs_Torus) {
+      const t = a.Torus(); const ax = t.Axis(); let n = d3(ax.Direction()); if (rev) n = [-n[0], -n[1], -n[2]];
+      return { type: 'Torus', origin: p3(t.Location()), normal: n, radius: t.MajorRadius(), minor: t.MinorRadius(), edges };
+    }
+    // freeform: a sample point and the geometric normal there
+    let origin: V3 = [0, 0, 0], normal: V3 = [0, 0, 1];
+    try {
+      const p = new oc.gp_Pnt_1(), du = new oc.gp_Vec_1(), dv = new oc.gp_Vec_1();
+      a.D1((u0 + u1) / 2, (v0 + v1) / 2, p, du, dv);
+      origin = p3(p); const cr = cross([du.X(), du.Y(), du.Z()], [dv.X(), dv.Y(), dv.Z()]);
+      normal = norm(cr); if (rev) normal = [-normal[0], -normal[1], -normal[2]];
+    } catch { /* keep the placeholder */ }
+    return { type: 'NURBS', origin, normal, edges };
+  } catch { return blank(); }
+  finally { a.delete?.(); }
+}
 export function faceInfo(oc: OC, f: any, id: number): FaceInfo {
   const a = new oc.BRepAdaptor_Surface_2(f, true); const t = a.GetType(); const T = oc.GeomAbs_SurfaceType; a.delete();
   const map: [any, FaceType, string][] = [[T.GeomAbs_Plane, 'Ebene', ''], [T.GeomAbs_Cylinder, 'Zylinder', ''], [T.GeomAbs_Cone, 'Kegel', ''], [T.GeomAbs_Sphere, 'Kugel', ''], [T.GeomAbs_Torus, 'Torus', ''],

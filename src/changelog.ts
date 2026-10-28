@@ -7,6 +7,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.43', date: '2026-10-28', items: [
+    'Prototype: nominal (Soll) features from the CAD model in the same Feature Builder as the polygon. Auto uses the pointer target — CAD face → Soll, polygon → Ist. Advanced › Nominal / actual can force Soll, Ist or Auto.',
+    'A click on a CAD face previews the analytic geometry (plane, circle at a circular edge, cylinder, cone, sphere, torus, slot contour, freeform surface) labelled Soll. ✓ creates the feature with a Soll component (method From CAD). The tree shows Soll under the feature; Ist appears only after an actual exists.',
+    'Extract actual from nominal: with a scan in the same coordinate system, the feature dialog collects mesh points near the Soll geometry and fits them (same search as re-extract, seeded by the nominal). Alignment itself is not changed.',
+    'Boundary, boundary exclusion distance and boundary smoothing stay greyed out for a scan. They still apply only to a CAD nominal.',
+  ] },
   { version: '2026.0.42', date: '2026-10-28', items: [
     'Coloured points are mesh vertices: used points, auxiliary-plane points, the creation preview, the brush and the re-extract preview are drawn as dots, not as coloured triangles. The brush selects vertices.',
     'A legend at the top left of the 3D view names those colours. ✕ on the legend leaves that view.',

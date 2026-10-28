@@ -4,6 +4,7 @@ import { progressBegin, progressEnd, progressUpdate } from './progress';
 import * as THREE from 'three';
 import type { Viewer } from './viewer';
 import type { CadReq } from './cadworker';
+import type { CadAnalytic } from './cad/analytic';
 import type { TrimOp, V3, FaceType, Tess } from './cad/occcore';
 
 class CadEngine {
@@ -20,11 +21,13 @@ class CadEngine {
     return new Promise<T>((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }).finally(progressEnd); }
 }
 
-interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; tess: Tess; res: null | { tess: Tess; area: number; pieces: number }; }
+interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; tess: Tess; geom?: CadAnalytic | null; res: null | { tess: Tess; area: number; pieces: number }; }
 type Tool = null | 'offset' | 'cut' | 'circle' | 'rect' | 'export';
 export interface CadCtx {
   viewer: Viewer; toast: (t: string) => void; status: (t: string) => void; renderTree: () => void; renderDialog: () => void;
   isPhone: () => boolean; togglePanel: (p: 'tree' | 'dialog' | 'table', on?: boolean) => void; eyeBtn: (v: boolean, f: () => void) => HTMLElement; hasMesh: () => boolean;
+  /** Feature Builder is active: CAD face selection must not take the click. */
+  featureTool?: () => boolean;
 }
 const TYPE_COLOR: Record<FaceType, number> = { Ebene: 0x9fb4cc, Zylinder: 0x9cc79a, Kegel: 0xd1bb8a, Kugel: 0xc4a0d6, Torus: 0x8ccccc, NURBS: 0xd6a3a3 };
 const TYPE_ICON: Record<FaceType, string> = { Ebene: '▱', Zylinder: '⌭', Kegel: '△', Kugel: '◯', Torus: '◎', NURBS: '∿' };
@@ -90,9 +93,15 @@ function outline(kind: 'circle' | 'rect', a: V3, b: V3): V3[] {
   const x = w.dot(R), y = w.dot(U); return [A, A.clone().addScaledVector(R, x), A.clone().addScaledVector(R, x).addScaledVector(U, y), A.clone().addScaledVector(U, y), A].map((p) => p.toArray() as V3);
 }
 function setRay(x: number, y: number) { const r = X.viewer.renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), X.viewer.camera); }
-function pickFace(x: number, y: number): { id: number; p: V3 } | null {
-  setRay(x, y); const h = ray.intersectObjects(meshes.filter((m) => m && m.visible), false)[0]; return h ? { id: h.object.userData.face, p: h.point.toArray() as V3 } : null;
+export function cadPickHit(x: number, y: number): { id: number; p: V3; dist: number; normal: V3 } | null {
+  setRay(x, y); const h = ray.intersectObjects(meshes.filter((m) => m && m.visible), false)[0];
+  if (!h) return null;
+  const n = h.face?.normal;
+  let normal: V3 = n ? [n.x, n.y, n.z] : [0, 0, 1];
+  if (n && ray.ray.direction.dot(n) > 0) normal = [-normal[0], -normal[1], -normal[2]];
+  return { id: h.object.userData.face, p: h.point.toArray() as V3, dist: h.distance, normal };
 }
+function pickFace(x: number, y: number): { id: number; p: V3 } | null { const h = cadPickHit(x, y); return h ? { id: h.id, p: h.p } : null; }
 /** Weltpunkt unter dem Zeiger: auf der Fläche, sonst auf der Ebene durch das Drehzentrum senkrecht zur Blickrichtung. */
 function worldAt(x: number, y: number): V3 {
   const h = pickFace(x, y); if (h) return h.p; setRay(x, y); const { D } = viewBasis(); const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(D, X.viewer.controls.target);
@@ -172,7 +181,7 @@ function closeLine() {
   drawOverlay(); finishLine();
 }
 function finishLine() { if (cad.draft.length < 2) { X.toast('At least two points.'); return; } cutStage = 'side'; X.toast('Now tap the side to remove.'); X.renderDialog(); }
-export const cadActive = () => cad.faces.length > 0 && (!!cad.tool || !!document.querySelector('.tab.active[data-tab="nuetz"]') || !X.hasMesh());
+export const cadActive = () => cad.faces.length > 0 && !X.featureTool?.() && (!!cad.tool || !!document.querySelector('.tab.active[data-tab="nuetz"]') || !X.hasMesh());
 
 function download(bytes: Uint8Array, name: string) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes as any], { type: 'application/octet-stream' })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
 export async function cadExport(fmt: 'step' | 'iges', all = cad.exportAll) {
@@ -261,7 +270,9 @@ export function initCad(ctx: CadCtx) {
     const h = pickFace(e.clientX, e.clientY); const id = h?.id ?? -1; if (id !== cad.hover) { cad.hover = id; cadPaint(); canvas.style.cursor = id >= 0 ? 'pointer' : ''; }
   });
   window.addEventListener('pointerup', (e) => {
-    if (!down || !cadActive()) { down = null; return; } const d0 = down; down = null; if (e.target !== canvas) return; (e as any).cadHandled = true;
+    if (!down || !cadActive()) { down = null; return; }
+    if (X.featureTool?.()) { down = null; return; }
+    const d0 = down; down = null; if (e.target !== canvas) return; (e as any).cadHandled = true;
     if (Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 8 || performance.now() - d0.t > 700) return;
     (e as any).cadHandled = true; cadTap(e.clientX, e.clientY, e.shiftKey || e.ctrlKey || e.metaKey);
   }, true);
@@ -280,5 +291,5 @@ export function initCad(ctx: CadCtx) {
   $('#btn-cad-all').onclick = () => { const all = cad.sel.size < cad.faces.filter((f) => f.visible).length; cad.sel = new Set(all ? cad.faces.filter((f) => f.visible).map((f) => f.id) : []); cadPaint(); X.renderTree(); X.renderDialog(); };
   $('#btn-cad-removed').onclick = () => { cad.showRemoved = !cad.showRemoved; cadPaint(); renderCadRibbon(); };
   $('#btn-cad-hide').onclick = () => { if (!cad.sel.size) { cad.faces.forEach((f) => (f.visible = true)); } else { for (const i of cad.sel) cad.faces[i].visible = false; cad.sel.clear(); } cadPaint(); X.renderTree(); X.renderDialog(); };
-  Object.assign((window as any).__app ?? ((window as any).__app = {}), { cad, cadOpen, cadExport, cadUndo, cadPick: pickFace, cadSetTool: setTool });
+  Object.assign((window as any).__app ?? ((window as any).__app = {}), { cad, cadOpen, cadExport, cadUndo, cadPick: pickFace, cadPickHit, cadSetTool: setTool });
 }

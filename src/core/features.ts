@@ -14,7 +14,7 @@ export interface Feature {
   type: GeomType;
   // ---- Ist (actual) – stored in `ist` (see core/featuremodel.ts); the flat names below are accessors onto it
   ist?: IstState;
-  /** reserved: nominal (Soll) from CAD – not implemented */
+  /** nominal (Soll) from CAD */
   soll?: SollState;
   measured?: FitResult;      // → ist.fit
   pointCount: number;        // → ist.pointCount
