@@ -6,12 +6,14 @@ import type { FitResult } from './fit';
 import { Vec3, basis, dot, sub, unit } from './linalg';
 import { selectionLoops } from './boundary';
 
-export interface FrozenBoundary { o: Vec3; n: Vec3; u: Vec3; v: Vec3; /** closed loops, flat [u0,v0,u1,v1,…] [mm] */ loops: number[][]; /** median edge [mm] */ h: number; /** search distance ± used at creation [mm] (default of a later re-extraction) */ band?: number }
+export interface FrozenBoundary { o: Vec3; n: Vec3; u: Vec3; v: Vec3; /** closed loops, flat [u0,v0,u1,v1,…] [mm] */ loops: number[][]; /** median edge [mm] */ h: number; /** search distance ± used at creation [mm] (default of a later re-extraction) */ band?: number; /** openings closed in the domain (dismissed island or a hole treated as closed): [u, v, r] mm. The fit points stay outside; the geometric domain does not keep the hole. */ sealed?: number[][] }
+/** Island / hole whose interior must not stay an inner loop of the frozen plane. `c` is the island centre, `r` its equivalent radius [mm]. */
+export interface HoleSeal { c: Vec3; r: number }
 
 const P3 = (pos: ArrayLike<number>, i: number): Vec3 => [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]];
 const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
 
-export function freezeBoundary(fit: FitResult, pos: ArrayLike<number>, tris: ArrayLike<number>, idx: ArrayLike<number>): FrozenBoundary | null {
+export function freezeBoundary(fit: FitResult, pos: ArrayLike<number>, tris: ArrayLike<number>, idx: ArrayLike<number>, seal?: HoleSeal[]): FrozenBoundary | null {
   if (fit.type !== 'Ebene' || idx.length < 3) return null;
   const n = unit(fit.normal), o = fit.center, [u, v] = basis(n);
   const L = selectionLoops(tris, idx, pos.length / 3); if (!L.length) return null;
@@ -22,7 +24,52 @@ export function freezeBoundary(fit: FitResult, pos: ArrayLike<number>, tris: Arr
     loops.push(a); }
   edges.sort((x, y) => x - y); const h = edges[edges.length >> 1] ?? 0.5;
   loops = realLoops(loops, h);
-  return { o: [...o] as Vec3, n: [...n] as Vec3, u: [...u] as Vec3, v: [...v] as Vec3, loops, h };
+  const frame = { o: [...o] as Vec3, n: [...n] as Vec3, u: [...u] as Vec3, v: [...v] as Vec3 };
+  const sealed = sealInner(loops, frame, seal);
+  loops = sealed.loops;
+  return { ...frame, loops, h, sealed: sealed.sealed.length ? sealed.sealed : undefined };
+}
+const loopCentroid = (l: number[]): [number, number] => { let x = 0, y = 0, n = 0; for (let i = 0; i < l.length; i += 2) { x += l[i]; y += l[i + 1]; n++; } return n ? [x / n, y / n] : [0, 0]; };
+/** 0.44: a dismissed island (and a hole marked closed) leaves the point set, but the frozen domain used for later
+ *  extract must not keep that opening. The outer contour stays; matching inner loops are dropped. */
+function sealInner(loops: number[][], F: { o: Vec3; u: Vec3; v: Vec3 }, seal?: HoleSeal[]): { loops: number[][]; sealed: number[][] } {
+  if (!seal?.length || loops.length < 2) return { loops, sealed: [] };
+  const A = loops.map(loopArea); let outer = 0; for (let i = 1; i < A.length; i++) if (A[i] > A[outer]) outer = i;
+  const sealed: number[][] = [], keep: number[][] = [];
+  for (let i = 0; i < loops.length; i++) {
+    if (i === outer) { keep.push(loops[i]); continue; }
+    const c = loopCentroid(loops[i]);
+    const hit = seal.find((s) => { const w = sub(s.c, F.o), su = dot(w, F.u), sv = dot(w, F.v); return Math.hypot(c[0] - su, c[1] - sv) < Math.max(1.5, (s.r || 0) * 1.6); });
+    if (hit) sealed.push([r4(c[0]), r4(c[1]), r4(Math.max(hit.r || 0, 0.5))]); else keep.push(loops[i]);
+  }
+  return { loops: keep, sealed };
+}
+const uvOf = (p: Vec3, F: { o: Vec3; u: Vec3; v: Vec3 }) => { const w = sub(p, F.o); return [dot(w, F.u), dot(w, F.v)] as [number, number]; };
+const nearSeal = (u: number, v: number, F: FrozenBoundary) => !!F.sealed?.some((s) => Math.hypot(u - s[0], v - s[1]) < Math.max(1.5, s[2] * 1.6));
+/** Boundary loops with sealed openings removed. The largest loop (outer contour) always stays. */
+export function unsealedBoundary(loops: Vec3[][], F: FrozenBoundary): Vec3[][] {
+  if (!F.sealed?.length || loops.length < 2) return loops;
+  const area = (L: Vec3[]) => { let a = 0; for (let i = 0; i < L.length; i++) { const p = uvOf(L[i], F), q = uvOf(L[(i + 1) % L.length], F); a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a); };
+  const A = loops.map(area); let outer = 0; for (let i = 1; i < A.length; i++) if (A[i] > A[outer]) outer = i;
+  return loops.filter((L, i) => { if (i === outer) return true; let x = 0, y = 0; for (const p of L) { const q = uvOf(p, F); x += q[0]; y += q[1]; } return !nearSeal(x / L.length, y / L.length, F); });
+}
+/** Triangle fans on the plane that close sealed openings. The fit point set is unchanged. */
+export function sealedFans(pos: ArrayLike<number>, tris: ArrayLike<number>, idx: ArrayLike<number>, F: FrozenBoundary): Float32Array {
+  if (!F.sealed?.length) return new Float32Array(0);
+  const L = selectionLoops(tris, idx, pos.length / 3); if (L.length < 2) return new Float32Array(0);
+  const flats = L.map((lp) => { const flat: number[] = []; for (const k of lp) { const w = sub(P3(pos, k), F.o); flat.push(dot(w, F.u), dot(w, F.v)); } return flat; });
+  const areas = flats.map(loopArea); let outer = 0; for (let i = 1; i < areas.length; i++) if (areas[i] > areas[outer]) outer = i;
+  const out: number[] = [], { o, u, v } = F;
+  const lift = (x: number, y: number) => [o[0] + u[0] * x + v[0] * y, o[1] + u[1] * x + v[1] * y, o[2] + u[2] * x + v[2] * y];
+  flats.forEach((flat, li) => {
+    if (li === outer) return;
+    let su = 0, sv = 0; for (let i = 0; i < flat.length; i += 2) { su += flat[i]; sv += flat[i + 1]; }
+    const n = flat.length / 2 || 1; su /= n; sv /= n;
+    if (!nearSeal(su, sv, F)) return;
+    const c = lift(su, sv);
+    for (let i = 0; i < flat.length; i += 2) { const j = (i + 2) % flat.length; out.push(...c, ...lift(flat[i], flat[i + 1]), ...lift(flat[j], flat[j + 1])); }
+  });
+  return new Float32Array(out);
 }
 
 const loopArea = (l: number[]) => { let a = 0; for (let i = 0; i < l.length; i += 2) { const j = (i + 2) % l.length; a += l[i] * l[j + 1] - l[j] * l[i + 1]; } return Math.abs(a) / 2; };
