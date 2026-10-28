@@ -7,6 +7,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.44', date: '2026-10-28', items: [
+    'Plane: dismissing an island (✕) or treating a hole as closed fills that opening in the frozen boundary and in the plane surface used for a later extract. The fit points stay outside the bore. A real island that was not dismissed still leaves a hole.',
+    'Cone: display and extract-from-geometry use the fitted cone over the frustum the mesh covers (full turn when the wall is closed), not only the click-grown patch. Open ends stay at the mesh/CAD limit — the apex is not added past the scan. If that refit runs onto a blend, the point set stays the grown patch and the drawn cone is still the full frustum.',
+    'Sphere: the feature is drawn as the complete sphere, and extract-from-geometry already searches the whole spherical shell. The same blend guard as before keeps a bad refit off the point set.',
+    'Cylinder is unchanged: fitted geometry is still the full turn over the height of the points (2026.0.27). Boundary, exclusion distance and smoothing stay greyed out on a scan.',
+    'Includes the 2026.0.43 CAD nominal prototype (Soll from a CAD face, extract actual from nominal) on the same version.',
+  ] },
   { version: '2026.0.43', date: '2026-10-28', items: [
     'Prototype: nominal (Soll) features from the CAD model in the same Feature Builder as the polygon. Auto uses the pointer target — CAD face → Soll, polygon → Ist. Advanced › Nominal / actual can force Soll, Ist or Auto.',
     'A click on a CAD face previews the analytic geometry (plane, circle at a circular edge, cylinder, cone, sphere, torus, slot contour, freeform surface) labelled Soll. ✓ creates the feature with a Soll component (method From CAD). The tree shows Soll under the feature; Ist appears only after an actual exists.',

@@ -1,7 +1,12 @@
 // Trimmed feature geometry: the fitted surface restricted to the triangles of the selected points
 // (all 3 vertices in the feature), each vertex projected onto the fitted element; plus the boundary contour.
-import type { FitResult } from './fit';
+import { type FitResult, signedDistance } from './fit';
 import { Vec3, add, basis, cross, dot, norm, scale, sub, unit } from './linalg';
+
+/** Vertices within this distance [mm] of a fitted cone count toward its full surface extent.
+ *  Tighter than the extract search distance, so a fillet just off the cone does not stretch the frustum.
+ *  Open ends stay at that mesh/CAD limit — a mathematical apex past the scan is not added. */
+export const SURFACE_SPAN_BAND = 0.35;
 
 export const TRIM_TYPES = ['Ebene', 'Zylinder', 'Kugel', 'Kegel', 'Torus'];
 /** curve features: trimmed display = only the covered arc / segment of the curve */
@@ -70,19 +75,42 @@ export function trimmedSurface(f: FitResult, pos: ArrayLike<number>, tris: Array
   return { tri: new Float32Array(out), edges: new Float32Array(ed) };
 }
 
+export interface ShellOpt {
+  /** 'points' (default): axial and angular extent of `verts` only.
+   *  'surface': every mesh vertex within `band` of the fitted surface — the frustum the mesh actually covers,
+   *  not the click-grown patch. Open ends stay at that mesh/CAD limit. */
+  span?: 'points' | 'surface';
+  band?: number;
+}
+/** Axial extent [mm] along the fitted axis of mesh vertices within `band` of the surface, or null when too few. */
+export function surfaceAxial(f: FitResult, pos: ArrayLike<number>, band = SURFACE_SPAN_BAND): [number, number] | null {
+  const n = unit(f.normal), c = f.center; let t0 = Infinity, t1 = -Infinity, k = 0;
+  for (let i = 0; i < pos.length / 3; i++) {
+    const p: Vec3 = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]];
+    if (Math.abs(signedDistance(f, p)) > band) continue;
+    const t = (p[0] - c[0]) * n[0] + (p[1] - c[1]) * n[1] + (p[2] - c[2]) * n[2];
+    if (t < t0) t0 = t; if (t > t1) t1 = t; k++;
+  }
+  return k >= 8 && t1 > t0 + 1e-6 ? [t0, t1] : null;
+}
 /**
  * Analytic display of a cylinder/cone whose boundary comes from the FITTED GEOMETRY (not the selected triangles):
- * the surface between the axial extent of the points (t0…t1 along the axis), over the full 360° when the wall is
- * closed, otherwise over the covered angular range (largest empty sector cut out). Edges are clean circles/arcs at
- * t0 and t1 (+ the two axial lines of an open wall) – no polygonal outline of the mesh selection.
+ * the surface between an axial extent (t0…t1 along the axis), over the full 360° when the wall is closed, otherwise
+ * over the covered angular range (largest empty sector cut out). Default extent is the given points (cylinder, 0.27).
+ * `span: 'surface'` uses the whole mesh frustum of a cone. Edges are clean circles/arcs at t0 and t1 (+ the two axial
+ * lines of an open wall) – no polygonal outline of the mesh selection.
  */
-export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint32Array, bins = 72): { tri: Float32Array; edges: Float32Array; closed: boolean; t0: number; t1: number; a0: number; a1: number } {
+export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint32Array, bins = 72, opt?: ShellOpt): { tri: Float32Array; edges: Float32Array; closed: boolean; t0: number; t1: number; a0: number; a1: number } {
   const n = unit(f.normal), c = f.center, [u, v] = basis(n), occ = new Uint8Array(bins);
-  const ts: number[] = [];
-  for (let i = 0; i < verts.length; i++) {
-    const k = verts[i], q: Vec3 = [pos[3 * k] - c[0], pos[3 * k + 1] - c[1], pos[3 * k + 2] - c[2]];
+  const ts: number[] = [], surf = opt?.span === 'surface', band = opt?.band ?? SURFACE_SPAN_BAND;
+  const take = (k: number) => {
+    const p: Vec3 = [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]];
+    if (surf && Math.abs(signedDistance(f, p)) > band) return;
+    const q: Vec3 = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
     ts.push(dot(q, n)); const a = Math.atan2(dot(q, v), dot(q, u)); occ[Math.min(bins - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * bins))] = 1;
-  }
+  };
+  if (surf) { for (let k = 0; k < pos.length / 3; k++) take(k); if (ts.length < 8) { ts.length = 0; occ.fill(0); for (let i = 0; i < verts.length; i++) take(verts[i]); } }
+  else for (let i = 0; i < verts.length; i++) take(verts[i]);
   ts.sort((a, b) => a - b);
   const qn = (p: number) => ts.length ? ts[Math.min(ts.length - 1, Math.max(0, Math.round(p * (ts.length - 1))))] : 0;
   const t0 = qn(0.001), t1 = qn(0.999);
@@ -103,4 +131,21 @@ export function analyticShell(f: FitResult, pos: ArrayLike<number>, verts: Uint3
   for (const t of [t0, t1]) for (let i = 0; i < na; i++) ed.push(...P(a0 + ((a1 - a0) * i) / na, t), ...P(a0 + ((a1 - a0) * (i + 1)) / na, t));
   if (!closed) for (const a of [a0, a1]) ed.push(...P(a, t0), ...P(a, t1));
   return { tri: new Float32Array(tri), edges: new Float32Array(ed), closed, t0, t1, a0, a1 };
+}
+/** Complete fitted sphere (both hemispheres). A selected cap is not the feature geometry. */
+export function analyticSphere(f: FitResult, nLat = 16, nLon = 32): { tri: Float32Array; edges: Float32Array } {
+  const c = f.center, r = Math.max(1e-6, f.radius ?? 1);
+  const P = (i: number, j: number): Vec3 => {
+    const b = Math.PI * (j / nLat) - Math.PI / 2, a = (2 * Math.PI * i) / nLon, cb = Math.cos(b), sb = Math.sin(b);
+    return [c[0] + r * cb * Math.cos(a), c[1] + r * cb * Math.sin(a), c[2] + r * sb];
+  };
+  const tri: number[] = [], ed: number[] = [];
+  for (let j = 0; j < nLat; j++) for (let i = 0; i < nLon; i++) {
+    const i1 = (i + 1) % nLon, p00 = P(i, j), p10 = P(i1, j), p01 = P(i, j + 1), p11 = P(i1, j + 1);
+    if (j === 0) tri.push(...p00, ...p11, ...p01); else if (j === nLat - 1) tri.push(...p00, ...p10, ...p01);
+    else tri.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
+  }
+  for (let i = 0; i < nLon; i++) ed.push(...P(i, nLat >> 1), ...P(i + 1, nLat >> 1));
+  for (const i of [0, nLon >> 2]) for (let j = 0; j < nLat; j++) ed.push(...P(i, j), ...P(i, j + 1));
+  return { tri: new Float32Array(tri), edges: new Float32Array(ed) };
 }

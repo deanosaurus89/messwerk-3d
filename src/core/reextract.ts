@@ -5,8 +5,9 @@
 // Regions:
 //  plane (trimmed)  → prism over its contour (occupancy grid of the current points in the plane, + edge margin)
 //  plane (no points, e.g. anchor) → rectangular box over the anchor points + margin
-//  cylinder / cone  → hollow shell over the trimmed height (+ margin)
-//  sphere           → spherical shell
+//  cylinder         → hollow shell over the trimmed height of the current points (+ margin); full turn inside that height
+//  cone (fullGeom)  → hollow shell over the mesh frustum of the fitted cone, not only the selected patch height
+//  sphere           → complete spherical shell (both hemispheres)
 //  circle / slot    → band along the curve (in-plane distance to the contour, over the current height + margin)
 //  line             → tube along the line (over its extent + margin)
 import { FitResult, GeomType, fitType, modelNormal, signedDistance } from './fit';
@@ -14,6 +15,7 @@ import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { fillOuterBoundary, insetPlane, rasterTris } from './fillplane';
 import { fitInPlane } from './aux';
 import { FrozenBoundary, frozenCells, frozenTester } from './frozen';
+import { surfaceAxial } from './trim';
 
 export interface ReexParams {
   /** search distance ± [mm]: normal thickness of the search region (and band for All inside boundary) */
@@ -42,6 +44,9 @@ export interface ReexParams {
   frozenIdx?: Uint32Array | number[] | null;
   /** Boundary from the point selection: candidates stay inside frozenIdx. A lateral margin must not pull in more points. */
   pointBound?: boolean;
+  /** Cone: axial extent is the fitted surface on the mesh (frustum the scan covers), not the selected-point span.
+   *  Sphere is already a full shell. Cylinder keeps the point span (0.27). */
+  fullGeom?: boolean;
   /** @deprecated pre-0.19 projects: separate band of All inside boundary (migrated by normReex) */
   fillBand?: number;
 }
@@ -133,7 +138,13 @@ export function buildRegion(fit: FitResult, pos: ArrayLike<number>, current: Uin
       else if (off < 0 && r > 0) { const inv = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) inv[k] = cells[k] ? 0 : 1; const g = dil(inv, r); for (let k = 0; k < W * H; k++) cells[k] = cells[k] && !g[k] ? 1 : 0; }
       return { kind: 'prism', o: c, n, u, v, h, i0, j0, w: W, hgt: H, cells, d };
     }
-    case 'Zylinder': case 'Kegel': { const [t0, t1] = along(pos, current, c, n, seedPts); return { kind: 'shell', type: fit.type, c, a: n, t0: t0 - m, t1: t1 + m, d, fit }; }
+    case 'Zylinder': case 'Kegel': {
+      // Cylinder (0.27): height of the current points. Cone with fullGeom: the frustum the mesh actually covers
+      // (open ends stay at that mesh/CAD limit; the apex is not extended past the scan).
+      let [t0, t1] = along(pos, current, c, n, seedPts);
+      if (fit.type === 'Kegel' && p.fullGeom) { const s = surfaceAxial(fit, pos); if (s) { t0 = Math.min(t0, s[0]); t1 = Math.max(t1, s[1]); } }
+      return { kind: 'shell', type: fit.type, c, a: n, t0: t0 - m, t1: t1 + m, d, fit };
+    }
     case 'Kugel': return { kind: 'sphere', c, r: fit.radius!, d };
     case 'Torus': return { kind: 'torus', fit, d };
     case 'Kreis': case 'Langloch': { const [t0, t1] = along(pos, current, c, n, seedPts); return { kind: 'band', type: fit.type, fit, t0: t0 - m, t1: t1 + m, d }; }

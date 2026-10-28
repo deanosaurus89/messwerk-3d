@@ -10,12 +10,12 @@ import { unionIndices } from './core/region';
 import { AxisAnalysis, analyzeAxis, axisNominal } from './core/axisan';
 import { sideView } from './ui/axisview';
 import { getDec, setDec, decFor, DEC_MIN, DEC_MAX } from './core/display';
-import { TRIM_TYPES, trimmedSurface, analyticShell, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
+import { TRIM_TYPES, trimmedSurface, analyticShell, analyticSphere, CURVE_TRIM_TYPES, trimmedCurve } from './core/trim';
 import { smoothedBoundary, loopSegments } from './core/boundary';
 import { zoneLoops } from './core/auxzone';
 import type { Island, IslandChoice } from './core/fillplane';
 import { normReex, lateralOf } from './core/reextract';
-import { freezeBoundary, type FrozenBoundary } from './core/frozen';
+import { freezeBoundary, sealedFans, unsealedBoundary, type FrozenBoundary, type HoleSeal } from './core/frozen';
 import { installNumFields, parseNum } from './ui/numfield';
 import { asNode, migrateFeatures, nodeToJSON, FEATURE_MODEL } from './core/featuremodel';
 import { REEX_TYPES, bindReex, clearReexPreview, initReexUI, reexHTML, reexPreview, reexPreviewPts, setSearchDistDefault } from './ui/reexui';
@@ -34,20 +34,37 @@ function curveTrimFor(f: FeatureView) {
   const pts = featPoints(f.id); const seg = pts ? trimmedCurve(f.measured!, pts) : null; curveCache.set(f.id, { key, seg }); return seg;
 }
 const shellCache = new Map<number, { key: string } & ReturnType<typeof analyticShell>>();
+let conePrev: { key: string; s: ReturnType<typeof analyticShell> } | null = null;
+/** Preview cone: full mesh frustum, cached so orbiting does not rescan the mesh every frame. */
+function previewCone(fit: FitResult, pos: ArrayLike<number>, idx: Uint32Array) {
+  const key = fit.center.join(',') + '|' + fit.radius + '|' + fit.halfAngle + '|' + fit.length + '|' + idx.length + '|' + pos.length;
+  if (conePrev?.key === key) return conePrev.s;
+  const s = analyticShell(fit, pos, idx, 72, { span: 'surface' });
+  conePrev = { key, s }; return s;
+}
 function shellFor(f: FeatureView) {
-  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length;
+  const cone = f.type === 'Kegel';
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.measured!.length + '|' + f.indices.length + (cone ? '|surf' : '');
   const c = shellCache.get(f.id); if (c && c.key === key) return c;
-  const r = analyticShell(f.measured!, viewer.model!.geometry.getAttribute('position').array as Float32Array, f.indices);
+  const r = analyticShell(f.measured!, viewer.model!.geometry.getAttribute('position').array as Float32Array, f.indices, 72, cone ? { span: 'surface' } : undefined);
   const e = { key, ...r }; shellCache.set(f.id, e); return e;
 }
 function trimFor(f: FeatureView) {
-  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length + '|' + smoothTol;
+  const key = f.measured!.center.join(',') + '|' + f.measured!.radius + '|' + f.indices.length + '|' + smoothTol + '|' + (f.frozen?.sealed?.length ?? 0);
   const c = trimCache.get(f.id); if (c && c.key === key) return c;
   const g = viewer.model!.geometry; if (!g.index) return null;
   const pos = g.getAttribute('position').array as Float32Array, tris = g.index.array as ArrayLike<number>;
   const r = trimmedSurface(f.measured!, pos, tris, f.indices);
   // 0.31: boundary = smoothed contour of the selection on the fitted surface (no triangle zigzag)
-  const e = { key, tri: r.tri, edges: loopSegments(boundaryLoops(f.measured!, pos, tris, f.indices)) }; trimCache.set(f.id, e); return e;
+  // 0.44: a sealed opening (dismissed island / closed hole) is filled in the plane surface and dropped from the contour.
+  let loops = boundaryLoops(f.measured!, pos, tris, f.indices);
+  let tri = r.tri;
+  if (f.type === 'Ebene' && f.frozen?.sealed?.length) {
+    loops = unsealedBoundary(loops, f.frozen);
+    const cap = sealedFans(pos, tris, f.indices, f.frozen);
+    if (cap.length) { const both = new Float32Array(tri.length + cap.length); both.set(tri); both.set(cap, tri.length); tri = both; }
+  }
+  const e = { key, tri, edges: loopSegments(loops) }; trimCache.set(f.id, e); return e;
 }
 /** Boundary smoothing tolerance [mm] (display only): null = automatic (0.7 × mesh edge, ≤ 0.5 mm), 0 = off */
 let smoothTol: number | null = (() => { const v = localStorage.getItem('mw3d-smooth'); return v == null || v === '' ? null : Number(v); })();
@@ -1061,13 +1078,15 @@ async function applyExtract(keep?: Uint32Array) {
     else status(tt('{0} points', r.indices.length) + ' · ' + extra);
   } catch (e: any) { toast(tt('Fit failed: {0}', e.message)); }
 }
-/** Boundary from “Fitted geometry”: ONE zone around the analytic fitted shape (cylinder/cone: radius ± band over the axial
- *  extent of the points, full 360°; sphere/torus shell), the exclusion distance shortens (+) / extends (−) it at its ends.
- *  All mesh points of that surface inside the zone are taken – not only the grown/selected triangles. */
+/** Boundary from “Fitted geometry”: ONE zone around the analytic fitted shape. Cylinder: radius ± band over the axial
+ *  extent of the points, full 360° (0.27). Cone: the same shell over the frustum the mesh covers, not the selected patch;
+ *  open ends stay at that mesh/CAD limit (the apex is not invented past the scan). Sphere: the complete spherical shell.
+ *  The exclusion distance shortens (+) / extends (−) a cylinder or cone at its ends. */
 async function geomZoneExtract(fit: FitResult, indices: Uint32Array, seed: Vec3 | undefined, band: number | undefined, x: { k: number; angleOn: boolean; angleDeg: number; inset: number }, crit?: FitCrit) {
   const b = band ?? REEX_DEFAULT.maxDist; // 0.39: Standard-Suchabstand (Optionen › Extraktion, 1 mm)
+  // Cone: axial extent is the mesh frustum of the fit, not the selected patch. Sphere is already a full shell.
   const g = await busy(engine.call<any>({ op: 'reex', fit, indices, seedPts: seed ? [seed] : [],
-    params: { maxDist: b, sigma: x.k > 0 ? x.k : 3, sigmaOn: x.k > 0, angleOn: x.angleOn, maxAngleDeg: x.angleDeg, margin: -x.inset, iterations: 3 }, ...(crit ? { crit, formBy: true } : {}) }));
+    params: { maxDist: b, sigma: x.k > 0 ? x.k : 3, sigmaOn: x.k > 0, angleOn: x.angleOn, maxAngleDeg: x.angleDeg, margin: -x.inset, iterations: 3, fullGeom: fit.type === 'Kegel' || fit.type === 'Kugel' }, ...(crit ? { crit, formBy: true } : {}) }));
   return { fit: g.fit as FitResult, indices: g.indices as Uint32Array, band: b, zone: g.region as import('./core/reextract').SearchRegion };
 }
 /** debounced live update of the preview after a parameter change */
@@ -1225,7 +1244,9 @@ function commitPreview() {
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
   if (t === 'Ebene' && p.method !== 'Konstruiert' && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
-    const g = viewer.model.geometry; f.frozen = freezeBoundary(p.fit, g.getAttribute('position').array as Float32Array, g.index!.array as ArrayLike<number>, p.indices) ?? undefined;
+    const g = viewer.model.geometry;
+    const seal: HoleSeal[] = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: I.c as Vec3, r: I.r }));
+    f.frozen = freezeBoundary(p.fit, g.getAttribute('position').array as Float32Array, g.index!.array as ArrayLike<number>, p.indices, seal) ?? undefined;
     if (f.frozen) { if (p.bandUsed) f.frozen.band = p.bandUsed; f.src = p.indices; f.frozenIdx = p.indices; f.hit = undefined; if (f.fp?.fill) f.fp.fill = { ...f.fp.fill, on: false }; } }
   // 0.38 (F11): other surface types with “Boundary from: Point selection” keep their creation point set as well – re-extraction
   // then works from it (stable, identical count on repeat) instead of growing from its own last result
@@ -2922,8 +2943,14 @@ function renderScene() {
     else if (state.trimGeo && CURVE_TRIM_TYPES.includes(f.type) && f.indices.length >= 2 && viewer.model) {
       const seg = curveTrimFor(f); if (seg) { viewer.addTrimmed(new Float32Array(0), seg, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
-    else if (f.fp?.zoneSrc === 'geom' && GEOM_ZONE.includes(f.type)) { // boundary from the fitted geometry: clean analytic surface + circles/arcs
-      const t = (f.type === 'Zylinder' || f.type === 'Kegel') && viewer.model ? shellFor(f) : null;
+    else if (f.type === 'Kugel' && f.measured?.radius) { // full fitted sphere, not the selected cap
+      const s = analyticSphere(f.measured); viewer.addTrimmed(s.tri, s.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
+    }
+    else if (f.type === 'Kegel' && viewer.model && f.measured) { // full fitted cone (mesh frustum), not the selected patch
+      const t = shellFor(f); viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured, f.color);
+    }
+    else if (f.fp?.zoneSrc === 'geom' && (f.type === 'Zylinder' || f.type === 'Torus')) { // cylinder: analytic shell over the point height (0.27); torus: full primitive
+      const t = f.type === 'Zylinder' && viewer.model ? shellFor(f) : null;
       if (t) { viewer.addTrimmed(t.tri, t.edges, f.color, sel); viewer.addPrimitiveMarkers(f.measured!, f.color); } else viewer.addPrimitive(f.measured!, f.color, sel);
     }
     else if (state.trimGeo && TRIM_TYPES.includes(f.type) && f.indices.length >= 3 && viewer.model) {
@@ -2935,12 +2962,21 @@ function renderScene() {
     if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
     else if (p.fit.type === 'Abstand' && state.mode?.kind === 'dist') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
+    else if (p.fit.type === 'Kegel' && viewer.model) {
+      const pos = viewer.model.geometry.getAttribute('position').array as Float32Array;
+      const s = previewCone(p.fit, pos, p.indices);
+      viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
+    }
+    else if (p.fit.type === 'Kugel' && p.fit.radius) {
+      const s = analyticSphere(p.fit); viewer.addTrimmed(s.tri, s.edges, PREVIEW_COLOR, true); viewer.addPrimitiveMarkers(p.fit, PREVIEW_COLOR);
+    }
     else viewer.addPrimitive(p.fit, PREVIEW_COLOR, true);
     if (p.aux) viewer.addPrimitive({ ...p.aux.plane, center: p.fit.center }, AUX_COLOR, false);
     if (p.aux && state.opts.aux === 'ring' && (p.fit.type === 'Kreis' || p.fit.type === 'Langloch')) for (const L of zoneLoops(p.fit, p.aux.plane, state.opts.ring.gap, state.opts.ring.width)) viewer.addContour(L, AUX_COLOR); // ring / band zone, live
-    // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands
-    if (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) for (const L of boundaryShown(previewLoops(p), p.islands)) viewer.addContour(L, 0x1565c0);
-    else for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
+    // 0.31: smoothed boundary of the selection (also All inside boundary) + detected islands.
+    // Cone and sphere show the full fitted surface; their outline is that surface, not the click-grown patch.
+    if (p.fit.type !== 'Kegel' && p.fit.type !== 'Kugel' && (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type))) for (const L of boundaryShown(previewLoops(p), p.islands)) viewer.addContour(L, 0x1565c0);
+    else if (p.fit.type !== 'Kegel' && p.fit.type !== 'Kugel') for (const L of p.contour ?? []) viewer.addContour(L, 0x1565c0);
     (p.islands ?? []).forEach((I, i) => { if (I.drop || (I.inc && I.kind === 'hole' && i !== islSel)) return; /* dismissed bore: no blue contour */ for (const L of I.loops) viewer.addContour(L, i === islSel ? 0xff2bd6 : I.drop ? 0x78909c : 0xff8c1a); });
   } else if (hoverNominal?.role === 'soll' && hoverNominal.fit && hoverNominal.fit.type !== 'Freiformfläche') viewer.addPrimitive(hoverNominal.fit, PREVIEW_COLOR, true);
   renderCsTriads();

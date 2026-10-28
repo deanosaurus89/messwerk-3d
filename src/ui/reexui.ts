@@ -39,7 +39,7 @@ function paramsFor(f: RxFeature): ReexParams {
   if (f.reex) { const { points, removed, before, ...q } = f.reex as any; void points; void removed; void before; const out = normReex({ ...reexP, ...q }); out.pointBound = pointBoundOf(f); out.frozenIdx = (f as { frozenIdx?: Uint32Array }).frozenIdx ?? null; if (out.pointBound) out.margin = 0; return out; }
   const fp = f.fp, q: ReexParams = { ...REEX_DEFAULT, ...reexP };
   if (fp) { q.sigmaOn = fp.k > 0; q.sigma = fp.k > 0 ? fp.k : 3; q.angleOn = !!fp.nf?.on; q.maxAngleDeg = fp.nf?.angleDeg ?? 30; q.inset = fp.inset ?? 0;
-    if (fp.zoneSrc === 'geom') { q.margin = -(fp.inset ?? 0); q.inset = 0; if ((fp.zoneBand ?? 0) > 0) q.maxDist = fp.zoneBand!; }
+    if (fp.zoneSrc === 'geom') { q.margin = -(fp.inset ?? 0); q.inset = 0; if ((fp.zoneBand ?? 0) > 0) q.maxDist = fp.zoneBand!; if (f.type === 'Kegel' || f.type === 'Kugel') q.fullGeom = true; }
     if (fp.fill?.on) { q.fill = true; q.islands = fp.fill.islands !== false; q.excludeRaised = !!fp.fill.exRaised; if (fp.fill.band > 0) q.maxDist = fp.fill.band; } }
   const fz = (f as any).frozen; if (fz?.band > 0) { q.maxDist = fz.band; q.fill = false; } // 0.33: frozen boundary – the search distance of the creation
   const out = normReex(q); out.pointBound = pointBoundOf(f); out.frozenIdx = (f as { frozenIdx?: Uint32Array }).frozenIdx ?? null;
