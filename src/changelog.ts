@@ -7,6 +7,16 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.53', date: '2026-10-29', items: [
+    'The create dialog is a bit rounder: cards for Nominal or Measured, Create or Construct, and the tools, on the desktop dialog and on the phone sheet. Previous layout is unchanged.',
+    'After the green check the Feature Builder stays open. The pick and the preview reset so the next feature can be created; Nominal or Measured and Create or Construct stay until you cancel.',
+    'A circle, slot or line taken as Nominal from CAD does not show an auxiliary plane. The auxiliary plane stays under Measured.',
+    'An explicit Plane highlights and creates only on faces that are planes. A sphere or a cylinder under the cursor does not light up and does not become a plane. The same lock applies to Cylinder, Cone, Sphere and Torus. Smart Detect still classifies the face.',
+    'A CAD plane is trimmed to the face boundary. A wire that was the untrimmed surface rectangle (much larger than the face) is no longer used as the outline. Cylinder, cone, sphere and torus follow the same wires.',
+    'Reference CAD can be fully opaque. Turning transparency off ignores the slider, the same way as the data object. While it is on, the model fades instead of staying ghosted at every slider position.',
+    'Construction: the axis of a cylinder or a cone cut by a plane is a point directly. The axis is taken from the feature. Nominal and Measured both keep the dependency.',
+    'New features start with every control off. Position, midpoint, diameter and the other characteristics are ticked only when you opt in.',
+  ] },
   { version: '2026.0.52', date: '2026-10-29', items: [
     'Create starts in the dialog: Nominal or Measured (the choice stays, and a side is offered only when that data exists), then Create or Construct. Create is the Feature Builder. Construct is the construction panel (From / To and ✓) in the same place, without the brush or Smart Detect. After ✓ the dialog shows how the feature was made. A construction remembers its parents; change them in the properties and the dependency stays.',
     'A feature can be nominal only, measured only, or both. The tree lists Nominal, then Measured. The auxiliary plane of a circle, slot or line sits under Measured.',

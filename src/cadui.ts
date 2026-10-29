@@ -8,6 +8,7 @@ import type { CadAnalytic } from './cad/analytic';
 import type { TrimOp, V3, FaceType, Tess } from './cad/occcore';
 import { cadPickSamples } from './ui/cadpick';
 import { SURFACE_HIGHLIGHT } from './core/nominalui';
+import { materialForOpacity } from './core/cadview';
 import { resolveTess, type TessTol } from './cad/tesspolicy';
 
 class CadEngine {
@@ -99,6 +100,16 @@ export function cadClear() {
   drawOverlay();
   try { eng.reset(); } catch { /* worker already gone */ }
 }
+function paintCadMat(mat: THREE.MeshStandardMaterial, opacity: number) {
+  const spec = materialForOpacity(opacity);
+  const side = spec.side === 'double' ? THREE.DoubleSide : THREE.FrontSide;
+  if (mat.transparent === spec.transparent && mat.opacity === spec.opacity && mat.depthWrite === spec.depthWrite && mat.side === side) return;
+  mat.opacity = spec.opacity;
+  mat.transparent = spec.transparent;
+  mat.depthWrite = spec.depthWrite;
+  mat.side = side;
+  mat.needsUpdate = true;
+}
 /** Farben/Sichtbarkeit aktualisieren (Typfarbe, Hover, Auswahl, Beschnitt-Rest rot). */
 export function cadPaint() {
   for (const f of cad.faces) {
@@ -109,14 +120,12 @@ export function cadPaint() {
       mat.color.setHex(SURFACE_HIGHLIGHT.color);
       mat.emissive.setHex(SURFACE_HIGHLIGHT.emissive);
       mat.emissiveIntensity = 0.95;
-      const op = Math.max(cadOpacity, SURFACE_HIGHLIGHT.opacity);
-      if (mat.transparent !== op < 0.995 || mat.opacity !== op) { mat.transparent = op < 0.995; mat.opacity = op; mat.depthWrite = op > 0.9; mat.needsUpdate = true; }
+      paintCadMat(mat, Math.max(cadOpacity, SURFACE_HIGHLIGHT.opacity));
     } else {
       mat.color.setHex(sel ? 0xffb300 : TYPE_COLOR[f.type]);
       mat.emissive.setHex(sel ? 0x3a2600 : 0);
       mat.emissiveIntensity = 1;
-      const tr = cadOpacity < 1;
-      if (mat.transparent !== tr || mat.opacity !== cadOpacity) { mat.transparent = tr; mat.opacity = cadOpacity; mat.depthWrite = !tr; mat.needsUpdate = true; }
+      paintCadMat(mat, cadOpacity);
     }
     if (edge) (edge.material as THREE.LineBasicMaterial).color.setHex(hov ? 0x7c2d12 : 0x23303d);
     const g = ghosts[f.id]; if (g) g.visible = f.visible && cad.showRemoved;

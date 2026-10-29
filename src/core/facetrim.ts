@@ -113,6 +113,29 @@ export function trimLoops(wires: Vec3[][] | null | undefined): Vec3[][] {
   return wires && wires.length ? wires.filter((L) => L.length >= 3) : [];
 }
 
+function loopSpan(loop: Vec3[]): number {
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (const p of loop) for (let k = 0; k < 3; k++) { if (p[k] < mn[k]) mn[k] = p[k]; if (p[k] > mx[k]) mx[k] = p[k]; }
+  return Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
+}
+
+/**
+ * Wires used to trim a face.
+ * Exact CAD curves (outer loop, then islands) win when they match the face.
+ * A 3D curve that is the untrimmed surface rectangle is much larger than the
+ * display mesh; that wire is not the face boundary, so the mesh outline is used
+ * instead of drawing an oversized patch.
+ */
+export function wiresForFace(wires: Vec3[][] | null | undefined, meshPos?: ArrayLike<number> | null, meshIdx?: ArrayLike<number> | null): Vec3[][] {
+  const clean = trimLoops(wires);
+  if (!meshPos || !meshIdx || meshIdx.length < 3 || meshPos.length < 9) return clean;
+  const mesh = loopsFromMesh(meshPos, meshIdx).filter((L) => L.length >= 3);
+  if (!mesh.length) return clean;
+  if (!clean.length) return mesh;
+  if (loopSpan(clean[0]) > loopSpan(mesh[0]) * 1.2 + 1) return mesh;
+  return clean;
+}
+
 type Uv = [number, number];
 const cross2 = (a: Uv, b: Uv, c: Uv) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 function dedupeUv(loop: Uv[]): Uv[] {
@@ -266,6 +289,9 @@ function refineSurface(fit: FitResult, uvTris: Uv[][], chord: number): { p: Vec3
       const k = ek(i, j); const hit = edgeMid.get(k); if (hit != null) return hit;
       const c = chordSag(fit, verts[i], verts[j]);
       if (c.sag <= chord) return -1;
+      // The parameter midpoint left the short chord (seam). Subdividing it would grow the patch
+      // past the face. Keep the chord.
+      if (norm(sub(verts[i].p, verts[j].p)) + 1e-6 < c.sag) return -1;
       const n = verts.length; verts.push({ s: c.s, t: c.t, p: c.on }); edgeMid.set(k, n); grew = true; return n;
     };
     for (let t = 0; t < tris.length; t += 3) {
@@ -305,7 +331,13 @@ export function facePatch(fit: FitResult, loops: Vec3[][], div = 24): { tri: Flo
     return inside(outer, c[0], c[1]) && holes.every((h) => !inside(h, c[0], c[1]));
   });
   if (!raw.length) return null;
-  const mesh = refineSurface(fit, raw, fit.type === 'Ebene' ? Infinity : chord);
+  let mesh = refineSurface(fit, raw, fit.type === 'Ebene' ? Infinity : chord);
+  if (fit.type !== 'Ebene') {
+    const limit = loopSpan(clean[0]) * 1.05 + 1;
+    const drawn = loopSpan(mesh.p);
+    // Refinement walked off the face (a parameter seam). The wire triangulation stays inside the boundary.
+    if (drawn > limit) mesh = refineSurface(fit, raw, Infinity);
+  }
   const tri: number[] = [];
   for (let i = 0; i < mesh.tris.length; i += 3) {
     const a = mesh.p[mesh.tris[i]], b = mesh.p[mesh.tris[i + 1]], c = mesh.p[mesh.tris[i + 2]];

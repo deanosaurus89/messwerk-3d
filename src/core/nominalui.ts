@@ -181,6 +181,19 @@ export function slotCaption(index: number, count: number, label: string): string
 }
 const CURVE_TREE = new Set(['Kreis', 'Langloch', 'Linie', 'Linienzug']);
 /**
+ * Auxiliary plane of a circle, slot or line on a CAD nominal (Soll).
+ * The plane is an Ist aid (scan wall ∩ face). A nominal curve does not show it.
+ */
+export function attachCadAux<T>(role: 'soll' | 'ist' | null | undefined, fitType: string, aux: T | null | undefined): T | undefined {
+  if (!aux) return undefined;
+  if (role === 'soll' && CURVE_TREE.has(fitType)) return undefined;
+  return aux;
+}
+/** ✓ keeps Create or Construct. Only an explicit leave (Cancel / Esc) drops the mode. */
+export function modeAfterConfirm<T>(mode: T, leave: boolean): T | null {
+  return leave ? null : mode;
+}
+/**
  * Tree children of one feature: nominal, then measured, then the auxiliary plane
  * under the measured part of a curve. A nominal-only or measured-only feature
  * lists just the part it has. The auxiliary plane is not shown under nominal.

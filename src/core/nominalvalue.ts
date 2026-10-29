@@ -4,7 +4,10 @@ import type { FitResult } from './fit';
 
 const DEG = 180 / Math.PI;
 
-/** Characteristic controls filled when a nominal geometry is created. */
+/**
+ * Characteristic controls a nominal geometry can fill once the user ticks them.
+ * Creating a feature does not tick any of these (see controlsSeededOnCreate).
+ */
 export function nominalControlKinds(type: string): string[] {
   switch (type) {
     case 'Ebene': return ['X', 'Y', 'Z'];
@@ -19,6 +22,14 @@ export function nominalControlKinds(type: string): string[] {
     case 'Winkel': return ['Winkelwert'];
     default: return [];
   }
+}
+
+/**
+ * Controls created together with a new feature. Always empty: midpoint, centre,
+ * position and every other characteristic stay unchecked until the user opts in.
+ */
+export function controlsSeededOnCreate(_type: string): string[] {
+  return [];
 }
 
 const axisAngle = (n: number[], k: number) => Math.acos(Math.min(1, Math.abs(n[k]) / (Math.hypot(n[0], n[1], n[2]) || 1))) * DEG;

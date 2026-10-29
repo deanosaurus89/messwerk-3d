@@ -128,6 +128,8 @@ const S = (label: string, ...cls: Cls[]): Slot => ({ label, cls });
 export const CONSTRUCTIONS: Construction[] = [
   // ---------------- points
   { key: 'pt-plane-line', out: 'Punkt', label: 'Intersection plane ∩ line/axis', slots: [S('Plane', 'plane'), S('Line / axis', 'line')], compute: ([pl, ln]) => P(linePlane(ln, pl), pl.normal) },
+  { key: 'pt-axis-plane', out: 'Punkt', label: 'Intersection of cylinder or cone axis with a plane', slots: [S('Plane', 'plane'), S('Cylinder / cone', 'cyl', 'cone')],
+    compute: ([pl, f]) => P(linePlane(f, pl), pl.normal) },
   { key: 'pt-3planes', out: 'Punkt', label: 'Intersection of 3 planes', slots: [S('Plane 1', 'plane'), S('Plane 2', 'plane'), S('Plane 3', 'plane')],
     compute: ([a, b, c]) => { const x = solve([[...a.normal], [...b.normal], [...c.normal]], [dot(a.normal, a.center), dot(b.normal, b.center), dot(c.normal, c.center)]);
       if (!x || x.some((v) => !isFinite(v)) || Math.abs(dot(a.normal, cross(b.normal, c.normal))) < 1e-6) throw new Error('Planes do not meet in one point'); return P(x as Vec3); } },

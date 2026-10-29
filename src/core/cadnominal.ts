@@ -303,6 +303,25 @@ export const CAD_SURFACE: Record<string, string> = surfOf;
 
 const ANALYTIC_SURF = new Set<string>(['Ebene', 'Zylinder', 'Kegel', 'Kugel', 'Torus']);
 
+/**
+ * Explicit Plane / Cylinder / Cone / Sphere / Torus only accepts a face of that
+ * analytic type. A sphere or a cylinder is not a plane, even if a local patch
+ * is nearly flat. NURBS (IGES splines) is not rejected here — the tessellation
+ * fit still has to come out as the requested type.
+ * Later, not in this release: fit some other solid through tessellated Soll
+ * triangles of a face that is only a mesh (for example a sphere stored as triangles).
+ */
+export function explicitSurfaceRejected(want: GeomType | 'auto', faceType: string | null | undefined): boolean {
+  if (want === 'auto' || !ANALYTIC_SURF.has(want)) return false;
+  if (!faceType || !ANALYTIC_SURF.has(faceType)) return false;
+  return faceType !== want;
+}
+/** Explicit analytic type with no matching fit: do not highlight and do not create. Auto is never a miss. */
+export function explicitSurfaceMiss(want: GeomType | 'auto', fitType: string | null | undefined): boolean {
+  if (want === 'auto' || !ANALYTIC_SURF.has(want)) return false;
+  return fitType !== want;
+}
+
 function cloudExtent(p: Vec3[]): number {
   const mn: Vec3 = [Infinity, Infinity, Infinity], mx: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (const q of p) for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], q[i]); mx[i] = Math.max(mx[i], q[i]); }
@@ -400,6 +419,7 @@ export function cappedEdgeTol(edgeTol: number, span: number): number {
 }
 export function nominalOnCad(faces: TessFace[], hitId: number, point: Vec3, want: GeomType | 'auto', edgeTol: number): { id: number; pick: NominalPick } | null {
   const face0 = faces.find((f) => f.id === hitId);
+  if (explicitSurfaceRejected(want, face0?.geom?.type)) return null;
   const tol = want === 'auto' ? cappedEdgeTol(edgeTol, faceSpan(face0?.positions)) : edgeTol;
   const found = nominalAtPointer(faces.map((f) => ({ id: f.id, geom: f.geom })), hitId, point, want, tol);
   if (want === 'Punkt') {
@@ -413,11 +433,18 @@ export function nominalOnCad(faces: TessFace[], hitId: number, point: Vec3, want
   const face = faces.find((f) => f.id === hitId);
   if (!face?.positions || face.positions.length < 9) return want === 'auto' ? null : found;
   const key = `${hitId}|${want}|${face.positions.length}|${face.positions[0] ?? 0}|${face.positions[face.positions.length - 1] ?? 0}`;
-  if (!surfaceMemo.has(key)) {
-    const { p, n } = sampleCloud(face.positions, face.normals);
-    surfaceMemo.set(key, analyticFromSamples(p, n, want === 'auto' ? 'auto' : want));
-  }
+  const cloud = sampleCloud(face.positions, face.normals);
+  if (!surfaceMemo.has(key)) surfaceMemo.set(key, analyticFromSamples(cloud.p, cloud.n, want === 'auto' ? 'auto' : want));
   const fitted = surfaceMemo.get(key) ?? null;
+  if (fitted && want !== 'auto' && ANALYTIC_SURF.has(want)) {
+    // NURBS: accept only when the face classifies as the requested surface.
+    // Fitting a different solid from the triangles (a sphere that is only a mesh) stays out of scope.
+    if (!face.geom || face.geom.type === 'NURBS') {
+      const auto = analyticFromSamples(cloud.p, cloud.n, 'auto');
+      if (auto && ANALYTIC_SURF.has(auto.fit.type) && auto.fit.type !== want) return null;
+    }
+    if (fitted.fit.type !== want) return null;
+  }
   if (fitted) return { id: hitId, pick: fitted };
   return want === 'auto' ? null : (found?.pick.freeform ? null : found);
 }
