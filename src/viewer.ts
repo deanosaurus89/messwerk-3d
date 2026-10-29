@@ -7,6 +7,7 @@ import type { FitResult } from './core/fit';
 import { AxisAnalysis, axisColorScale, displayPoint, nominalFoot } from './core/axisan';
 import type { SearchRegion } from './core/reextract';
 import type { Vec3 } from './core/linalg';
+import { nominalArcLocal } from './core/trim';
 import { Labels, ViewCube } from './overlay';
 
 (THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
@@ -530,6 +531,11 @@ export class Viewer {
       case 'Kugel': obj = new THREE.Mesh(new THREE.SphereGeometry(f.radius!, 24, 16), mat); break;
       case 'Torus': obj = new THREE.Mesh(new THREE.TorusGeometry(f.radius!, f.minorRadius!, 12, 48), mat); obj.quaternion.copy(qz); break;
       case 'Kreis': {
+        const arc = nominalArcLocal(f);
+        if (arc) {
+          obj = new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc.map((p) => new THREE.Vector3(p[0], p[1], p[2]))), lineMat);
+          break;
+        }
         const pts = Array.from({ length: 73 }, (_, i) => new THREE.Vector3(f.radius! * Math.cos((i * Math.PI) / 36), f.radius! * Math.sin((i * Math.PI) / 36), 0));
         obj = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat); obj.quaternion.copy(qz); break;
       }

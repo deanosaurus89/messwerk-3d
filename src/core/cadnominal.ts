@@ -79,6 +79,7 @@ function planeFit(origin: Vec3, normal: Vec3, at: Vec3): FitResult {
 function circleFit(e: CadCurve): { fit: FitResult; aux: FitResult } {
   const n = unit(e.normal!);
   const fit: FitResult = { type: 'Kreis', center: e.center!, normal: n, radius: e.radius, diameter: 2 * e.radius!, ...ZERO };
+  if (e.ang0 != null && e.sweep != null && e.sweep < Math.PI * 2 - 0.05) { fit.arc0 = e.ang0; fit.arcSweep = e.sweep; }
   return { fit, aux: planeFit(e.center!, n, e.center!) };
 }
 function slotFit(s: SlotGeom): { fit: FitResult; aux: FitResult } {
@@ -180,10 +181,7 @@ export function nominalAtPointer(faces: NominalFaceRef[], hitId: number, point: 
       if (!best || d < best.d) best = { id: f.id, pick: n, d };
     }
     if (best) return { id: best.id, pick: best.pick };
-    if (hit?.geom) {
-      const n = nominalFromCad(hit.geom, point, want, -1);
-      if (n) return { id: hit.id, pick: n };
-    }
+    // A miss is a miss. The face under the cursor is not a circle, slot, line or polyline.
     return null;
   }
   const direct = hit?.geom ? nominalFromCad(hit.geom, point, want, edgeTol) : null;
@@ -211,8 +209,16 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
     if (!surf || surf.type === 'Freiformfläche') return null;
     return { fit: surf };
   }
-  if (want === 'Kreis') return best ? circleFit(best) : null;
-  if (want === 'Langloch') return slot ? slotFit(slot) : null;
+  if (want === 'Kreis') {
+    if (!best) return null;
+    if (edgeTol >= 0 && bestD > edgeTol) return null;
+    return circleFit(best);
+  }
+  if (want === 'Langloch') {
+    if (!slot) return null;
+    if (edgeTol >= 0 && slotD > edgeTol) return null;
+    return slotFit(slot);
+  }
   if (want === 'Freiformfläche') return surf ? { fit: { ...surf, type: 'Freiformfläche' }, freeform: face.type === 'NURBS' || surf.type !== 'Freiformfläche' } : null;
   if (surf && surf.type === want) return { fit: surf };
   if (want === 'Linie') {
@@ -417,16 +423,17 @@ export function cappedEdgeTol(edgeTol: number, span: number): number {
   if (!(span > 1) || !(edgeTol > 0)) return edgeTol;
   return Math.min(edgeTol, Math.max(0.6, span * 0.28));
 }
-export function nominalOnCad(faces: TessFace[], hitId: number, point: Vec3, want: GeomType | 'auto', edgeTol: number): { id: number; pick: NominalPick } | null {
+export function nominalOnCad(faces: TessFace[], hitId: number, point: Vec3, want: GeomType | 'auto', edgeTol: number, hitNormal?: Vec3): { id: number; pick: NominalPick } | null {
+  // A point is the cursor. Curves and surfaces must not take this pick.
+  if (want === 'Punkt') {
+    const face = faces.find((f) => f.id === hitId);
+    const n = hitNormal && norm(hitNormal) > 1e-9 ? hitNormal : (face?.geom?.normal ?? [0, 0, 1]);
+    return { id: hitId, pick: { fit: { type: 'Punkt', center: [point[0], point[1], point[2]], normal: unit(n), ...ZERO } } };
+  }
   const face0 = faces.find((f) => f.id === hitId);
   if (explicitSurfaceRejected(want, face0?.geom?.type)) return null;
   const tol = want === 'auto' ? cappedEdgeTol(edgeTol, faceSpan(face0?.positions)) : edgeTol;
   const found = nominalAtPointer(faces.map((f) => ({ id: f.id, geom: f.geom })), hitId, point, want, tol);
-  if (want === 'Punkt') {
-    if (found) return found;
-    const face = faces.find((f) => f.id === hitId);
-    return { id: hitId, pick: { fit: { type: 'Punkt', center: [point[0], point[1], point[2]], normal: unit(face?.geom?.normal ?? [0, 0, 1]), ...ZERO } } };
-  }
   if (found && !found.pick.freeform) return found;
   if (want === 'Freiformfläche') return found;
   if (want === 'Linie' || want === 'Kreis' || want === 'Langloch' || want === 'Linienzug') return found;

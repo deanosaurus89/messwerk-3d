@@ -135,8 +135,9 @@ import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType, anchorFit, signedDistance } from './core/fit';
 import { boundaryKind, coneDisplayShell, cylinderDisplayShell, drawsPointHighlight, zoneSrcFor } from './core/geombound';
-import { SURFACE_HIGHLIGHT, TREE_GROUPS, attachCadAux, boundaryExclusionFor, compactStatHtml, creationLines, detectBadge, fbActionOn, featureBuilderHost, featureBuilderLayout, featureClassWord, featureTreeParts, modeAfterConfirm, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, pathEnabled, resolveSide, roleWord, showPickRing, sideChoices, slotCaption, stickySide } from './core/nominalui';
+import { SURFACE_HIGHLIGHT, TREE_GROUPS, attachCadAux, boundaryExclusionFor, compactStatHtml, creationLines, detectBadge, fbActionOn, featureBuilderHost, featureBuilderLayout, featureClassWord, featureTreeParts, islandDrawerStaysOpen, measuredPointByGrow, modeAfterConfirm, nominalAdvancedControls, nominalCanConfirm, nominalHighlightsFace, nominalMethodRow, orientationText, pathEnabled, resolveSide, roleWord, showPickRing, sideChoices, slotCaption, stickySide } from './core/nominalui';
 import { facePatch, trimLoops, wiresForFace } from './core/facetrim';
+import { canJoin, fitAsAnalytic, joinedFit, joinLoops, nominalSurface } from './core/cadjoin';
 import { applyComputedNominal, controlsSeededOnCreate, editNominal, nominalIsModified, nominalOfFit, resetNominal } from './core/nominalvalue';
 import { importTarget } from './core/importpath';
 import { resolveTess, type TessTol } from './cad/tesspolicy';
@@ -182,7 +183,7 @@ interface FeatureView extends Feature { color: number; /** 0.33: frozen boundary
 interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; refId?: number; }
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
   /** Soll = analytic CAD nominal; Ist = fitted to the polygon (default for mesh previews) */
-  role?: 'soll' | 'ist'; cadFace?: number; cadSeed?: Vec3[]; cadPoint?: Vec3;
+  role?: 'soll' | 'ist'; cadFace?: number; cadIds?: number[]; cadSeed?: Vec3[]; cadPoint?: Vec3;
   /** CAD face boundary (outer loop, then islands) the analytic patch is trimmed to */
   loops?: Vec3[][];
   aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** zone from the fitted geometry (Boundary from: Fitted geometry) */ zone?: import("./core/reextract").SearchRegion; /** raw region-growing result (before extraction parameters) */ grown?: Uint32Array; /** All inside boundary: search distance used (auto = 3 × RMS) */ bandUsed?: number; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; /** All inside boundary: raised-feature points and the outer contour loops */ raised?: Uint32Array; contour?: number[][][]; /** All inside boundary: detected islands (0.31) */ islands?: Island[]; /** aux plane captured with All inside boundary */ auxFill?: boolean; }
@@ -775,7 +776,7 @@ function edgeTol(touch = false): number {
   return edgeWindowMm(base, (2 * dist * Math.tan(fov / 2)) / h, touch);
 }
 function nominalPointerNote(): string {
-  return tt('Tap a face for a surface, or an edge for a circle, slot, line or polyline. Create nominal adds it to the tree. Circle, slot, line and polyline use the same confirm step.');
+  return tt('Tap a face for a surface, or an edge for a circle, slot, line or polyline. A point is the spot under the cursor, with the face normal — the face is not highlighted. Create nominal adds it to the tree.');
 }
 function creationAim(x: number, y: number, soften = false) {
   const c = cad.faces.length ? cadPickHit(x, y, soften) : null;
@@ -811,7 +812,7 @@ function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
       hoverType = null;
       renderModeBar(); renderScene(); return;
     }
-    const found = nominalOnCad(cadTessFaces(), c.id, c.p, want, edgeTol(false));
+    const found = nominalOnCad(cadTessFaces(), c.id, c.p, want, edgeTol(false), c.normal);
     if (explicitSurfaceMiss(want, found?.pick.fit.type)) {
       cadHighlight(-1);
       hoverNominal = { role, type: '', fit: null, cadId: c.id, cadPoint: [...c.p] as V3 };
@@ -819,7 +820,7 @@ function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
       renderModeBar(); renderScene(); return;
     }
     const owner = found ? cad.faces[found.id] : face;
-    cadHighlight(found ? found.id : c.id);
+    cadHighlight(found && nominalHighlightsFace(found.pick.fit.type) ? found.id : -1);
     if (!owner && !found) { hoverNominal = { role, type: '', fit: null }; renderModeBar(); return; }
     const nom = found?.pick ?? null;
     const next = { role, type: nom?.fit.type ?? '', fit: nom && !nom.freeform ? nom.fit : null, cadId: found?.id ?? c.id, cadPoint: [...c.p] as V3 };
@@ -835,7 +836,7 @@ function freeformNominal(positions: ArrayLike<number>, normals: ArrayLike<number
   const nb = fitFreeform(P, N.length === P.length ? N : P.map(() => [0, 0, 1] as Vec3), null, { nu: 6, nv: 6, deg: 3, smooth: 1e-3, iterations: 2 });
   return { type: 'Freiformfläche', center: nb.frame.o, normal: nb.frame.n, nurbs: { surface: nb.surface, boundary: nb.boundary, kind: nb.kind, trimUV: nb.trimUV, corners: nb.corners, params: { nu: 6, nv: 6, deg: 3, smooth: 1e-3 }, std: nb.std, mean: nb.mean }, rms: nb.rms, form: nb.form, maxPos: nb.maxPos, maxNeg: nb.maxNeg, n: nb.n };
 }
-async function previewFromCad(c: { id: number; p: V3 }, touch = lastNominalTouch) {
+async function previewFromCad(c: { id: number; p: V3; normal?: V3 }, touch = lastNominalTouch) {
   const hitFace = cad.faces[c.id];
   const want = (state.mode as FitMode).type;
   const role = state.opts.side;
@@ -845,31 +846,48 @@ async function previewFromCad(c: { id: number; p: V3 }, touch = lastNominalTouch
     status(tt('No {0} on this CAD face ({1}).', typeName(want), hitFace?.type ?? ''));
     renderModeBar(); renderScene(); return;
   }
-  const found = nominalOnCad(cadTessFaces(), c.id, c.p, want, edgeTol(touch));
+  const found = nominalOnCad(cadTessFaces(), c.id, c.p, want, edgeTol(touch), c.normal);
   if (explicitSurfaceMiss(want, found?.pick.fit.type)) {
     cadHighlight(-1); hoverNominal = null;
     status(tt('No {0} on this CAD face ({1}).', typeName(want), hitFace?.type ?? ''));
     renderModeBar(); renderScene(); return;
   }
   const face = found ? cad.faces[found.id] : hitFace;
-  cadHighlight(found ? found.id : c.id);
   if (!face) { status(tt('This CAD face has no analytic geometry.')); renderAll(); return; }
   let nom = found?.pick ?? null;
-  if (!nom && want !== 'Freiformfläche') { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
+  if (!nom && want !== 'Freiformfläche') { cadHighlight(-1); status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
   if (want === 'Freiformfläche' && (!nom || nom.freeform)) {
     try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; }
     catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; }
   }
-  if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
+  if (!nom) { cadHighlight(-1); status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
+  const curveOrPoint = !nominalHighlightsFace(nom.fit.type);
+  const same = fitAsAnalytic(nom.fit);
+  if (state.opts.multi && state.preview?.fit && same && nominalHighlightsFace(state.preview.fit.type)) {
+    if (canJoin(state.preview.fit, same)) {
+      const prev = state.preview;
+      const loops = joinLoops(prev.loops, faceLoopsOf(face));
+      const fit = joinedFit(prev.fit, same, loops);
+      const ids = [...(prev.cadIds ?? (prev.cadFace != null ? [prev.cadFace] : [])), face.id];
+      regionSnaps.push(prev); regionOps.push('add');
+      state.preview = { ...prev, fit, loops, cadFace: ids[0], cadIds: ids, cadPoint: c.p, role };
+      cadHighlight(-1); hoverNominal = null;
+      status(tt('{0} from {1} regions. The fitted surface now covers every added region.', typeName(fit.type), ids.length));
+      renderAll(); return;
+    }
+    status(tt('Add region: that face is not the same {0}.', typeName(state.preview.fit.type)));
+    return;
+  }
+  cadHighlight(curveOrPoint ? -1 : face.id);
   const tess = face.res?.tess ?? face.tess;
   const seed = samplePositions(tess.positions, 240);
-  const loops = faceLoopsOf(face);
+  const loops = curveOrPoint ? undefined : faceLoopsOf(face);
   if (nom.fit.type === 'Ebene' && seed.length > 1) {
     let e = 0; for (let i = 1; i < seed.length; i++) e = Math.max(e, Math.hypot(seed[i][0] - seed[0][0], seed[i][1] - seed[0][1], seed[i][2] - seed[0][2]));
     (nom.fit as FitResult & { span?: number }).span = Math.max(e, 8);
   }
   const auxPlane = attachCadAux(role, nom.fit.type, nom.aux);
-  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role, cadFace: face.id, cadSeed: seed, cadPoint: c.p, loops,
+  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role, cadFace: face.id, cadIds: [face.id], cadSeed: seed, cadPoint: c.p, loops,
     aux: auxPlane ? { plane: auxPlane, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
   status(role === 'soll'
@@ -884,7 +902,7 @@ function sideBadge(role: 'soll' | 'ist' | null | undefined, type?: string): stri
 }
 function scheduleAuxHover(h: Hit | null) {
   clearTimeout(auxT); const m = state.mode as FitMode | null;
-  if (!h || !m || m.kind !== 'fit' || m.type === 'Freiformfläche' || state.preview) { if (!h) viewer.showHoverSets([]); return; }
+  if (!h || !m || m.kind !== 'fit' || m.type === 'Freiformfläche' || m.type === 'Punkt' || state.preview) { if (!h || m?.type === 'Punkt') viewer.showHoverSets([]); return; }
   const seq = ++auxSeq;
   auxT = window.setTimeout(async () => {
     if (seq !== auxSeq) return;
@@ -1120,7 +1138,10 @@ function ctxSpec(): CtxSpec | null {
   // 0.41 Feature Builder in the 3D view context window.
   // Before the first click: only Smart Detect + ⚙. After detection: Add region (strictly additive),
   // Brush add, Exclude. No Remove region. Boundary toggle only for cylinder/cone/sphere/torus.
-  const smart = `<button data-a="click" class="cp-smart ${m.method === 'Klick' && !state.opts.multi && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
+  const placeBtn = (on: boolean) => `<button data-a="click" class="cp-smart ${on ? 'on' : ''}" title="${tt('Place: the point is the spot under the cursor. Measured adds it to the point set (or use the brush). Nominal takes the coordinates and the face normal. The face is not highlighted.')}">✚ ${tt('Place')}</button>`;
+  const smart = m.type === 'Punkt'
+    ? placeBtn(m.method === 'Klick' && !state.opts.multi && !paintEx)
+    : `<button data-a="click" class="cp-smart ${m.method === 'Klick' && !state.opts.multi && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
   const seg = !p ? `<span class="cp-seg cp-selm">${smart}</span>`
     : `<span class="cp-seg cp-selm">${smart}<button data-a="addreg" class="${m.method === 'Klick' && state.opts.multi ? 'on' : ''}" title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button><button data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">🖌＋ ${tt('Brush add')}</button>${p.regions || regionOps.length ? `<button data-a="unregion" title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button>` : ''}</span>`;
   const type = `<select id="cp-type" title="${tt('Feature type')}">${typeOptions(p ? p.fit.type : m.type)}</select>`;
@@ -1162,7 +1183,10 @@ function ctxSpec(): CtxSpec | null {
   const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${sollUi ? tt('Nominal / actual. Fit criterion and the normal angle are not used for a CAD nominal.') : tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${sollUi ? nominalAdvancedControls(state.opts.brush) : scanPars}<button type="button" data-a="fblayout" class="cp-layout">${tt('New layout')}</button></div></details>`;
   const compact = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
   const hi = fbActionOn(!!p && m.method === 'Klick', !!p && state.opts.multi);
-  const smartSlim = `<button data-a="click" class="cp-smart ${hi.smart && m.method === 'Klick' && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
+  const pointPick = (p ? p.fit.type : m.type) === 'Punkt';
+  const smartSlim = pointPick
+    ? placeBtn(m.method === 'Klick' && !paintEx)
+    : `<button data-a="click" class="cp-smart ${hi.smart && m.method === 'Klick' && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
   const datumAlways = (m.type !== 'Abstand' && m.type !== 'Winkel' && (p ? p.fit.type !== 'Abstand' && p.fit.type !== 'Winkel' && p.fit.type !== 'Linienzug' : true))
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum / Reference')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
   const canUndo = !!(p && (p.regions || regionOps.length));
@@ -1177,7 +1201,7 @@ function ctxSpec(): CtxSpec | null {
     <label>${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>` : ''}`);
   const islN = p?.islands?.length ?? 0;
   const islDrawer = !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || GEOM_ZONE.includes(p.fit.type))
-    ? `<details class="cp-isl-drawer"><summary>${tt('Islands')} ${islN}</summary><div class="cp-isl-b">${islandChips(p.islands ?? [])}<button type="button" data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">${tt('Brush add')}</button></div></details>` : '';
+    ? `<details class="cp-isl-drawer" ${islOpen ? 'open' : ''}><summary>${tt('Islands')} ${islN}</summary><div class="cp-isl-b">${islandChips(p.islands ?? [])}<button type="button" data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">${tt('Brush add')}</button></div></details>` : '';
   const compactCtl = `${sidePathHtml('create')}<div class="cp-top">${datumAlways}</div>`
     + `<div class="cp-acts">${type}<span class="cp-seg cp-selm">${smartSlim}<button data-a="addreg" class="${hi.add ? 'on' : ''}" ${p && m.method === 'Klick' ? '' : 'disabled'} title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button>${sollUi ? '' : `<button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button>`}<button data-a="unregion" ${canUndo ? '' : 'disabled'} title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button></span>${brushTools}${detectBadge(detected)}</div>`
     + (sollUi ? '' : `${auxCtl}${bfrom}`)
@@ -1257,13 +1281,16 @@ const islKind = (I: Island) => (I.kind === 'raised' ? tt('raised feature') : I.k
 const islCanInc = (_I: Island) => true; // 0.38: every island removable (holes are then shown closed)
 const islHoleWarn = (I: Island) => I.kind === 'hole' && !I.rim;
 /** Compact island chips: icon, id, dismiss. The detail stays off the first row. */
+function islandChip(I: Island, i: number, title: string): string {
+  return `<span class="isl-pair"><button type="button" class="isl-chip${I.drop ? ' drop' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${title}">${islIcon(I)}${I.id}</button><button type="button" class="isl-x" data-islx="${i}" title="${tt('Remove this island from the feature. The chip stays struck through and can be restored until ✓.')}">✕</button></span>`;
+}
 function islandChips(list: Island[]): string {
-  return list.map((I, i) => `<button type="button" class="isl-chip${I.drop ? ' drop' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${islKind(I)}">${islIcon(I)}${I.id}<span class="isl-x" data-islx="${i}" title="${tt('Remove this island from the feature. The chip stays struck through and can be restored until ✓.')}">✕</span></button>`).join('');
+  return list.map((I, i) => islandChip(I, i, islKind(I))).join('');
 }
 /** Plane · All inside boundary: detected islands (auto) – tap one (here or in 3D) → “Not an island” / refine its extent */
 function islandsHTML(list: Island[]) {
   const dropped = list.filter((I) => I.drop).length, S = list[islSel];
-  const chips = list.map((I, i) => `<button type="button" class="isl-chip${I.drop ? ' drop' : ''}${i === islSel ? ' on' : ''}" data-isl="${i}" title="${tt('Show this island in the 3D view. ✕ removes it (the blue contour goes away). Click again to use it.')} · ${islKind(I)} · ${I.n} ${tt('pts')}">${islIcon(I)}${I.id}<span class="isl-x" data-islx="${i}" title="${tt('Remove this island from the feature. The chip stays struck through and can be restored until ✓.')}">✕</span></button>`).join('');
+  const chips = list.map((I, i) => islandChip(I, i, `${tt('Show this island in the 3D view. ✕ removes it (the blue contour goes away). Click again to use it.')} · ${islKind(I)} · ${I.n} ${tt('pts')}`)).join('');
   const det = S ? `<div class="isl-det"><b>${tt('Island')} ${S.id}</b> ${islKind(S)} · Ø≈${fmt(2 * S.r, 1)} · h ${fmt(S.h, 2)} mm · ${S.n} ${tt('pts')}${S.drop ? ' · ' + tt('removed') : ''}${islHoleWarn(S) ? ` <span class="isl-warn" title="${tt('No surface points inside – this is probably a real hole/bore. Removing it closes the opening in the plane contour.')}">⚠ ${tt('probably a hole/bore')}</span>` : ''}
     <label title="${tt('Refine the island: grow (+) or shrink (−) its excluded zone by this distance [mm]')}">${tt('Refine')} ± <input id="cp-islm" data-num="signed" value="${S.m}" inputmode="text"> mm</label></div>` : '';
   const man = state.opts.fill.man.map((I, k) => `<button type="button" class="isl-chip man" data-islman="${k}" title="${tt('Island added by tap, Ø {0} mm – click to remove it', fmt(2 * I.r, 1))}">✚${k + 1} ✕</button>`).join('');
@@ -1282,12 +1309,24 @@ function islandChoice(I: Island): IslandChoice {
 function bindIslands(el: ParentNode) {
   el.querySelectorAll<HTMLButtonElement>('[data-islman]').forEach((b) => (b.onclick = () => { state.opts.fill.man.splice(Number(b.dataset.islman), 1); extractLive(); }));
   el.querySelectorAll<HTMLButtonElement>('[data-isladd]').forEach((b) => (b.onclick = () => { state.opts.addIsl = !state.opts.addIsl; state.opts.sub = false; renderModeBar(); status(state.opts.addIsl ? tt('Add island: tap the plane – a disc of the brush diameter is excluded.') : ''); }));
-  const dt = el.querySelector<HTMLDetailsElement>('details.cp-isl'); if (dt) dt.ontoggle = () => { islOpen = dt.open; };
+  el.querySelectorAll<HTMLDetailsElement>('details.cp-isl, details.cp-isl-drawer').forEach((dt) => { dt.ontoggle = () => { islOpen = dt.open; }; });
   const list = state.preview?.islands; if (!list) return;
-  const sel = el.querySelector<HTMLSelectElement>('[data-islsel]'); if (sel) sel.onchange = () => { islSel = Number(sel.value); renderAll(); };
-  el.querySelectorAll<HTMLElement>('[data-islx]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); e.preventDefault(); const I = list[Number((b as HTMLElement).dataset.islx)]; if (!I) return; const c = islandChoice(I); c.drop = !I.drop; if (c.drop) c.inc = false; extractLive(); }));
-  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-islx]')) return; const i = Number(b.dataset.isl); const I = list[i]; if (!I) return; if (I.drop) { const c = islandChoice(I); c.drop = false; extractLive(); return; } islSel = i; viewer.focus(I.c as [number, number, number], Math.max(I.r * 4, 8)); renderAll(); }));
-  const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; extractLive(); };
+  const sel = el.querySelector<HTMLSelectElement>('[data-islsel]'); if (sel) sel.onchange = () => { islSel = Number(sel.value); islOpen = islandDrawerStaysOpen(islOpen, 'select'); renderAll(); };
+  el.querySelectorAll<HTMLElement>('[data-islx]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation(); e.preventDefault();
+    const I = list[Number((b as HTMLElement).dataset.islx)]; if (!I) return;
+    I.drop = !I.drop; const c = islandChoice(I); c.drop = !!I.drop; if (c.drop) c.inc = false;
+    islOpen = islandDrawerStaysOpen(islOpen, 'dismiss');
+    renderAll(); extractLive();
+  }));
+  el.querySelectorAll<HTMLButtonElement>('[data-isl]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation(); e.preventDefault();
+    const i = Number(b.dataset.isl); const I = list[i]; if (!I) return;
+    islOpen = islandDrawerStaysOpen(islOpen, 'select');
+    if (I.drop) { I.drop = false; const c = islandChoice(I); c.drop = false; renderAll(); extractLive(); return; }
+    islSel = i; viewer.focus(I.c as [number, number, number], Math.max(I.r * 4, 8)); renderAll();
+  }));
+  const m = el.querySelector<HTMLInputElement>('#cp-islm'); if (m) m.onchange = () => { const I = list[islSel]; const v = parseNum(m.value); if (!I || v == null || !isFinite(v)) return; islandChoice(I).m = v; islOpen = islandDrawerStaysOpen(islOpen, 'select'); extractLive(); };
 }
 /** island under a tap in the 3D view (ray from the camera through the hit, intersected with the preview plane) */
 function islandAt(h: Hit): number {
@@ -1336,6 +1375,20 @@ async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: '
   } catch (e: any) { state.preview = null; status(tt('Freeform surface: {0}', e.message)); toast(tt('Freeform surface: {0}', e.message)); }
   renderAll();
 }
+/** Measured point: one brush dab (or another click) into the point set. No region growing, no face highlight. */
+async function previewMeasuredPoint(h: Hit, add: boolean) {
+  const r = Math.max(0.2, state.opts.brush);
+  try {
+    const dab = await busy(engine.call<any>({ op: 'brush', center: h.point, radius: r, facing: h.normal }));
+    let idx = dab.indices as Uint32Array;
+    if (!idx?.length) { status(tt('No point under the brush. Increase the brush radius or click the surface.')); renderAll(); return; }
+    if (add && state.preview?.fit.type === 'Punkt' && state.preview.indices.length) idx = unionIndices(state.preview.indices, idx);
+    const q = await busy(engine.call<any>({ op: 'fit', indices: idx, type: 'Punkt' }));
+    state.preview = { fit: q.fit, indices: idx, candidates: [], method: 'Klick', hit: h, role: 'ist' };
+    status(tt('Point from {0} points. Another click or the brush adds to the set. The face is not grown.', idx.length));
+  } catch (e: any) { status(tt('Fit failed: {0}', e.message)); }
+  renderAll();
+}
 async function previewByClick(h: Hit, add = false) {
   seedFeedback(h);
   const dialogFb = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
@@ -1349,6 +1402,7 @@ async function previewByClick(h: Hit, add = false) {
   if (state.opts.sub && pv && !pv.aux) { await removeRegion(h); return; }
   if ((add || state.opts.multi) && pv?.aux && (pv.fit.type === 'Kreis' || pv.fit.type === 'Langloch') && (m.type === pv.fit.type || m.type === 'auto')) { await addAuxRegion(h); return; }
   if ((add || state.opts.multi) && pv && MULTI_TYPES.includes(pv.fit.type) && !pv.aux && (m.type === pv.fit.type || m.type === 'auto')) { await addPlaneRegion(h); return; }
+  if (m.type === 'Punkt') { await previewMeasuredPoint(h, add || state.opts.multi || pv?.fit.type === 'Punkt'); return; }
   resetIslands(); // a new selection: island choices start from the automatic detection
   if (m.type === 'Freiformfläche') { await previewNurbs({ hit: h }, 'Klick'); return; }
   if (usesAux(m.type)) {
@@ -1528,8 +1582,9 @@ async function refitPreview(t: GeomType | 'auto') {
     if (t === 'Freiformfläche' && face && (!nom || nom.freeform)) { try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; } catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; } }
     if (!nom || nom.freeform || !face) { status(tt('No {0} on this CAD face ({1}).', t === 'auto' ? tt('matching feature') : typeName(t), face?.type ?? '')); return; }
     const auxPlane = attachCadAux(state.opts.side, nom.fit.type, nom.aux);
-    state.preview = { ...p, fit: nom.fit, loops: faceLoopsOf(face), aux: auxPlane ? { plane: auxPlane, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: state.opts.side, cadFace: face.id };
-    cadHighlight(face.id);
+    const markFace = nominalHighlightsFace(nom.fit.type);
+    state.preview = { ...p, fit: nom.fit, loops: markFace ? faceLoopsOf(face) : undefined, aux: auxPlane ? { plane: auxPlane, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: state.opts.side, cadFace: face.id };
+    cadHighlight(markFace ? face.id : -1);
     renderAll(); return;
   }
   if (t === 'Linienzug') { status(tt('A polyline has no nominal on the polygon model. Use From CAD, or derive it in Analyze.')); return; }
@@ -3462,6 +3517,13 @@ function drawBounded(fit: FitResult, loops: Vec3[][] | undefined, color: number,
   if (patch && patch.tri.length) viewer.addTrimmed(patch.tri, patch.edges, color, true, undefined, opacity);
   else viewer.addPrimitive(fit, color, true, opacity, true);
 }
+/** Nominal preview: a point or a curve is the marker only. A closed shell is the full analytic wall. */
+function drawNominalGeom(fit: FitResult, loops: Vec3[][] | undefined, color: number, opacity?: number) {
+  if (!nominalHighlightsFace(fit.type)) { viewer.addPrimitive(fit, color, true, opacity); return; }
+  const mesh = loops?.length ? nominalSurface(fit, loops) : null;
+  if (mesh?.tri.length) viewer.addTrimmed(mesh.tri, mesh.edges, color, true, undefined, opacity);
+  else drawBounded(fit, loops, color, opacity);
+}
 function renderScene() {
   applyCadOpacity();
   if (!state.data && !state.features.length && !state.preview && !hoverNominal && !cad.faces.length) {
@@ -3497,7 +3559,7 @@ function renderScene() {
     if (!f.measured || !viewer.model) {
       const cadSurf = !!f.soll && !f.measured && ['Ebene', 'Zylinder', 'Kegel', 'Kugel', 'Torus'].includes(f.type);
       if (mShown.nurbs) viewer.addFreeform(mShown.nurbs, f.color, sel, sel && state.ctrlNet);
-      else if (cadSurf) drawBounded(mShown, f.soll?.loops, f.color, SURFACE_HIGHLIGHT.opacity);
+      else if (cadSurf) drawNominalGeom(mShown, f.soll?.loops, f.color, SURFACE_HIGHLIGHT.opacity);
       else viewer.addPrimitive(mShown, f.color, sel, undefined, false);
       continue;
     }
@@ -3525,7 +3587,7 @@ function renderScene() {
     if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
     else if (p.fit.type === 'Abstand' && state.mode?.kind === 'dist') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
-    else if (p.role === 'soll' || p.cadFace != null) drawBounded(p.fit, p.loops, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
+    else if (p.role === 'soll' || p.cadFace != null) drawNominalGeom(p.fit, p.loops, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
     else if (previewAnalytic(p)) drawAnalyticPreview(p);
     else if (viewer.model && (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) && p.indices.length >= 3) {
       const seals: SealMark[] = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: I.c, r: I.r }));
@@ -3540,7 +3602,8 @@ function renderScene() {
     (p.islands ?? []).forEach((I, i) => { if (i !== islSel || I.drop) return; for (const L of I.loops) viewer.addLoop(L, 0xff2bd6); });
   } else if (hoverNominal?.fit && hoverNominal.fit.type !== 'Freiformfläche') {
     const face = hoverNominal.cadId != null ? cad.faces[hoverNominal.cadId] : undefined;
-    drawBounded(hoverNominal.fit, face ? faceLoopsOf(face) : undefined, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
+    const loops = nominalHighlightsFace(hoverNominal.fit.type) && face ? faceLoopsOf(face) : undefined;
+    drawNominalGeom(hoverNominal.fit, loops, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
   }
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();

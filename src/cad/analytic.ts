@@ -8,6 +8,9 @@ export interface CadCurve {
   a?: V3; b?: V3;
   /** circle */
   center?: V3; normal?: V3; radius?: number;
+  /** Circle edge, angle of the start about `normal` (basis) and sweep in (0, 2π]. Omitted on a full turn. */
+  ang0?: number;
+  sweep?: number;
 }
 export interface CadAnalytic {
   type: 'Ebene' | 'Zylinder' | 'Kegel' | 'Kugel' | 'Torus' | 'NURBS';

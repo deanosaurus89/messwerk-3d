@@ -189,6 +189,22 @@ export function attachCadAux<T>(role: 'soll' | 'ist' | null | undefined, fitType
   if (role === 'soll' && CURVE_TREE.has(fitType)) return undefined;
   return aux;
 }
+/** A nominal surface lights the face. A point, circle, slot, line or polyline does not. */
+export function nominalHighlightsFace(type: string): boolean {
+  return type === 'Ebene' || type === 'Zylinder' || type === 'Kegel' || type === 'Kugel' || type === 'Torus' || type === 'Freiformfläche';
+}
+/** Measured point is a brush dab or a click into the point set. Region growing is for faces. */
+export function measuredPointByGrow(type: string): boolean {
+  return type !== 'Punkt';
+}
+/**
+ * Islands drawer. Selecting a chip or dismissing it (✕) keeps the list open.
+ * Only the summary itself toggles it shut.
+ */
+export function islandDrawerStaysOpen(open: boolean, reason: 'summary' | 'select' | 'dismiss'): boolean {
+  if (reason === 'summary') return !open;
+  return true;
+}
 /** ✓ keeps Create or Construct. Only an explicit leave (Cancel / Esc) drops the mode. */
 export function modeAfterConfirm<T>(mode: T, leave: boolean): T | null {
   return leave ? null : mode;

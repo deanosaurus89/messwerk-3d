@@ -59,15 +59,17 @@ describe('pointer nominal: edge, neighbour, explicit line', () => {
     expect(featureClass(near.pick.fit.type)).toBe('curve');
   });
 
-  it('explicit line matches explicit circle: the face’s geometry, and a neighbour within the window', () => {
-    const mid = nominalAtPointer(faces, 2, [5, 5, 0], 'Linie', 2)!;
-    expect(mid.id).toBe(2);
-    expect(mid.pick.fit.type).toBe('Linie');
+  it('explicit line and circle use the edge only, including a neighbour inside the window', () => {
+    expect(nominalAtPointer(faces, 2, [5, 5, 0], 'Linie', 2)).toBeNull();
     expect(nominalFromCad(edged, [5, 5, 0], 'Linie', 2)).toBeNull();
+    const onEdge = nominalAtPointer(faces, 2, [5, 0.3, 0], 'Linie', 2)!;
+    expect(onEdge.id).toBe(2);
+    expect(onEdge.pick.fit.type).toBe('Linie');
     const side = nominalAtPointer(faces, 0, [5, 0.4, 0], 'Linie', 2)!;
     expect(side.pick.fit.type).toBe('Linie');
     expect(side.id).toBe(2);
-    const circle = nominalAtPointer([{ id: 7, geom: disk }], 7, [0, 0, 0], 'Kreis', 2)!;
+    expect(nominalAtPointer([{ id: 7, geom: disk }], 7, [0, 0, 0], 'Kreis', 2)).toBeNull();
+    const circle = nominalAtPointer([{ id: 7, geom: disk }], 7, [10, 0.2, 0], 'Kreis', 2)!;
     expect(circle.pick.fit.type).toBe('Kreis');
   });
 
