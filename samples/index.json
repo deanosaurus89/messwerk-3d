@@ -1,0 +1,64 @@
+[
+ {
+  "key": "formdemo",
+  "name": "Form deviation demo (default)",
+  "file": "formdemo.stl.gz",
+  "kind": "Measured scan with large form deviations",
+  "description": "Validation part with clearly visible form deviations – ideal for Analyze (color map, arrows, zones) and extraction.",
+  "triangles": 297828,
+  "bytes": 8964070,
+  "thumb": "thumb-formdemo.jpg",
+  "default": true
+ },
+ {
+  "key": "multifeature",
+  "name": "Multi-Feature plate (real scan)",
+  "file": "multifeature.stl.gz",
+  "kind": "Real measured scan (PolyWorks STL)",
+  "description": "Bracket plate approx. 230 × 235 × 52 mm (real scan): two inclined faces, slots, round, square and hexagonal openings, bosses, pins and spheres – many feature types for Auto extraction.",
+  "triangles": 295022,
+  "bytes": 8111497,
+  "thumb": "thumb-multifeature.jpg"
+ },
+ {
+  "key": "flansch",
+  "name": "Shaft/flange",
+  "file": "flansch.stl.gz",
+  "kind": "Scan-ähnlich (isotropes Netz)",
+  "description": "Rotationsteil: Flansch Ø110 × 16 mit Teilkreis 6 × Ø10 auf Ø85, Welle Ø50 mit Torus-Einstich, Absatz Ø36, Kegel 53,13°, Zapfen Ø24, Bohrung Ø16 – alle koaxial zur Z-Achse.",
+  "triangles": 304374,
+  "bytes": 11094837,
+  "thumb": "thumb-flansch.jpg"
+ },
+ {
+  "key": "inseldemo",
+  "name": "Islands demo (bolt circle)",
+  "file": "inseldemo.stl.gz",
+  "kind": "Synthetic scan (plate with bolt circle)",
+  "description": "Plate 80 × 60 × 10: bolt circle 6 × Ø8 on PCD 40 – three holes with raised rims, one with a spatter ring – centre bore Ø14, a local bump, a flat swell and a scan gap. For plane “All inside boundary”: islands and smoothed boundary.",
+  "triangles": 168102,
+  "bytes": 4236740,
+  "thumb": "thumb-inseldemo.jpg"
+ },
+ {
+  "key": "cadsample",
+  "name": "CAD surface model (IGES)",
+  "file": "cad-sample.igs.gz",
+  "kind": "CAD (IGES, trimmed NURBS surfaces)",
+  "description": "Surface model with 138 faces – for CAD trimming (cut line/polygon, islands, boundary offset) and STEP/IGES export.",
+  "triangles": 0,
+  "bytes": 1034575,
+  "thumb": "thumb-cadsample.jpg",
+  "cad": true
+ },
+ {
+  "key": "beispielteil",
+  "name": "Training part",
+  "file": "beispielteil.stl",
+  "kind": "Scan-like (isotropic mesh ~0.5 mm, noise σ 8 µm)",
+  "description": "Block 100 × 60 × 20: Bohrungen Ø12/Ø6, Langloch, Bolzen, Kegel, Kugel, Torus. Für den Trainingsmodus.",
+  "triangles": 183612,
+  "bytes": 9180684,
+  "thumb": "thumb-beispielteil.jpg"
+ }
+]

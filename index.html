@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M8 1l7 7-7 7-7-7z%22 fill=%22%231f5fa8%22/%3E%3C/svg%3E" />
+<title>MessWerk 3D – Inspection</title>
+  <script type="module" crossorigin src="/messwerk-3d/assets/index-CFjeK9jB.js"></script>
+  <link rel="stylesheet" crossorigin href="/messwerk-3d/assets/index-m8T8dwFf.css">
+</head>
+<body>
+<div id="app">
+  <header id="titlebar"><span class="logo">◆ MessWerk 3D</span><span class="qat" id="qat" title="Quick Access Toolbar"><button id="q-undo" disabled title="Undo (Ctrl+Z) – for now: the last mesh edit; later: every operation">↶</button><button id="q-redo" disabled title="Redo (Ctrl+Y) – comes with the global undo (later)">↷</button><button type="button" id="btn-new-title" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)">📄</button></span><span id="projname">New project</span>
+    <input id="search" placeholder="Search tree …" /></header>
+  <nav id="ribbon-tabs">
+    <button type="button" id="btn-new-tab" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)">📄</button>
+    <button class="tab active" data-tab="start">Home</button>
+    <button class="tab" data-tab="merkmale" title="Start: features, coordinate systems and mesh editing">Start</button>
+    <button class="tab" data-tab="pruef">Controls</button>
+    <button class="tab" data-tab="analyze">Analyze</button>
+    <button class="tab" data-tab="re" title="Reverse Engineering"><span class="t-long">Reverse Engineering</span><span class="t-short">RE</span></button>
+    <button class="tab" data-tab="nuetz">Tools</button>
+    <button class="tab" data-tab="ansicht">View</button>
+    <button class="tab" data-tab="hilfe">Help</button>
+  </nav>
+  <section id="ribbon">
+    <div class="panel" data-tab="start">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-new" data-act="new" title="Start a new, empty project (asks before discarding unsaved changes)"><span class="ico">📄</span>New project</button>
+        <label class="big" title="Import a measured mesh (STL, PLY, OBJ, XYZ) or a CAD reference (IGES, STEP). CAD files are added under Reference, not as the measured mesh."><span class="ico">⤓</span>Import<input type="file" id="file" accept=".stl,.ply,.obj,.xyz,.txt,.asc,.gz,.stp,.step,.igs,.iges,.STP,.STEP,.IGS,.IGES" hidden /></label>
+        <button class="big" id="btn-sample" title="Load a demo part (sample data)"><span class="ico">▣</span>Load sample</button>
+      </div><div class="glabel">Data</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-save" title="Save project as .mw3d"><span class="ico">💾</span>Save project</button>
+        <label class="big" title="Open project (.mw3d)"><span class="ico">📂</span>Open project<input type="file" id="file-project" accept=".mw3d,application/zip,application/octet-stream" hidden /></label>
+        <button class="big" id="btn-restore" title="Restore autosave"><span class="ico">↺</span>Last project</button>
+      </div><div class="glabel">Project <span id="autosave"></span></div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-csv" title="Export all controls as CSV (Excel)"><span class="ico">⎙</span>Controls CSV</button>
+        <button class="big" id="btn-csv-feat" title="Export all features as CSV"><span class="ico">⎙</span>Features CSV</button>
+        <button class="big" id="btn-report" title="Freeze the current results as a report table"><span class="ico">▤</span>Create report</button>
+      </div><div class="glabel">Report</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-options" title="Options: feature colors, annotation contents and view settings"><span class="ico">⚙</span>Options</button>
+        <button class="big" id="btn-docs" title="Documentation: key functions and workflows"><span class="ico">📖</span>Documentation</button>
+      </div><div class="glabel">Settings &amp; help</div></div>
+    </div>
+    <div class="panel hidden" data-tab="merkmale">
+      <div class="rsec" data-phone title="Features"><span>Features</span></div>
+      <div class="group rb-grid"><div class="btns" id="feat-type-btns"></div><div class="glabel">Features</div></div>
+      <div class="rsec" data-phone title="Coordinate Systems"><span>Coordinate Systems</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cs-new" title="New coordinate system from features (primary – secondary – origin)"><span class="ico" id="ico-cs"></span>New 3-2-1</button>
+        <div class="rb-col"><button class="rb-s" id="btn-cs-activate" title="Make the selected coordinate system active (select “Global (WCS)” in the tree to return to the global system)"><span class="ico">●</span><span>Activate</span></button><div class="rb-ghost"></div><div class="rb-ghost"></div></div>
+      </div><div class="glabel">Coordinate Systems</div></div>
+      <div class="rsec" data-phone title="Mesh editing"><span>Mesh editing</span></div>
+      <div class="group"><div class="btns">
+        <div class="rb-col">
+          <button class="rb-s" data-pe="reduce" title="Triangle reduction with tolerance to the original"><span class="ico">◭</span><span>Reduce</span></button>
+          <button class="rb-s" data-pe="smooth" title="Smoothing (Taubin)"><span class="ico">≈</span><span>Smooth</span></button>
+          <button class="rb-s" data-pe="erase" title="Magic eraser: cut out a bump and fill the hole"><span class="ico">✧</span><span>Magic eraser</span></button>
+        </div>
+        <div class="rb-col sep">
+          <button class="rb-s" id="btn-pe-cmp" title="Color comparison with the original polygon model"><span class="ico">◐</span><span>Compare</span></button>
+          <button class="rb-s" id="btn-pe-reset" title="Restore the original polygon model (discards all mesh edits)"><span class="ico">⟲</span><span>Restore original</span></button>
+          <button class="rb-s more" id="btn-mesh-more" data-pop="mesh-more-pop" title="More mesh tools: Subdivide"><span class="ico">⋯</span><span>More</span></button>
+        </div>
+      </div><div class="glabel">Mesh Editing · <span id="pe-info">Original</span></div></div>
+    </div>
+    <div class="panel hidden" data-tab="pruef">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-report2" title="Freeze the current results as a report table"><span class="ico">▤</span>Create report</button>
+        <button class="big" id="btn-csv2" title="Export the control list as CSV" onclick="document.getElementById('btn-csv').click()"><span class="ico">⎙</span>List CSV</button>
+      </div><div class="glabel">Report · tick controls in the catalog below the 3D view</div></div>
+      <div class="group gentol"><div class="btns">
+        <label class="gt" title="ISO 2768-1 general tolerance class for linear sizes, distances, radii and angles of NEW controls (project setting). none = built-in defaults."><span>ISO 2768-1</span><select id="gt-lin"><option value="">none</option><option value="f">f (fine)</option><option value="m">m (medium)</option><option value="c">c (coarse)</option><option value="v">v (very coarse)</option></select></label>
+        <label class="gt" title="ISO 2768-2 general geometrical tolerance class (flatness/straightness, perpendicularity, symmetry, run-out, roundness) of NEW controls (project setting)."><span>ISO 2768-2</span><select id="gt-geo"><option value="">none</option><option value="H">H</option><option value="K">K</option><option value="L">L</option></select></label>
+        <button class="big sm" id="gt-apply" title="Apply the general tolerance to all existing controls whose tolerance was not typed by hand"><span class="ico">↻</span>Apply to all</button>
+      </div><div class="glabel">General tolerance (project) · ISO 286 fit per size control</div></div>
+      <div class="group"><div class="btns an-pick">
+        <label title="How datum features become datums (ISO 5459). ISO 5459 (default): the datum is in contact with the datum feature from outside the material – tangent plane (minimax), maximum inscribed cylinder for holes, minimum circumscribed for shafts; secondary/tertiary datums are constrained in orientation to the previous ones. Least squares: Gauss fits (as before 2026.0.15).">Datums <select id="datum-assoc"><option value="iso">ISO 5459 (contact)</option><option value="lsq">Least squares (Gauss)</option></select></label>
+        <label title="Scan data: ignore single spike points more than 3σ from the least-squares datum feature before the contact association (otherwise one spike decides the datum)"><input type="checkbox" id="datum-filter" checked> 3σ spike filter</label>
+        <button class="big" id="btn-datum-info" title="Show how each datum feature was simulated (method, shift and tilt vs. the least-squares fit)"><span class="ico">ⓘ</span>Datum info</button>
+      </div><div class="glabel">Datum simulation</div></div>
+    </div>
+    
+    <div class="panel hidden" data-tab="analyze">
+      <div class="group"><div class="btns">
+        <button class="big" data-an="form" title="Form deviation of the selected feature(s): points vs. fitted geometry"><span class="ico">◐</span>Feature deviation</button>
+        <button class="big" data-an="axis" title="Axis of cylinders/cones vs. the nominal axis from the datum of a perpendicularity/parallelism/position/coaxiality control: tilt, section centres, tolerance cylinder and zone envelope (exaggerated)"><span class="ico">⟂</span>Axis analysis</button>
+        <button class="big" data-an="mesh" title="Edited polygon model vs. original polygon model"><span class="ico">◑</span>Mesh vs. original</button>
+        <button class="big" id="btn-an-off" title="Remove the deviation display"><span class="ico">✕</span>Off</button>
+      </div><div class="glabel">Deviation color map</div></div>
+      <div class="group"><div class="btns an-pick">
+        <select id="an-ctrl" title="Choose exactly one control to analyse: form controls → colour map, axis controls (position, perpendicularity, parallelism, angularity, coaxiality, straightness of axis) → axis view"></select>
+        <button class="big" id="btn-an-ctrl" title="Analyse the chosen control"><span class="ico">◐</span>Analyze control</button>
+      </div><div class="glabel">Per control</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-an-whisk" title="Deviation vectors (whiskers) with exaggeration"><span class="ico">⟊</span>Whiskers</button>
+        <button class="big" id="btn-an-trans" title="Data object transparency during Analyze. Separate from the CAD model. Same switch as the gear above the cube and View › Data transparent."><span class="ico">◌</span>Transparent</button>
+        <button class="big" id="btn-an-set" title="Color scale, legend and whisker settings"><span class="ico">⚙</span>Settings</button>
+      </div><div class="glabel">Display</div></div>
+    </div>
+    
+    <div class="panel hidden" data-tab="re">
+      <div class="group wip-note"><div class="wip">🚧 Work in progress / paused</div><div class="glabel">Status</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-ftype="Freiformfläche" title="Freeform surface (B-spline/NURBS) – click or brush"><span class="ico" id="ico-ff2"></span>Freeform surface</button>
+      </div><div class="glabel">Surface on polygon model</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-curve-detect" title="Detect sharp edges and tangent lines automatically"><span class="ico">⌁</span>Detect curves</button>
+        <button class="big" id="btn-curve-draw" title="Curve through clicked points on the mesh"><span class="ico">✎</span>Draw curve</button>
+        <button class="big" id="btn-curve-del" title="Delete the selected curve"><span class="ico">✕</span>Delete curve</button>
+        <button class="big" id="btn-curve-layout" title="Show the patch layout of the curve network"><span class="ico">▦</span>Patch layout</button>
+        <button class="big" id="btn-curve-accept" title="Accept suggested seams/splits for 4-sided patches"><span class="ico">✚</span>Accept suggestions</button>
+        <button class="big" id="btn-curve-undo" title="Undo curve edit (Ctrl+Z)"><span class="ico">↶</span>Undo</button>
+        <button class="big" id="btn-curve-opts" title="Detection and clean-up options"><span class="ico">⚙</span>Options</button>
+      </div><div class="glabel">Curve network (surface reconstruction)</div></div>
+    </div>
+    <div class="panel hidden" data-tab="nuetz">
+      <div class="group"><div class="btns">
+        <label class="big" title="Open CAD file (STEP or IGES)"><span class="ico">📐</span>Open CAD<input type="file" id="cad-file" accept=".stp,.step,.igs,.iges,.STP,.STEP,.IGS,.IGES" hidden /></label>
+        <button class="big" id="btn-cad-all" title="Select all visible faces / clear selection"><span class="ico">▣</span>Select all</button>
+        <button class="big" id="btn-cad-hide" title="Hide selected faces (no selection: show all)"><span class="ico">◌</span>Hide</button>
+      </div><div class="glabel">CAD faces</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-cadtool="offset" title="Offset the face boundary inwards"><span class="ico">⬚</span>Edge offset</button>
+        <button class="big" data-cadtool="cut" title="Draw a line/polyline, project it onto the face, remove one side"><span class="ico">✂</span>Cut line</button>
+        <button class="big" data-cadtool="circle" title="Cut out a circular hole"><span class="ico">◯</span>Circle island</button>
+        <button class="big" data-cadtool="rect" title="Cut out a rectangular hole"><span class="ico">▭</span>Rectangle island</button>
+      </div><div class="glabel">Trim</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-cad-undo" title="Undo last trim (Ctrl+Z)"><span class="ico">↶</span>Undo</button>
+        <button class="big" id="btn-cad-reset" title="Remove all trims (original)"><span class="ico">⟲</span>Original</button>
+        <button class="big on" id="btn-cad-removed" title="Show removed areas in red"><span class="ico">◐</span>Show removed</button>
+      </div><div class="glabel">Non-destructive</div></div>
+      <div class="group"><div class="btns">
+        <button class="big" data-cadtool="export" title="Save trimmed faces as STEP (AP214) or IGES (144)"><span class="ico">⤒</span>Export</button>
+      </div><div class="glabel">Export</div></div>
+    </div>
+    <div class="panel hidden" data-tab="hilfe">
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-training" title="Guided training: datums and datum systems"><span class="ico">🎓</span>Training: datums</button>
+        <button class="big" id="btn-help" title="Help on datums (ISO 5459)"><span class="ico">?</span>Help datums</button>
+        <button class="big" id="btn-docs2" title="Documentation: key functions and workflows"><span class="ico">📖</span>Documentation</button>
+        <button class="big" id="btn-whatsnew" title="Changes per version"><span class="ico">★</span>What's new</button>
+        <button class="big" id="btn-testlist" title="Checklist for testers: status per item, comments, copy the result (opens a new tab)"><span class="ico">☑</span>Test checklist</button>
+      </div><div class="glabel">Help</div></div>
+      <div class="group"><div class="btns"><div class="ver-box" id="ver-box"></div></div><div class="glabel">Version</div></div>
+    </div>
+    <div class="panel hidden" data-tab="ansicht">
+      <div class="rsec" data-phone title="Views"><span>Views</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-view-center" title="Center the view on the selection"><span class="ico">⌖</span>Center</button>
+        <button class="big" id="btn-view-fit" title="Zoom to fit the whole model"><span class="ico">⤢</span>Fit</button>
+        <button class="big" data-view="iso" title="Isometric view"><span class="ico">◩</span>Isometric</button>
+        <button class="big" data-view="+Z" title="View from the top (+Z)"><span class="ico">Z+</span>Top</button>
+        <button class="big" data-view="-Z" title="View from the bottom (−Z)"><span class="ico">Z−</span>Bottom</button>
+        <button class="big" data-view="-Y" title="View from the front (−Y)"><span class="ico">Y−</span>Front</button>
+        <button class="big" data-view="+Y" title="View from the back (+Y)"><span class="ico">Y+</span>Back</button>
+        <button class="big" data-view="+X" title="View from the right (+X)"><span class="ico">X+</span>Right</button>
+        <button class="big" data-view="-X" title="View from the left (−X)"><span class="ico">X−</span>Left</button>
+      </div><div class="glabel">Standard views</div></div>
+      <div class="rsec" data-phone title="Display"><span>Display</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-data-trans" title="Data object transparency. Separate from the CAD model. Default is opaque. Same switch as the gear above the cube and Home › Options."><span class="ico">◌</span>Data transparent</button>
+        <button class="big" id="btn-cad-trans" title="CAD model transparency. Separate from the data object. Default is opaque."><span class="ico">◌</span>CAD transparent</button>
+        <button class="big" id="btn-toggle-prims" data-vt="prims" title="Show/hide the geometry of all features"><span class="ico">◎</span>Geometries</button>
+        <button class="big on" id="btn-toggle-zone" title="Extraction zone: show the search zone of the feature whose dialog is open (global preference, remembered). Hidden automatically when the dialog is closed."><span class="ico">⬚</span>Zone</button>
+        <button class="big" id="btn-toggle-pts" title="Used points: show the points used in the fit of every feature (in its colour). One feature only: right-click it in the tree › Show used points"><span class="ico">⁘</span>Used points</button>
+        <button class="big" id="btn-toggle-aux" title="Aux-plane points: show the points of the fitted auxiliary planes (blue), independent of the used points. One feature only: right-click it in the tree or use its properties"><span class="ico">▱</span>Aux-plane pts</button>
+        <button class="big" id="btn-toggle-wire" data-vt="wire" title="Show triangle edges"><span class="ico">▦</span>Mesh edges</button>
+        <button class="big" id="btn-toggle-wcs" title="Global coordinate system (from the scan/CAD import): show its triad at the origin (also the eye in the tree). Right-click it in the tree › Center on origin."><span class="ico">⊹</span>Global CS</button>
+        <button class="big" id="btn-center-wcs" title="Center the view on the origin of the global coordinate system"><span class="ico">⌖</span>Center origin</button>
+        <button class="big on" id="btn-toggle-curves" data-vt="curves" title="Show curves and CAD edges"><span class="ico">〰</span>Curves/edges</button>
+      </div><div class="glabel">Display</div></div>
+      <div class="rsec" data-phone title="Annotations"><span>Annotations</span></div>
+      <div class="group"><div class="btns">
+        <button class="big" id="btn-toggle-labels" data-vt="labels" title="Show/hide the annotations of all features"><span class="ico">🏷</span>Annotations</button>
+        <button class="big" id="btn-reset-labels" title="Reset annotation positions: dragged (pinned 🔒) annotations go back to automatic placement – the selected features only, or all if nothing is selected"><span class="ico">↺</span>Reset positions</button>
+        <button class="big" id="btn-annot-spread" data-vt="aspread" title="Maximize: spread annotations so more of them fit on screen without covering each other. A label you have dragged stays where you put it."><span class="ico">⤢</span>Maximize</button>
+        <button class="big" id="btn-annot-grid" data-vt="agrid" title="Grid: snap annotations onto a screen raster. A label you have dragged stays fixed and is not moved onto the grid."><span class="ico">⊞</span>Grid</button>
+        <button class="big" id="btn-annot-pts" data-vt="apts" title="Annotation content: show the point count of each feature (also in Options)"><span class="ico">#</span>Point count</button>
+        <button class="big" id="btn-annot-std" data-vt="astd" title="Annotation content: show the standard deviation σ of each feature (also in Options)"><span class="ico">σ</span>Std. dev.</button>
+        <div class="big decbig" title="Decimal places of all displayed values (annotations, panels, tree, report/CSV) – also in Options. Internal values and input fields are not rounded."><span class="ico dec-row"><button type="button" id="dec-minus" title="One decimal place less">−</button><b id="dec-val">2</b><button type="button" id="dec-plus" title="One decimal place more">+</button></span>Decimals</div>
+      </div><div class="glabel">Annotations</div></div>
+      <div class="rsec" data-phone title="Panels"><span>Panels</span></div>
+      <div class="group"><div class="btns">
+        <button class="big on" data-pane-toggle="tree" title="Show/hide the tree"><span class="ico">☰</span>Tree</button>
+        <button class="big on" data-pane-toggle="dialog" title="Show/hide the dialog area"><span class="ico">ⓘ</span>Dialog</button>
+        <button class="big on" data-pane-toggle="table" title="Show/hide the controls table"><span class="ico">▤</span>Controls</button>
+      </div><div class="glabel">Panels</div></div>
+    </div>
+  </section>
+  <div class="rb-pop hidden" id="feat-more-pop" role="menu"><div class="rb-ph">More feature types</div></div>
+  <div class="rb-pop hidden" id="mesh-more-pop" role="menu"><div class="rb-ph">More mesh tools</div>
+    <button class="rb-mi" data-pe="subdiv" title="Triangle subdivision (Loop) with tolerance"><span class="ico">⟁</span><span>Subdivide</span></button></div>
+  <main id="workspace">
+    <aside id="tree-pane"><div class="pane-title">Tree</div><div id="tree"></div></aside>
+    <div id="center">
+      <div id="scene"><div id="report-view" class="hidden"></div><div id="help-backdrop" class="hidden"></div><div id="help-view" class="hidden" role="dialog"></div><div id="sample-dialog" class="hidden"></div><div id="restore-bar" class="hidden"></div><div id="hint"></div><div id="toast" class="hidden"></div><div id="busy" class="hidden">Computing …</div></div>
+      <div id="table-pane" data-ctab="katalog"><div class="pane-title"><span id="ctrl-title">Control Properties</span> <span id="summary"></span>
+          <span class="ctabs"><button data-ctab="katalog">Control Properties</button><button data-ctab="liste">All Controls <span id="ctab-n"></span></button></span></div>
+        <div id="ctrl-body"><div id="catalog"></div>
+          <div id="ctrl-list"><div class="sub-title"><span>All Controls</span><label class="cl-filter"><input type="checkbox" id="cl-filter"> Only features selected in the tree</label></div><div id="table-wrap"><table id="ctrl-table"><thead><tr>
+          <th>Feature</th><th>Control</th><th>Nominal</th><th>Actual</th><th>Dev.</th><th>Tol +</th><th>Tol −</th><th>Status</th><th></th>
+          </tr></thead><tbody></tbody></table></div></div></div></div>
+    </div>
+    <aside id="dialog-pane"><div class="pane-title">Dialog</div><div id="dialog"></div></aside>
+  </main>
+  <nav id="mobile-bar">
+    <button data-panel="tree">☰ Tree</button><button data-panel="dialog">ⓘ Dialog</button><button data-panel="table">▤ Controls <span id="mb-sum"></span></button>
+  </nav>
+  <footer id="statusbar"><span id="status">Ready. Import a polygon model or “Load sample”.</span><span id="stats"></span></footer>
+</div>
+</body>
+</html>
