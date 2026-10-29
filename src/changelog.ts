@@ -7,6 +7,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.51', date: '2026-10-29', items: [
+    'Feature Builder opens in the right-hand dialog while a feature is being created (a side sheet on a phone, so the view cube and the view controls stay put). When you confirm or leave, the dialog shows the object properties again. Previous layout, in the panel or under Home → Options, restores the bottom Feature Builder on desktop and on a phone. The choice is remembered.',
+    'The dialog builder keeps Nominal | Measured at the top, a thin stat line (type icon, flatness, standard deviation), Smart Detect, Add region, Brush and Region back. After Smart Detect, Add region is the next mode. Islands stay collapsed to a count until you open them. Brush radius sits under Advanced. Boundary exclusion is offered for Nominal only.',
+    'Orbit can tumble several full turns about the horizontal screen axis. Changing the type before ✓ refits the same points. A nominal pick uses the normal mouse cursor; the radius ring stays on Measured.',
+    'Home → Import also takes IGES and STEP and adds them as a Reference. The display mesh is coarser and can be remeshed from the tolerance in the CAD dialog without reading the file again. Create and fits still use the analytic face (or a NURBS sample of the surface), and the drawn patch is trimmed to the face boundary.',
+    'Nominal features fill the nominal column of their controls from the CAD fit (diameter, plane coordinates, cylinder axis, and so on). A construction from nominal geometry keeps a Soll component; a measured construction keeps Ist. A nominal you type by hand is marked and can be reset to the value from the Soll geometry.',
+  ] },
   { version: '2026.0.50', date: '2026-10-29', items: [
     'Feature Builder is tighter: Nominal or Measured on the first row, with Datum / Reference beside it. Smart Detect, Add region (offered as soon as a face is recognised), Brush and Region back sit on the next row. Islands are small chips with ✕. Advanced is one chevron. Options, or Previous layout in the panel, restores the previous Feature Builder. The choice is remembered.',
     'The tree is flat: Data, Reference, Features and Coordinate Systems are the same level. There is no Objects folder. Each group has an eye that shows or hides everything inside it. Pin stays on Data and Reference.',

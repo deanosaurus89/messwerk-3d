@@ -1,7 +1,7 @@
 // 3D-Szene (three.js): Polygonmodell, Merkmalsprimitive, Picking mit BVH, Ansichten.
 import * as THREE from 'three';
 import { NurbsInfo, evalCurve, evalSurface, insideTrim, tessellate } from './core/nurbs';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TumbleControls } from './ui/tumblecontrols';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { FitResult } from './core/fit';
 import { AxisAnalysis, axisColorScale, displayPoint, nominalFoot } from './core/axisan';
@@ -21,7 +21,7 @@ export class Viewer {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
-  controls: OrbitControls;
+  controls: TumbleControls;
   model: THREE.Mesh | THREE.Points | null = null;
   colors: Float32Array | null = null;
   prims = new THREE.Group();
@@ -43,11 +43,11 @@ export class Viewer {
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(150, -200, 150);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls = new TumbleControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-    // Maus: links drehen, mittlere Taste gedrückt = verschieben in der Bildebene, Rad = zoomen, rechts = verschieben
+    // Maus: links drehen (auch mehrfach um die horizontale Bildachse), mittlere Taste oder rechts = verschieben, Rad = zoomen
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
     // Hintergrund-Verlauf wie in typischer Messsoftware
     const cv = document.createElement('canvas'); cv.width = 2; cv.height = 256;
@@ -418,6 +418,7 @@ export class Viewer {
     const dist = this.camera.position.distanceTo(this.controls.target);
     // Z bleibt "oben" (OrbitControls); Draufsicht minimal nach −Y geneigt -> X rechts, Y oben (XY-Ebene)
     if (Math.abs(d.z) > 0.999) d.set(0, -1e-4, Math.sign(d.z)).normalize();
+    this.camera.up.set(0, 0, 1);
     this.camera.position.copy(this.controls.target).addScaledVector(d, dist);
     this.camera.lookAt(this.controls.target);
     this.controls.update();
@@ -436,6 +437,7 @@ export class Viewer {
     const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
     const dist = (this.radius / Math.sin(Math.min(vf, hf) / 2)) * 0.9; // Hochformat: horizontaler Öffnungswinkel begrenzt
     if (Math.abs(d.z) > 0.999) d.set(0, -1e-4, Math.sign(d.z)).normalize();
+    this.camera.up.set(0, 0, 1);
     this.controls.target.copy(this.center);
     this.camera.position.copy(this.center).addScaledVector(d, dist);
     this.camera.near = dist / 100; this.camera.far = dist * 10; this.camera.updateProjectionMatrix();
@@ -461,8 +463,9 @@ export class Viewer {
   /** Pinsel-Cursor: Kreis auf der Fläche, optional die Dreiecke markieren, die ein Strich erfassen würde (Kugel um den Treffer, zugewandt). */
   showCursor(hit: Hit | null, radius: number, highlight = false) {
     if (this.brushHi) { this.scene.remove(this.brushHi); this.brushHi.geometry.dispose(); this.brushHi = null; }
-    if (!hit) { this.cursor.visible = false; return; }
-    const pointer = radius <= 0;
+    // radius <= 0: nominal pick — no ring and no brush disc. Hover highlight is the face colour.
+    if (!hit || radius <= 0) { this.cursor.visible = false; return; }
+    const pointer = false;
     const bt = (this.model?.geometry as any)?.boundsTree;
     if (highlight && !pointer && bt) {
       const c = new THREE.Vector3(...hit.point), n = new THREE.Vector3(...hit.normal), sph = new THREE.Sphere(c, radius); const out: number[] = [];
@@ -709,6 +712,7 @@ export class Viewer {
   focus(c: [number, number, number], r: number, look?: [number, number, number]) {
     const dir = look ? new THREE.Vector3(...look).normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
     if (look && Math.abs(dir.z) > 0.999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
+    if (look) this.camera.up.set(0, 0, 1);
     const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
     const dist = Math.max(r, this.radius / 200) / Math.sin(Math.min(vf, hf) / 2) * 1.15;
     this.controls.target.set(...c);

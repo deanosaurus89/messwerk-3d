@@ -135,7 +135,11 @@ import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType, anchorFit, signedDistance } from './core/fit';
 import { boundaryKind, coneDisplayShell, cylinderDisplayShell, drawsPointHighlight, zoneSrcFor } from './core/geombound';
-import { SURFACE_HIGHLIGHT, TREE_GROUPS, addRegionSuggested, compactStatHtml, detectBadge, featureBuilderLayout, featureClassWord, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, roleWord, stickySide } from './core/nominalui';
+import { SURFACE_HIGHLIGHT, TREE_GROUPS, boundaryExclusionFor, compactStatHtml, detectBadge, fbActionOn, featureBuilderHost, featureBuilderLayout, featureClassWord, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, roleWord, showPickRing, stickySide } from './core/nominalui';
+import { facePatch, loopsFromMesh } from './core/facetrim';
+import { applyComputedNominal, editNominal, nominalControlKinds, nominalIsModified, nominalOfFit, resetNominal } from './core/nominalvalue';
+import { importTarget } from './core/importpath';
+import { resolveTess, type TessTol } from './cad/tesspolicy';
 import { treeMenuIds, type TreeTarget } from './core/treemenu';
 import {
   Control, ControlKind, Feature, availableControls, computeDistance, controlLabel, controlsCSV,
@@ -178,6 +182,8 @@ interface PreviewAux { plane: FitResult; indices: Uint32Array; source: string; r
 interface Preview { fit: FitResult; indices: Uint32Array; candidates: { type: string; rms: number }[]; method: 'Klick' | 'Pinsel' | 'Konstruiert'; refs?: number[];
   /** Soll = analytic CAD nominal; Ist = fitted to the polygon (default for mesh previews) */
   role?: 'soll' | 'ist'; cadFace?: number; cadSeed?: Vec3[]; cadPoint?: Vec3;
+  /** CAD face boundary (outer loop, then islands) the analytic patch is trimmed to */
+  loops?: Vec3[][];
   aux?: PreviewAux; hit?: Hit; dev?: Float32Array; /** multi-seed plane: index sets of the merged regions */ regions?: Uint32Array[]; /** zone from the fitted geometry (Boundary from: Fitted geometry) */ zone?: import("./core/reextract").SearchRegion; /** raw region-growing result (before extraction parameters) */ grown?: Uint32Array; /** All inside boundary: search distance used (auto = 3 × RMS) */ bandUsed?: number; /** region-grown points before 'capture all inside outer boundary' */ seed?: Uint32Array; filled?: number; /** All inside boundary: raised-feature points and the outer contour loops */ raised?: Uint32Array; contour?: number[][][]; /** All inside boundary: detected islands (0.31) */ islands?: Island[]; /** aux plane captured with All inside boundary */ auxFill?: boolean; }
 type V3 = [number, number, number];
 interface CurveView { id: number; name: string; kind: 'Kante' | 'Tangente' | 'Übergang' | 'Benutzer' | 'Vorschlag'; visible: boolean; chain: number[]; closed: boolean; ctrl: number[][]; pts: number[][]; length: number; }
@@ -400,7 +406,9 @@ function startFitMode(t: GeomType | 'auto', side?: SideMode) {
   pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
-  state.preview = null; clearBrush(); renderAll();
+  state.preview = null; clearBrush();
+  if (featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog') { setPaneOpen('dialog', true); togglePanel('dialog', true); }
+  renderAll();
 }
 function startDistanceMode() {
   pe.tool = null;
@@ -419,6 +427,14 @@ function stopMode() {
 
 $('#file').onchange = async (e) => {
   const input = e.target as HTMLInputElement; const f = input.files?.[0]; if (!f) return;
+  if (importTarget(f.name) === 'reference') {
+    input.value = '';
+    let file = f;
+    if (/\.gz$/i.test(f.name)) { const raw = gunzipSync(new Uint8Array(await f.arrayBuffer())); file = new File([raw], f.name.replace(/\.gz$/i, '')); }
+    await cadOpen(file);
+    status(tt('CAD reference imported: {0}. It is under Reference, not the measured mesh.', file.name));
+    return;
+  }
   if (!(await requestLoad())) { input.value = ''; return; }
   await loadBuffer(f.name, await f.arrayBuffer(), true);
   input.value = '';
@@ -640,7 +656,7 @@ function setPickR(v: number | 0) {
   state.opts.pick = v > 0 ? +Math.min(Math.max(v, 0.05), (state.data?.diag ?? 1000) / 4).toFixed(v < 1 ? 2 : 1) : 0; localStorage.setItem('mw3d-pick', String(state.opts.pick));
   for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.value = state.opts.pick ? String(state.opts.pick) : '';
   for (const el of document.querySelectorAll<HTMLInputElement>('.cp-pick-v')) el.placeholder = `${tt('auto')} ${pickR()}`;
-  if (lastHit && areaMode()) viewer.showCursor(lastHit, pickR(), true);
+  if (lastHit && areaMode() && showPickRing(state.opts.side === 'soll')) viewer.showCursor(lastHit, pickR(), true);
   status(tt('Pick radius r = {0} mm{1} – seed area of Click & grow (mouse wheel; empty = automatic).', pickR(), state.opts.pick ? '' : ' (' + tt('auto') + ')'));
 }
 /** Pinsel aktiv (Fit-Pinsel oder Polygon-Radierer)? Dann ändert das Mausrad den Radius, Strg+Rad zoomt. */
@@ -689,7 +705,16 @@ function creationAim(x: number, y: number, soften = false) {
   return { side, cad: c, mesh };
 }
 function cadTessFaces(): TessFace[] {
-  return cad.faces.map((f) => { const tess = f.res?.tess ?? f.tess; return { id: f.id, geom: f.geom ?? null, positions: tess.positions, normals: tess.normals }; });
+  return cad.faces.map((f) => {
+    // NURBS recognition uses the surface sample cloud. The display mesh is only the fallback.
+    const cloud = f.fitCloud ?? f.res?.tess ?? f.tess;
+    return { id: f.id, geom: f.geom ?? null, positions: cloud.positions, normals: cloud.normals };
+  });
+}
+function faceLoopsOf(face: { geom?: { loops?: Vec3[][] } | null; tess: { positions: Float32Array; indices: Uint32Array }; res?: { tess: { positions: Float32Array; indices: Uint32Array } } | null }): Vec3[][] {
+  if (face.geom?.loops && face.geom.loops.length) return face.geom.loops;
+  const tess = face.res?.tess ?? face.tess;
+  return loopsFromMesh(tess.positions, tess.indices);
 }
 function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
   clearTimeout(cadHoverT); const seq = ++cadHoverSeq;
@@ -733,11 +758,12 @@ async function previewFromCad(c: { id: number; p: V3 }, touch = lastNominalTouch
   if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
   const tess = face.res?.tess ?? face.tess;
   const seed = samplePositions(tess.positions, 240);
+  const loops = faceLoopsOf(face);
   if (nom.fit.type === 'Ebene' && seed.length > 1) {
     let e = 0; for (let i = 1; i < seed.length; i++) e = Math.max(e, Math.hypot(seed[i][0] - seed[0][0], seed[i][1] - seed[0][1], seed[i][2] - seed[0][2]));
     (nom.fit as FitResult & { span?: number }).span = Math.max(e, 8);
   }
-  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role, cadFace: face.id, cadSeed: seed, cadPoint: c.p,
+  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role, cadFace: face.id, cadSeed: seed, cadPoint: c.p, loops,
     aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
   status(role === 'soll'
@@ -954,8 +980,14 @@ function previewStats(p: Preview): string {
   return sideBadge(role, m.type) + `<span class="cp-type">${ICON[m.type] ?? ''} ${typeName(m.type)}</span>` + rows.map(([k, v, c]) => `<span class="cp-kv" data-kv="${c}"><small>${k}</small><b>${v}</b></span>`).join('');
 }
 let paintEx = false, exclStroke = new Set<number>();
+let fbPending: CtxSpec | null = null;
 function renderModeBar() {
-  const spec = ctxSpec(); setCtx('mesh', spec); setCtx('tool', analysisSpec()); placeFloaters();
+  fbPending = null;
+  document.body.classList.remove('fb-dialog');
+  document.body.classList.toggle('nominal-cursor', state.mode?.kind === 'fit' && state.opts.side === 'soll');
+  const spec = ctxSpec(); setCtx('mesh', spec); setCtx('tool', analysisSpec());
+  if (fbPending) document.body.classList.add('fb-dialog');
+  placeFloaters();
 }
 function ctxSpec(): CtxSpec | null {
   if (!state.data && !cad.faces.length) return null;
@@ -1019,24 +1051,29 @@ function ctxSpec(): CtxSpec | null {
     <label title="${tt('Fit criterion (ISO 5459): Gauss = least squares; Minimum zone = smallest separation; circumscribed / inscribed = tangential.')}">${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>
   ` : ''}`;
   const pars = `<details class="cp-params" ${cpParamsOpen ? 'open' : ''}><summary title="${sollUi ? tt('Nominal / actual. Fit criterion and the normal angle are not used for a CAD nominal.') : tt('Settings: feature type, pick radius, normal angle, search distance, exclusion distance and fit criterion. Changes update the preview live.')}">⚙</summary><div class="cp-pg">${sideCtl}${sollUi ? nominalAdvancedControls(state.opts.brush) : scanPars}<button type="button" data-a="fblayout" class="cp-layout">${tt('New layout')}</button></div></details>`;
-  const compact = featureBuilderLayout(localStorage.getItem('mw3d-fb-layout')) === 'compact';
+  const compact = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
+  const hi = fbActionOn(!!p && m.method === 'Klick', !!p && state.opts.multi);
+  const smartSlim = `<button data-a="click" class="cp-smart ${hi.smart && m.method === 'Klick' && !paintEx ? 'on' : ''}" title="${tt('Smart Detect: tap/click a face – the region grows from the seed area (pick circle) and the feature is detected (Auto) or fitted as the chosen type')}">✨ ${tt('Smart Detect')}</button>`;
   const datumAlways = (m.type !== 'Abstand' && m.type !== 'Winkel' && (p ? p.fit.type !== 'Abstand' && p.fit.type !== 'Winkel' && p.fit.type !== 'Linienzug' : true))
     ? `<label class="cp-datum" title="${tt('Assign a datum label to the new feature directly (it can be changed later in the Feature dialog)')}">${tt('Datum / Reference')} <select id="cp-datum"><option value="">–</option>${DATUM_LETTERS.filter((l) => !state.features.some((g) => g.datum === l)).slice(0, 8).map((l) => `<option ${state.opts.newDatum === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : '';
-  const suggest = addRegionSuggested(!!p && m.method === 'Klick', state.opts.multi);
   const canUndo = !!(p && (p.regions || regionOps.length));
-  const brushCtl = !sollUi && m.method === 'Pinsel'
-    ? `<label class="cp-brush">r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label><button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}">🧽 ${tt('Erase')}</button><span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>`
-    : (!sollUi && m.method === 'Klick' ? pick : '');
-  const advBody = sollUi ? '' : `${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
+  const brushTools = !sollUi && m.method === 'Pinsel'
+    ? `<button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}">🧽 ${tt('Erase')}</button><span><b>${state.brushCount}</b> ${tt('pts')}</span><button data-a="clear" class="warn" ${state.brushCount ? '' : 'disabled'}>🗑</button>` : '';
+  const brushAdv = !sollUi ? `<label class="cp-brush">${tt('Brush radius')} <button type="button" data-br="-">−</button><input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"><button type="button" data-br="+">＋</button> <input id="cp-brush-r" type="range" min="0.2" max="${Math.max(20, +(state.opts.brush * 4).toFixed(1))}" step="0.1" value="${state.opts.brush}"> mm</label>` : '';
+  const exclNom = boundaryExclusionFor(!!sollUi) === 'enabled'
+    ? `<label title="${tt('Boundary exclusion distance [mm]: points closer than this to the boundary are excluded. Nominal only.')}">${tt('Boundary excl.')} <input data-exn="inset" data-num="abs" value="${x.inset}" inputmode="decimal"> mm</label>` : '';
+  const advBody = `${brushAdv}${!sollUi && m.method === 'Klick' ? pick : ''}${exclNom}` + (sollUi ? '' : `${state.opts.fill.on && ((p && p.fit.type === 'Ebene' && !p.aux) || (auxable && ao === 'auto')) ? `<label title="${tt('Search distance ± [mm]: thickness of the search region normal to the plane – points farther away are not part of the face (same parameter as in Re-extraction)')}">${tt('Search distance ±')} <input id="cp-fband" data-num="abs" value="${state.opts.fill.band ?? ''}" placeholder="${tt('auto')}${p?.bandUsed && state.opts.fill.band == null ? ' ' + fmt(p.bandUsed, 2) : ''}" inputmode="decimal" style="width:5.5em"> mm</label><button data-a="fillraised" class="${state.opts.fill.exRaised ? 'on' : ''}" title="${raisedTip()}">⛰ ${tt('Exclude raised')}${p?.raised?.length ? ` (${p.raised.length})` : ''}</button>${raisedHelp()}` : ''}${fullPars ? `
     ${isPl || TRIM_TYPES.includes(ptype) ? smoothCtl('cp-smooth', true) : ''}
-    ${isPl || GEOM_ZONE.includes(ptype) ? `<label title="${istBoundaryTip()}">${tt('Boundary excl.')} <input data-exn="inset" data-num="${isPl ? 'abs' : 'signed'}" value="${x.inset}" inputmode="${isPl ? 'decimal' : 'text'}" disabled> mm</label>` : ''}
     ${m.method === 'Klick' ? `<label title="${tt('Normal angle')}">${tt('Normal angle')} <input id="cp-nang" data-num="abs" value="${state.opts.maxAngleDeg}" inputmode="decimal" style="width:3.5em">°</label>` : ''}
-    <label>${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>` : ''}`;
+    <label>${tt('Fit criterion')} <select id="cp-crit">${FIT_CRITS.map((c) => `<option value="${c}" ${c === (state.opts.crit ?? 'lsq') ? 'selected' : ''}>${tt(CRIT_NAME[c])}</option>`).join('')}</select></label>` : ''}`);
+  const islN = p?.islands?.length ?? 0;
+  const islDrawer = !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || GEOM_ZONE.includes(p.fit.type))
+    ? `<details class="cp-isl-drawer"><summary>${tt('Islands')} ${islN}</summary><div class="cp-isl-b">${islandChips(p.islands ?? [])}<button type="button" data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">${tt('Brush add')}</button></div></details>` : '';
   const compactCtl = `<div class="cp-top"><span class="cp-seg cp-sidepick"><button type="button" data-sidepick="soll" class="${state.opts.side === 'soll' ? 'on' : ''}">${tt('Nominal')}</button><button type="button" data-sidepick="ist" class="${state.opts.side === 'ist' ? 'on' : ''}">${tt('Measured')}</button></span>${datumAlways}<button type="button" data-a="fblayout" class="cp-layout" title="${tt('Switch back to the previous Feature Builder')}">${tt('Previous layout')}</button></div>`
-    + `<div class="cp-acts">${type}<span class="cp-seg cp-selm">${smart}<button data-a="addreg" class="${m.method === 'Klick' && state.opts.multi ? 'on' : ''}${suggest ? ' suggest' : ''}" ${p && m.method === 'Klick' ? '' : 'disabled'} title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button>${sollUi ? '' : `<button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button>`}<button data-a="unregion" ${canUndo ? '' : 'disabled'} title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button></span>${brushCtl}${detectBadge(detected)}</div>`
+    + `<div class="cp-acts">${type}<span class="cp-seg cp-selm">${smartSlim}<button data-a="addreg" class="${hi.add ? 'on' : ''}" ${p && m.method === 'Klick' ? '' : 'disabled'} title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button>${sollUi ? '' : `<button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button>`}<button data-a="unregion" ${canUndo ? '' : 'disabled'} title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button></span>${brushTools}${detectBadge(detected)}</div>`
     + (sollUi ? '' : `${auxCtl}${bfrom}`)
-    + (compact && !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || (GEOM_ZONE.includes(p.fit.type) && (p.islands?.length ?? 0) > 0)) ? `<div class="cp-isl-row">${islandChips(p.islands ?? [])}</div>` : '')
-    + (advBody ? `<details class="cp-adv cp-params" ${cpParamsOpen ? 'open' : ''}><summary>${tt('Advanced')}</summary><div class="cp-pg">${advBody}</div></details>` : '');
+    + islDrawer
+    + `<details class="cp-adv cp-params" ${cpParamsOpen ? 'open' : ''}><summary>${tt('Advanced')}</summary><div class="cp-pg">${advBody}</div></details>`;
   const roleNow = detected
     ? (p?.role ?? ((p && (p.method === 'Klick' || p.method === 'Pinsel')) ? 'ist' as const : hoverNominal?.role ?? null))
     : (p?.role ?? null);
@@ -1046,9 +1083,9 @@ function ctxSpec(): CtxSpec | null {
       ? `${sideBadge(hoverNominal.role)}${hoverNominal.type ? `<span class="cp-type">${ICON[hoverNominal.type] ?? ''}</span>` : ''}<span class="cp-hint">${hoverNominal.fit ? (hoverNominal.role === 'soll' ? tt('Recognised. Create nominal adds it to the tree.') : tt('Recognised. ✓ adds it to the tree.')) : tt('Click the CAD face, then confirm.')}</span>`
       : `${sideBadge(hoverNominal.role, hoverNominal.type)}<span class="cp-hint">${hoverNominal.role === 'soll' && !hoverNominal.type ? tt('Click the CAD face, then Create nominal.') : tt('Recognised. Create nominal adds it to the tree.')}</span>`)
     : '';
-  return {
+  const spec: CtxSpec = {
     title: `${tt('Feature Builder')} · ${[roleWord(roleNow), headType].filter(Boolean).join(' · ')}`, cls: `${m.method === 'Pinsel' ? 'brush' : ''} ${compact ? 'fb-compact' : ''}`.trim(),
-    controls: compact ? compactCtl : ctl + pars, stats: (compact ? '' : (detected && !p ? detectBadge(detected) : '')) + (p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverStat || (hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '')),
+    controls: compact ? compactCtl : ctl + pars, stats: (compact ? (p ? previewStats(p) : hoverStat) : ((detected && !p ? detectBadge(detected) : '') + (p ? previewStats(p) : m.method === 'Pinsel' ? (brushLive ? previewStats(brushLive) : state.brushCount ? `<span class="cp-kv"><small>${tt('Points')}</small><b>${state.brushCount}</b></span>` : `<span class="cp-hint">${tt('Paint the area – the fit is shown here, ✓ creates the feature')}</span>`) : hoverStat || (hoverType ? `<span class="cp-hint">${tt('Detected')}: <b>${typeName(hoverType)}</b></span>` : '')))),
     bind: (el) => {
       el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => (b.onclick = () => { const a = b.dataset.a;
         if (a === 'fblayout') { try { localStorage.setItem('mw3d-fb-layout', featureBuilderLayout(localStorage.getItem('mw3d-fb-layout')) === 'compact' ? 'classic' : 'compact'); } catch { /* */ } renderAll(); return; }
@@ -1091,6 +1128,8 @@ function ctxSpec(): CtxSpec | null {
         c.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); c.onchange?.(new Event('change')); } }); });
       const na = el.querySelector<HTMLInputElement>('#cp-nang'); if (na) na.onchange = () => { const v = parseNum(na.value); if (v != null && v > 0 && v < 90) { state.opts.maxAngleDeg = v; const pv = state.preview; if (pv?.hit && pv.method === 'Klick' && !pv.regions) previewByClick(pv.hit); } };
       const br = el.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
+      const rs = el.querySelector<HTMLInputElement>('#cp-brush-r'); if (rs) rs.oninput = () => { const x = Number(rs.value); if (x > 0) setBrushRadius(x); };
+      el.querySelectorAll<HTMLButtonElement>('[data-br]').forEach((b) => (b.onclick = () => setBrushRadius(state.opts.brush * (b.dataset.br === '+' ? 1.25 : 0.8))));
     },
     ok: p ? { run: () => { if (p.role === 'soll' || p.cadFace != null) void confirmNominal(); else commitPreview(); }, title: p.role === 'soll' ? tt('Create nominal') : tt('Create feature (Enter)') }
       : (hoverNominal?.fit && nominalCanConfirm(null, hoverNominal.fit)) ? { run: () => void confirmNominal(), title: state.opts.side === 'soll' ? tt('Create nominal') : tt('Create feature (Enter)') }
@@ -1098,6 +1137,8 @@ function ctxSpec(): CtxSpec | null {
     undo: m.method === 'Pinsel' ? { run: undoBrush, disabled: !brushUndo.some((x) => x.length), title: tt('Undo brush stroke (Ctrl+Z)') } : null,
     cancel: p ? { run: discardPreview, title: tt('Discard preview (Esc)') } : { run: stopMode, title: tt('Exit mode (Esc)') },
   };
+  if (compact) { fbPending = spec; return null; }
+  return spec;
 }
 
 const istBoundaryTip = () => tt('Boundary exclusion distance and boundary smoothing apply only to a CAD nominal. They stay greyed out for a scan (actual).');
@@ -1197,9 +1238,12 @@ async function previewNurbs(src: { indices?: Uint32Array; hit?: Hit }, method: '
 }
 async function previewByClick(h: Hit, add = false) {
   seedFeedback(h);
-  // phones: the Creation Panel sits at the bottom – close bottom sheets / drawers that would cover it
-  if (isPhone()) { togglePanel('dialog', false); togglePanel('table', false); }
+  const dialogFb = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
+  // classic layout: the creation panel is the bottom dock, so a phone sheet would cover it
+  if (isPhone() && !dialogFb) { togglePanel('dialog', false); togglePanel('table', false); }
   const m = state.mode as FitMode;
+  const fresh = dialogFb && !add && !state.opts.multi;
+  const armAdd = () => { if (fresh && state.preview && m.method === 'Klick') state.opts.multi = true; };
   const pv = state.preview;
   if (state.opts.addIsl && pv && pv.fit.type === 'Ebene' && !pv.aux) { state.opts.fill.man.push({ c: [...h.point] as Vec3, r: state.opts.brush }); state.opts.addIsl = false; await applyExtract(); renderAll(); status(tt('Island added (Ø {0} mm = brush diameter).', fmt(2 * state.opts.brush, 1))); return; }
   if (state.opts.sub && pv && !pv.aux) { await removeRegion(h); return; }
@@ -1220,11 +1264,12 @@ async function previewByClick(h: Hit, add = false) {
     if (!r.aux && extractActive()) await applyExtract();
     if (r.aux) {
       // Creation Panel choice (local ring / all inside boundary) also applies to an auto-detected circle/slot/line
-      if ((state.opts.aux === 'ring' || false) && (r.fit.type === 'Kreis' || r.fit.type === 'Langloch' || r.fit.type === 'Linie')) { try { await previewWithAux(h, r.fit.type); } catch (e: any) { toast(e.message); } renderAll(); return; }
-      status(tt('Auto: {0} in auxiliary plane – {1} wall points (orange), {2} plane points (blue).', typeName(r.fit.type), r.indices.length, r.aux.indices.length)); renderAll(); return; }
+      if ((state.opts.aux === 'ring' || false) && (r.fit.type === 'Kreis' || r.fit.type === 'Langloch' || r.fit.type === 'Linie')) { try { await previewWithAux(h, r.fit.type); } catch (e: any) { toast(e.message); } armAdd(); renderAll(); return; }
+      status(tt('Auto: {0} in auxiliary plane – {1} wall points (orange), {2} plane points (blue).', typeName(r.fit.type), r.indices.length, r.aux.indices.length)); armAdd(); renderAll(); return; }
     status(tt('Preview: {0} from {1} points ({2} ms). ✓ creates the feature.', typeName(r.fit.type), r.indices.length, r.ms.toFixed(0)));
   } catch (e: any) { state.preview = null; status(tt('No geometry found: {0}', e.message)); }
   attachSurfaceIslands();
+  armAdd();
   renderAll();
 }
 /** Holes in a cylinder, cone, sphere or torus selection, so ✕ can close them in the geometry. */
@@ -1354,7 +1399,10 @@ async function refitRegions(regions: Uint32Array[], hit?: Hit, type: GeomType = 
 }
 /** Seed area feedback: the triangles inside the pick circle at the click/tap (desktop shows it on hover already; on
  *  touch devices it is the only feedback where the region starts) – stays until the next hover/tap or the preview ends. */
-function seedFeedback(h: Hit) { if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { lastHit = h; viewer.showCursor(h, pickR(), true); } }
+function seedFeedback(h: Hit) {
+  if (!showPickRing(state.opts.side === 'soll')) { viewer.showCursor(null, 1); canvas.style.cursor = 'default'; return; }
+  if (state.mode?.kind === 'fit' && state.mode.method === 'Klick') { lastHit = h; viewer.showCursor(h, pickR(), true); }
+}
 async function previewByClickAs(h: Hit, t: GeomType | 'auto') {
   const m = state.mode as FitMode; const old = m.type; m.type = t; await previewByClick(h); m.type = old;
 }
@@ -1379,31 +1427,23 @@ async function refitPreview(t: GeomType | 'auto') {
     let nom = found?.pick ?? null;
     if (t === 'Freiformfläche' && face && (!nom || nom.freeform)) { try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; } catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; } }
     if (!nom || nom.freeform || !face) { status(tt('No {0} on this CAD face ({1}).', t === 'auto' ? tt('matching feature') : typeName(t), face?.type ?? '')); return; }
-    state.preview = { ...p, fit: nom.fit, aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: state.opts.side, cadFace: face.id };
+    state.preview = { ...p, fit: nom.fit, loops: faceLoopsOf(face), aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: state.opts.side, cadFace: face.id };
     cadHighlight(face.id);
     renderAll(); return;
   }
   if (t === 'Linienzug') { status(tt('A polyline has no nominal on the polygon model. Use From CAD, or derive it in Analyze.')); return; }
   if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
-  if (p.hit && t === 'Ebene' && p.method === 'Klick') {
-    const g = await busy(engine.call<any>({ op: 'grow', tri: p.hit.tri, point: p.hit.point, maxAngleDeg: state.opts.maxAngleDeg, radius: state.opts.radius, type: 'Ebene', seedR: state.opts.pick }));
-    state.preview = { ...p, aux: undefined, zone: undefined, fit: g.fit, indices: g.indices, grown: g.indices, candidates: g.candidates ?? [] };
-    if (extractActive()) await applyExtract();
-    status(tt('Refitted as {0}.', typeName('Ebene')));
-    renderAll(); return;
-  }
-  if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none') {
+  if (p.hit && (t === 'Kreis' || t === 'Langloch') && state.opts.aux !== 'none' && !p.indices.length) {
     try { await previewWithAux(p.hit, t); } catch (e: any) { status(tt('Auxiliary plane: {0}', e.message)); }
     renderAll(); return;
   }
   try {
-    const src = p.grown ?? p.indices;
+    // Type change refits the points Smart Detect already picked. It does not grow a new region.
+    const src = p.indices.length ? p.indices : (p.grown ?? p.indices);
     const r = await busy(engine.call<any>({ op: 'fit', indices: src, type: t }));
-    state.preview = { ...p, aux: undefined, zone: undefined, fit: r.fit, indices: r.indices, grown: src, candidates: r.candidates.length ? r.candidates : p.candidates };
-    // the Creation Panel parameters (Boundary from: Fitted geometry, exclusion, angle, outliers) apply to the new type too –
-    // before 0.27 a type change (e.g. Auto ▸ circle → Cylinder) kept only the selected points, so ✓ stored a trimmed feature
-    if (extractActive()) await applyExtract();
+    state.preview = { ...p, aux: undefined, zone: undefined, fit: r.fit, indices: src, grown: p.grown ?? src, candidates: r.candidates.length ? r.candidates : p.candidates };
+    attachSurfaceIslands();
     status(tt('Refitted as {0}.', typeName(r.fit.type)));
   } catch (e: any) { status(tt('Fit failed: {0}', e.message)); }
   renderAll();
@@ -1425,8 +1465,9 @@ function commitNominal(p: Preview) {
     color: state.colorMode === 'uniform' ? state.uniformColor : PALETTE[state.features.length % PALETTE.length], indices: new Uint32Array(0),
   };
   const node = asNode(f);
-  node.soll = { source: 'cad', fit: { ...p.fit, residuals: undefined }, method: 'aus CAD', faceId: p.cadFace, seed: p.cadSeed, aux: p.aux ? { plane: p.aux.plane, source: 'aus CAD' } : undefined };
+  node.soll = { source: 'cad', fit: { ...p.fit, residuals: undefined }, method: 'aus CAD', faceId: p.cadFace, seed: p.cadSeed, loops: p.loops?.map((L) => L.map((q) => [...q] as Vec3)), aux: p.aux ? { plane: p.aux.plane, source: 'aus CAD' } : undefined };
   state.features.push(node); touchProject();
+  seedNominalControls(node);
   state.preview = null; clearBrush(); resetIslands(); hoverNominal = null;
   state.sel = [node.id]; state.selControl = null; state.addFeat = node.id;
   renderAll();
@@ -1471,6 +1512,7 @@ function commitConstruction(p: Preview) {
   node.cons = { key: m.key, refs: [...refs], params: { ...m.params } };
   if (nominal) node.soll = { source: 'constructed', fit: { ...p.fit, residuals: undefined }, method: 'Konstruiert' };
   state.features.push(node); touchProject();
+  if (nominal) seedNominalControls(node);
   if (t === 'Winkel' && !nominal) addControl('Winkelwert', node.id);
   if (!nominal && node.measured?.pattern) { addControl('Durchmesser', node.id); addControl('Teilung', node.id); }
   state.mode = { ...m, refs: [], slot: 0 }; state.preview = null;
@@ -1481,7 +1523,7 @@ function commitConstruction(p: Preview) {
 function commitPreview() {
   const p = state.preview; if (!p) return;
   if (p.method === 'Konstruiert' && state.mode?.kind === 'con') { viewer.showCursor(null, 1); commitConstruction(p); return; }
-  if (p.role === 'soll') { viewer.showCursor(null, 1); commitNominal(p); return; }
+  if (p.role === 'soll' && state.mode?.kind !== 'dist') { viewer.showCursor(null, 1); commitNominal(p); return; }
   viewer.showCursor(null, 1); // seed feedback ends with the preview
   const t = p.fit.type;
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
@@ -1499,7 +1541,10 @@ function commitPreview() {
     if (t === 'Ebene') { f.fp!.inset = x.inset; if (state.opts.fill.on) f.fp!.fill = { on: true, band: state.opts.fill.band ?? 0, exRaised: state.opts.fill.exRaised, islands: x.islands, isl: state.opts.fill.isl.map((o) => ({ ...o, c: [...o.c] })) }; } }
   { const zChoice = zoneSrcFor(t, state.opts.ex.zoneSrc, !!p.aux); if (zChoice && f.fp && !f.fp.zoneSrc) f.fp.zoneSrc = zChoice; }
   if (p.regions) f.hit = undefined; // Add region stays the chosen selection method
-  if (p.cadFace != null) f.cadFace = p.cadFace;
+  if (p.cadFace != null) {
+    f.cadFace = p.cadFace;
+    if (p.loops?.length) f.soll = { source: 'cad', fit: { ...p.fit, residuals: undefined }, method: 'aus CAD', faceId: p.cadFace, loops: p.loops.map((L) => L.map((q) => [...q] as Vec3)) };
+  }
   if (t === 'Ebene' && p.method !== 'Konstruiert' && p.indices.length >= 3 && viewer.model?.geometry.index) { // 0.33: freeze the boundary of the final selection (union of regions, after islands)
     const g = viewer.model.geometry;
     const seal: HoleSeal[] = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: I.c as Vec3, r: I.r }));
@@ -1516,12 +1561,15 @@ function commitPreview() {
     f.auxIndices = p.aux.indices;
   }
   state.features.push(asNode(f)); touchProject(); // node + Ist (core/featuremodel.ts)
+  if (f.soll?.fit && p.cadFace != null && p.role !== 'soll') seedNominalControls(f);
   if (state.opts.newDatum && !state.features.some((g) => g.datum === state.opts.newDatum)) setDatum(f, state.opts.newDatum);
   state.opts.newDatum = '';
   state.preview = null; clearBrush(); resetIslands();
   state.sel = [f.id]; state.selControl = null; state.addFeat = f.id;
   if (state.mode?.kind === 'dist') { const comp = state.mode.comp; f.dim = { comp }; const off = state.labelOffsets.get(-1); if (off) state.labelOffsets.set(f.id, off); state.labelOffsets.delete(-1);
-    addControl(('Abstand ' + comp) as ControlKind, f.id); state.mode = { kind: 'dist', a: null, b: null, slot: 0, comp }; }
+    const parents = (p.refs ?? []).map((id) => state.features.find((g) => g.id === id)).filter((g): g is FeatureView => !!g);
+    if (constructionIsNominal(parents)) { f.soll = { source: 'constructed', fit: { ...p.fit, residuals: undefined }, method: 'Konstruiert' }; f.measured = undefined; f.pointCount = 0; }
+    addControl(('Abstand ' + comp) as ControlKind, f.id); refreshNominals(f); state.mode = { kind: 'dist', a: null, b: null, slot: 0, comp }; }
   if (f.cons) { if (t === 'Winkel') addControl('Winkelwert', f.id); if (f.measured!.pattern) { addControl('Durchmesser', f.id); addControl('Teilung', f.id); }
     const m = state.mode as ConMode; state.mode = { ...m, refs: [], slot: 0 }; state.preview = null; }
   renderAll();
@@ -1627,7 +1675,11 @@ function setDistanceSlot(id: number) {
 function updateDistancePreview() {
   const m = state.mode as DistMode;
   const a = state.features.find((f) => f.id === m.a), b = state.features.find((f) => f.id === m.b);
-  state.preview = a && b ? { fit: computeDistance(a.measured!, b.measured!), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: [a.id, b.id] } : null;
+  if (!a || !b) { state.preview = null; return; }
+  const nominal = constructionIsNominal([a, b]);
+  const fa = parentFit(a, nominal), fb = parentFit(b, nominal);
+  if (!fa || !fb) { state.preview = null; return; }
+  state.preview = { fit: computeDistance(fa, fb), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: [a.id, b.id], role: nominal ? 'soll' : 'ist' };
 }
 /** Abstände nach Änderung eines Bezugsmerkmals neu berechnen. */
 const deriveSrc = new WeakMap<Feature, { m: unknown; P: unknown }>();
@@ -1644,11 +1696,16 @@ function recomputeDistances() {
       if (hit && hit.m === par.measured && hit.P === P) continue;
       try { f.measured = runDerive(f.derived.key, par, P); f.derived.error = undefined; deriveSrc.set(f, { m: par.measured, P }); } catch (e: any) { f.derived.error = tt(e.message); }
       continue; }
-    if (f.type === 'Abstand' && !f.cons) { f.measured = computeDistance(ps[0]!, ps[1]!); continue; }
+    if (f.type === 'Abstand' && !f.cons) {
+      const r = computeDistance(ps[0]!, ps[1]!);
+      if (nominalCon && f.soll) f.soll.fit = r; else f.measured = r;
+      refreshNominals(f); continue;
+    }
     if (f.cons) {
       try {
         const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params);
         if (nominalCon && f.soll) f.soll.fit = r; else f.measured = r;
+        refreshNominals(f);
         f.cons.error = undefined;
       }
       catch (e: any) { f.cons.error = tt(e.message); }
@@ -2230,9 +2287,26 @@ function bonusTip(bx?: BonusInfo): string {
 const bonusText = (c: Control, r: ControlResult) => { const s = tolSum(c, r, 4), bx = r.members?.[r.worst ?? 0]?.bx;
   return s ? ` <small class="bonus${bx?.beyond ? ' warn' : ''}" title="${bonusTip(bx)}">${bx?.beyond ? '⚠ ' : ''}${s}</small>` : ''; };
 
+function seedNominalControls(f: FeatureView) {
+  const fit = f.soll?.fit; if (!fit) return;
+  for (const kind of nominalControlKinds(fit.type)) {
+    if (!state.controls.some((c) => c.kind === kind && c.featureIds[0] === f.id)) addControl(kind as ControlKind, f.id);
+  }
+  refreshNominals(f);
+}
+function refreshNominals(f: FeatureView) {
+  const fit = f.soll?.fit; if (!fit) return;
+  for (const c of state.controls) {
+    if (c.featureIds[0] !== f.id) continue;
+    const v = nominalOfFit(c.kind, fit);
+    if (v != null) applyComputedNominal(c, v);
+  }
+}
 function addControl(kind: ControlKind, id: number) {
   const t = defaultTolerance(kind);
   const c: Control = { id: state.nextCtrl++, kind, featureIds: [id], nominal: t.nominal, tolUp: t.up, tolLo: t.lo };
+  const host = state.features.find((x) => x.id === id);
+  if (host?.soll?.fit) { const v = nominalOfFit(kind, host.soll.fit); if (v != null) applyComputedNominal(c, v); }
   if (isDatumControl(kind)) { c.datumIds = []; /* no auto-prefill: the user picks Primary (required) → Secondary → Tertiary */ if (kind === 'Neigung') c.basic = [null]; else if (kind === 'Position' || kind === 'Profil (Bezug)') c.basic = [null, null, null]; } // TED never prefilled: user enters drawing values
   state.controls.push(c); applyTol(c);
   state.selControl = state.nextCtrl - 1;
@@ -2549,6 +2623,24 @@ function clearSelection() { if (!state.sel.length && !state.selModel && state.cu
 
 /** Numeric field (central helper, see ui/numfield): kind 'abs' = magnitude only, 'signed' = ± toggle, 'neg' = Tol− (a plain
  *  number counts as negative, '+' or the ± toggle makes it positive). onChange gets the parsed value and the raw text. */
+function nominalEditor(c: Control, f?: FeatureView): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'nom-ed' + (nominalIsModified(c) ? ' mod' : '');
+  wrap.title = nominalIsModified(c) ? tt('Nominal changed by hand. ↺ restores the value from the Soll geometry.') : tt('Nominal');
+  wrap.appendChild(numInput(c.nominal, (x) => {
+    if (c.nominalFrom == null && f?.soll?.fit) { const v = nominalOfFit(c.kind, f.soll.fit); if (v != null) c.nominalFrom = v; }
+    editNominal(c, x); applyTol(c);
+  }, 'signed'));
+  if (nominalIsModified(c)) {
+    const mark = document.createElement('span'); mark.className = 'nom-mod'; mark.textContent = '✎';
+    wrap.appendChild(mark);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'tsrc-rs'; b.textContent = '↺';
+    b.title = tt('Reset to the nominal computed from the Soll geometry');
+    b.onclick = (e) => { e.stopPropagation(); resetNominal(c); applyTol(c); renderAll(); };
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
 function numInput(v: number | null, onChange: (x: number | null, raw: string) => void, kind: 'abs' | 'signed' | 'neg' | 'any' = 'any') {
   const i = document.createElement('input'); i.type = 'text'; i.inputMode = 'decimal';
   if (kind !== 'any') i.dataset.num = kind === 'neg' ? 'signed' : kind; if (kind === 'neg') i.dataset.numNeg = '1';
@@ -2647,7 +2739,14 @@ function renderDistDialog(d: HTMLElement) {
     ${p ? `<h4>${tt('Result (actual)')}</h4>${kv(fitRows(p.fit, 0))}` : ''}
     <p class="note">${tt('Rule: center to center; if a plane is involved, the center of the other feature is projected perpendicularly onto the plane (point–plane distance). X/Y/Z are the absolute components.')}</p>`;
 }
+function mountFeatureBuilder(d: HTMLElement, spec: CtxSpec) {
+  d.innerHTML = `<div class="fb-slim ${spec.cls ?? ''}"><div class="cp-c">${spec.controls ?? ''}</div>${spec.stats ? `<div class="cp-s">${spec.stats}</div>` : ''}<div class="fb-actions">${spec.cancel ? `<button type="button" id="fb-cancel" class="btn" title="${spec.cancel.title ?? ''}">✕</button>` : ''}${spec.ok ? `<button type="button" id="fb-ok" class="btn cp-ok" ${spec.ok.disabled ? 'disabled' : ''} title="${spec.ok.title ?? ''}">✓</button>` : ''}</div></div>`;
+  spec.bind?.(d);
+  d.querySelector('#fb-ok')?.addEventListener('click', () => spec.ok?.run());
+  d.querySelector('#fb-cancel')?.addEventListener('click', () => spec.cancel?.run());
+}
 function renderFitDialog(d: HTMLElement) {
+  if (fbPending && featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog') { mountFeatureBuilder(d, fbPending); return; }
   const m = state.mode as FitMode; const p = state.preview;
   const nominalUi = p?.role === 'soll' || hoverNominal?.role === 'soll' || state.opts.side === 'soll';
   const sollUi = nominalUi;
@@ -2889,7 +2988,7 @@ function renderTable() {
         const lab = (t: string, el: HTMLElement) => { const s = document.createElement('span'); s.className = 'ce'; s.innerHTML = `<small>${t}</small>`; s.appendChild(el); ed.appendChild(s); };
         if (isZoneControl(c.kind)) lab(tt('Tol (0..t)'), numInput(c.tolUp, (x) => { c.tolUp = Math.abs(x ?? 0); c.tolSrc = 'manual'; }, 'abs'));
         else {
-          lab(tt('Nominal'), numInput(c.nominal, (x) => { c.nominal = x; applyTol(c); }, 'signed'));
+          lab(tt('Nominal'), nominalEditor(c, f));
           if (prefs.tolTables && fitApplies(c)) lab(tt('Fit'), fitInput(c));
           lab(tt('Tol+'), numInput(c.tolUp, (x) => { c.tolUp = x ?? 0; c.tolSrc = 'manual'; }, 'signed'));
           lab(tt('Tol−'), numInput(c.tolLo, (x, raw) => { c.tolLo = tolLoOf(x, raw); c.tolSrc = 'manual'; }, 'neg'));
@@ -2922,7 +3021,7 @@ function renderTable() {
     td(fc?.name ?? '?');
     td(`<span class="sym">${CTRL_SYMBOL(c, fc)}</span> ${controlLabel(c, fc)}${c.datumIds?.length ? ` <span class="frame">${datumText(c, fm)}</span>` : ''}${r.flag && r.flag !== NOMINAL_UNCONFIRMED ? ` <span class="flag${r.flag === NOMINAL_MISSING ? ' missing' : ''}">⚠ ${tt(r.flag)}</span>` : ''}`);
     const zone = isZoneControl(c.kind);
-    td(zone ? '<span class="note">—</span>' : numInput(c.nominal, (x) => { c.nominal = x; applyTol(c); }, 'signed'), 'num');
+    td(zone ? '<span class="note">—</span>' : nominalEditor(c, fc as FeatureView | undefined), 'num');
     td(fmt(r.measured), 'num');
     td(zone ? '' : fmt(r.deviation), `num dev ${r.status}`);
     const tu = td(numInput(c.tolUp, (x) => { c.tolUp = zone ? Math.abs(x ?? 0) : x ?? 0; c.tolSrc = 'manual'; }, zone ? 'abs' : 'signed'), 'num'); if (c.tolSrc) tu.title = c.tolSrc === 'manual' ? tt('manual') : c.tolSrc;
@@ -3070,6 +3169,11 @@ function placeFloaters() {
   const cube = document.getElementById('navcube') as HTMLElement | null;
   const panel = document.getElementById('ctx-panel') as HTMLElement | null;
   const phone = matchMedia('(max-width: 900px), (max-height: 560px)').matches;
+  if (document.body.classList.contains('fb-dialog')) {
+    cube?.style.removeProperty('top'); gear?.style.removeProperty('top');
+    cube?.style.removeProperty('bottom'); gear?.style.removeProperty('bottom');
+    return;
+  }
   const sheet = phone && ['show-table', 'show-dialog', 'show-tree'].some((c) => document.body.classList.contains(c));
   if (sheet) {
     // a bottom sheet covers the lower view; keep the cube and the gear in the 3D area above it
@@ -3240,6 +3344,11 @@ function exitPointColoring() {
   else { renderRibbon(); renderAll(); }
 }
 const shownFit = (f: FeatureView) => f.measured ?? f.soll?.fit;
+function drawBounded(fit: FitResult, loops: Vec3[][] | undefined, color: number, opacity?: number) {
+  const patch = loops && loops.length >= 1 ? facePatch(fit, loops) : null;
+  if (patch && patch.tri.length) viewer.addTrimmed(patch.tri, patch.edges, color, true, undefined, opacity);
+  else viewer.addPrimitive(fit, color, true, opacity, true);
+}
 function renderScene() {
   if (!state.data && !state.features.length && !state.preview && !hoverNominal && !cad.faces.length) {
     viewer.clearPointMarks(); document.getElementById('pt-legend')?.remove(); document.getElementById('dev-legend')?.remove(); viewer.clearPrims(); viewer.labels.set([]); return;
@@ -3274,10 +3383,11 @@ function renderScene() {
     if (!f.measured || !viewer.model) {
       const cadSurf = !!f.soll && !f.measured && ['Ebene', 'Zylinder', 'Kegel', 'Kugel', 'Torus'].includes(f.type);
       if (mShown.nurbs) viewer.addFreeform(mShown.nurbs, f.color, sel, sel && state.ctrlNet);
-      else viewer.addPrimitive(mShown, f.color, sel, cadSurf ? SURFACE_HIGHLIGHT.opacity : undefined, cadSurf);
+      else if (cadSurf) drawBounded(mShown, f.soll?.loops, f.color, SURFACE_HIGHLIGHT.opacity);
+      else viewer.addPrimitive(mShown, f.color, sel, undefined, false);
       continue;
     }
-    if (f.cadFace != null && f.measured) { viewer.addPrimitive(f.measured, f.color, sel, SURFACE_HIGHLIGHT.opacity, true); continue; }
+    if (f.cadFace != null && f.measured) { drawBounded(f.measured, f.soll?.loops, f.color, SURFACE_HIGHLIGHT.opacity); continue; }
     if (f.type === 'Winkel') viewer.addAngle(f.measured!, f.color, sel);
     else if (f.type === 'Abstand') viewer.addDistance(f.measured!.p1!, f.measured!.p2!, f.color, sel, f.dim ? dimGeometry(f.measured!, f.dim.comp, state.labelOffsets.get(f.id) ?? null) : undefined);
     else if (f.measured!.nurbs) viewer.addFreeform(f.measured!.nurbs, f.color, sel, sel && state.ctrlNet);
@@ -3301,7 +3411,7 @@ function renderScene() {
     if (p.fit.type === 'Winkel') viewer.addAngle(p.fit, PREVIEW_COLOR, true);
     else if (p.fit.type === 'Abstand' && state.mode?.kind === 'dist') viewer.addDistance(p.fit.p1!, p.fit.p2!, PREVIEW_COLOR, true, dimGeometry(p.fit, (state.mode as DistMode).comp, state.labelOffsets.get(-1) ?? null));
     else if (p.fit.nurbs) viewer.addFreeform(p.fit.nurbs, PREVIEW_COLOR, true, state.ctrlNet);
-    else if (p.role === 'soll' || p.cadFace != null) viewer.addPrimitive(p.fit, SURFACE_HIGHLIGHT.color, true, SURFACE_HIGHLIGHT.opacity, true);
+    else if (p.role === 'soll' || p.cadFace != null) drawBounded(p.fit, p.loops, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
     else if (previewAnalytic(p)) drawAnalyticPreview(p);
     else if (viewer.model && (p.fit.type === 'Ebene' || TRIM_TYPES.includes(p.fit.type)) && p.indices.length >= 3) {
       const seals: SealMark[] = (p.islands ?? []).filter((I) => I.drop || (I.kind === 'hole' && I.inc)).map((I) => ({ c: I.c, r: I.r }));
@@ -3314,7 +3424,10 @@ function renderScene() {
     if (p.aux && state.opts.aux === 'ring' && (p.fit.type === 'Kreis' || p.fit.type === 'Langloch')) for (const L of zoneLoops(p.fit, p.aux.plane, state.opts.ring.gap, state.opts.ring.width)) viewer.addContour(L, AUX_COLOR); // ring / band zone, live
     // Selected island only: straight mesh loop, not a smoothed tube. Dismissed islands are filled, not outlined.
     (p.islands ?? []).forEach((I, i) => { if (i !== islSel || I.drop) return; for (const L of I.loops) viewer.addLoop(L, 0xff2bd6); });
-  } else if (hoverNominal?.fit && hoverNominal.fit.type !== 'Freiformfläche') viewer.addPrimitive(hoverNominal.fit, SURFACE_HIGHLIGHT.color, true, SURFACE_HIGHLIGHT.opacity, true);
+  } else if (hoverNominal?.fit && hoverNominal.fit.type !== 'Freiformfläche') {
+    const face = hoverNominal.cadId != null ? cad.faces[hoverNominal.cadId] : undefined;
+    drawBounded(hoverNominal.fit, face ? faceLoopsOf(face) : undefined, SURFACE_HIGHLIGHT.color, SURFACE_HIGHLIGHT.opacity);
+  }
   renderCsTriads();
   if (ovm().on('drf')) renderDrfTriad();
   // Labels
@@ -3486,7 +3599,7 @@ function openOptions() {
     <div class="row"><label><input type="checkbox" id="od-pts" ${state.annot.pts ? 'checked' : ''}> ${tt('Show point count')}</label></div>
     <div class="row"><label><input type="checkbox" id="od-std" ${state.annot.std ? 'checked' : ''}> ${tt('Show standard deviation σ')}</label></div>
     <h4>${tt('Feature Builder')}</h4>
-    <div class="row" title="${tt('The tighter Feature Builder is the default. Previous layout restores the panel from before 2026.0.50.')}"><label><input type="checkbox" id="od-fb" ${featureBuilderLayout(localStorage.getItem('mw3d-fb-layout')) === 'classic' ? 'checked' : ''}> ${tt('Previous Feature Builder layout')}</label></div>
+    <div class="row" title="${tt('The dialog Feature Builder is the default on desktop and on a phone. Previous layout restores the bottom panel. The choice is remembered.')}"><label><input type="checkbox" id="od-fb" ${featureBuilderLayout(localStorage.getItem('mw3d-fb-layout')) === 'classic' ? 'checked' : ''}> ${tt('Previous Feature Builder layout')}</label></div>
     <h4>${tt('Display')}</h4>
     <div class="row" title="${tt('Decimal places of all displayed values: annotations, panels, tree properties, report and CSV (lengths in mm, deviations and angles). Internal precision and input fields are not rounded; unit direction vectors keep at least 5 places. Also View ▸ Decimals.')}"><label>${tt('Decimal places')}</label> <span class="od-dec"><button class="btn" type="button" data-dec="-1" title="${tt('One decimal place less')}">−</button><input id="od-dec" type="number" min="${DEC_MIN}" max="${DEC_MAX}" step="1" value="${getDec()}" inputmode="numeric"><button class="btn" type="button" data-dec="1" title="${tt('One decimal place more')}">+</button></span> <span class="note">(${tt('default')} 2)</span></div>
     <div class="row" title="${tt('How transparent the data object is (5–95 %). Separate from the CAD model.')}"><label>${tt('Data object [%]')}</label> <input type="number" id="od-trans" min="5" max="95" step="5" value="${viewTrans.amt}" style="width:5em"> <label><input type="checkbox" id="od-trans-on" ${viewTrans.on ? 'checked' : ''}> ${tt('Data object transparent')}</label></div>
