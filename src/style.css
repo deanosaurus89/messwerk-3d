@@ -465,6 +465,10 @@ input.ted:disabled { background:#f1f3f5; }
 #dialog .cp-adv > summary::before { content:'▸ '; }
 #dialog .cp-adv[open] > summary::before { content:'▾ '; }
 #dialog .fb-slim button.on { background:#1d64c8; color:#fff; border-color:#1d64c8; }
+#dialog .fb-slim button:disabled { opacity:.45; cursor:default; }
+#dialog .fb-slim select { max-width:100%; font:inherit; }
+#dialog .fb-slim .con-in { display:flex; gap:6px; align-items:center; }
+#dialog .fb-slim .con-in select { flex:1; min-width:0; }
 #dialog .cp-layout { border:none; background:none; color:#1565c0; font:600 11px system-ui; cursor:pointer; text-decoration:underline; }
 .nom-ed.mod { outline:1px dashed #e65100; border-radius:4px; padding:0 2px; }
 .nom-mod { color:#e65100; font-weight:700; margin:0 2px; }

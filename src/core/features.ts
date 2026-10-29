@@ -29,8 +29,9 @@ export interface Feature {
   derived?: { key: string; parent: number; error?: string };
   refs?: number[];           // Abstand: IDs der beiden Bezugsmerkmale
   datum?: string;            // Bezugsbuchstabe (A, B, C …)
-  /** constructed feature: construction key, parents (also in refs) and parameters */
-  cons?: { key: string; refs: number[]; params?: Record<string, number>; error?: string };
+  /** constructed feature: construction key, parents (also in refs) and parameters.
+   *  `side` is the component the construction writes (nominal or measured). Absent on older files. */
+  cons?: { key: string; refs: number[]; params?: Record<string, number>; error?: string; side?: 'soll' | 'ist' };
 }
 
 /** Hilfsebene: Ebene, in die die Wandpunkte projiziert werden (Kreis/Langloch). */

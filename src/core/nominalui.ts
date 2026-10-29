@@ -154,3 +154,63 @@ export function nominalRecord(fit: FitResult, faceId?: number, seed?: Vec3[]): S
 export function nominalDraft(fit: FitResult, faceId?: number) {
   return { type: fit.type, class: featureClass(fit.type), measured: undefined as undefined, soll: nominalRecord(fit, faceId), orientation: orientationOf(fit) };
 }
+
+/** Nominal is available when a CAD reference or a nominal feature exists. Measured needs a scan or a measured feature. */
+export function sideChoices(hasCad: boolean, hasMesh: boolean, hasSoll = false, hasIst = false): { soll: boolean; ist: boolean } {
+  return { soll: hasCad || hasSoll, ist: hasMesh || hasIst };
+}
+/** Sticky choice, kept only when that side can actually be built. */
+export function resolveSide(choice: 'soll' | 'ist', hasCad: boolean, hasMesh: boolean, hasSoll = false, hasIst = false): 'soll' | 'ist' {
+  const a = sideChoices(hasCad, hasMesh, hasSoll, hasIst);
+  if (choice === 'soll' && a.soll) return 'soll';
+  if (choice === 'ist' && a.ist) return 'ist';
+  if (a.ist) return 'ist';
+  if (a.soll) return 'soll';
+  return choice;
+}
+/** Interactive create needs the raw data (CAD or the scan). Construct needs an existing feature of that side. */
+export function pathEnabled(side: 'soll' | 'ist', path: 'interactive' | 'construct', src: { cad: boolean; mesh: boolean; soll: boolean; ist: boolean }): boolean {
+  if (path === 'interactive') return side === 'soll' ? src.cad : src.mesh;
+  return side === 'soll' ? src.soll : src.ist;
+}
+/** Two-parent constructions read as From / To. Any other slot keeps its own name. */
+export function slotCaption(index: number, count: number, label: string): string {
+  if (count === 2 && index === 0) return 'From';
+  if (count === 2 && index === 1) return 'To';
+  return label;
+}
+const CURVE_TREE = new Set(['Kreis', 'Langloch', 'Linie', 'Linienzug']);
+/**
+ * Tree children of one feature: nominal, then measured, then the auxiliary plane
+ * under the measured part of a curve. A nominal-only or measured-only feature
+ * lists just the part it has. The auxiliary plane is not shown under nominal.
+ */
+export function featureTreeParts(f: { type: string; measured?: unknown; soll?: { fit?: unknown } | null; aux?: unknown }): ('soll' | 'ist' | 'aux')[] {
+  const out: ('soll' | 'ist' | 'aux')[] = [];
+  if (f.soll?.fit) out.push('soll');
+  if (f.measured) out.push('ist');
+  if (f.measured && f.aux && CURVE_TREE.has(f.type)) out.push('aux');
+  return out;
+}
+/** How each component of a feature was created, for the properties dialog. */
+export function creationLines(f: {
+  measured?: unknown;
+  method?: string;
+  soll?: { source?: string; fit?: unknown } | null;
+  cons?: { side?: 'soll' | 'ist' } | null;
+}): { role: 'soll' | 'ist'; method: string }[] {
+  const out: { role: 'soll' | 'ist'; method: string }[] = [];
+  const constructedSoll = f.soll?.source === 'constructed' || f.cons?.side === 'soll';
+  if (f.soll?.fit) out.push({ role: 'soll', method: constructedSoll ? 'Construction' : 'From CAD' });
+  if (f.measured) {
+    const istIsConstruction = !!f.cons && f.cons.side !== 'soll' && f.method === 'Konstruiert';
+    let method = 'Click & grow';
+    if (istIsConstruction || (f.method === 'Konstruiert' && !f.soll?.fit)) method = 'Construction';
+    else if (f.method === 'Pinsel') method = 'Brush';
+    else if (f.method === 'Anker') method = 'Anchor';
+    else if (f.method === 'Abgeleitet') method = 'Derived from Analyze';
+    else if (f.method === 'aus Soll') method = 'From nominal';
+    out.push({ role: 'ist', method });
+  }
+  return out;
+}
