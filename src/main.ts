@@ -135,7 +135,7 @@ import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType, anchorFit, signedDistance } from './core/fit';
 import { boundaryKind, coneDisplayShell, cylinderDisplayShell, drawsPointHighlight, zoneSrcFor } from './core/geombound';
-import { detectBadge, featureClassWord, nominalAdvancedControls, orientationText, roleWord } from './core/nominalui';
+import { detectBadge, featureClassWord, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, roleWord } from './core/nominalui';
 import { treeMenuIds, type TreeTarget } from './core/treemenu';
 import {
   Control, ControlKind, Feature, availableControls, computeDistance, controlLabel, controlsCSV,
@@ -160,7 +160,8 @@ import { ICON } from './icons';
 import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionIsNominal, constructionsFor, parentFit, recomputeOrder, runConstruction, slotFor } from './core/construct';
 import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin, nextEmptyField, rotate90, smartAxis } from './core/csys';
 import { NurbsParams, evalSurface, fitFreeform, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
-import { creationSide, nominalFromCad, nominalReexParams, nearerTarget, samplePositions, type SideMode } from './core/cadnominal';
+import { creationSide, nominalAtPointer, nominalFromCad, nominalReexParams, nearerTarget, samplePositions, type SideMode } from './core/cadnominal';
+import { edgeWindowMm } from './ui/cadpick';
 
 type FitMode = { kind: 'fit'; type: GeomType | 'auto'; method: 'Klick' | 'Pinsel' };
 type DimComp = '3D' | 'X' | 'Y' | 'Z';
@@ -350,14 +351,9 @@ typeBtns.append(rbCol([typeSmall('Ebene'), typeSmall('Kreis'), typeSmall('Zylind
 { // ⋯ More: Freeform, Polyline, Torus (+ methods), Bolt circle (added with the constructions below)
   const mi = (icon: string, label: string, title: string, id?: string) => rbSmall(icon, label, title, id, 'rb-mi');
   const ff = mi('Freiformfläche', tt('Freeform'), typeTitle('Freiformfläche')); ff.dataset.ftype = 'Freiformfläche'; ff.onclick = () => { closeRbPops(); startFitMode('Freiformfläche'); };
-  // Polyline: no nominal on the polygon model → only From CAD reference (later) or Derived from Analyze
-  const pl = mi('Linienzug', typeName('Linienzug'), tt('Polyline (connected line segments). Not from the polygon model (it has no nominal there): derive it in Analyze (e.g. the median line of a bore) – From CAD reference comes later'), 'btn-polyline');
-  pl.insertAdjacentHTML('beforeend', `<span class="hint">▸ ${tt('Analyze')}</span>`);
-  pl.onclick = (e) => { e.stopPropagation(); closeRbPops(); ctxMenu.className = 'ctx-menu'; const items: [string, (() => void) | null][] = [[tt('From CAD reference (later)'), null],
-    [`🔗 ${tt('Derived from Analyze')}`, () => { (document.querySelector('.tab[data-tab="analyze"]') as HTMLButtonElement)?.click(); toast(tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).')); }]];
-    ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
-    ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
-    const r = featMoreBtn.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px'; };
+  // Polyline has no mesh nominal. The menu matches line/circle: From CAD creates it; Analyze can still derive one.
+  const pl = mi('Linienzug', typeName('Linienzug'), tt('Polyline (connected line segments). From CAD: tap an edge; tangent segments join until a corner. On a scan, derive it in Analyze (median line of a bore).'), 'btn-polyline');
+  pl.onclick = (e) => { e.stopPropagation(); const r = pl.getBoundingClientRect(); closeRbPops(); splitMenu(featMoreBtn, 'Linienzug', r); };
   const to = mi('Torus', typeName('Torus'), typeTitle('Torus')); to.dataset.ftype = 'Torus'; to.onclick = () => { closeRbPops(); startFitMode('Torus'); };
   const tw = rbSplit(to, () => splitMenu(featMoreBtn, 'Torus')); tw.classList.add('rb-mi-split');
   featMore.append(ff, pl, tw);
@@ -372,16 +368,27 @@ document.querySelectorAll<HTMLButtonElement>('[data-pop]').forEach((b) => (b.onc
 document.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest?.('.rb-pop')) closeRbPops(); });
 document.querySelectorAll('.rb-pop').forEach((p) => p.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button:not(.split-dd)')) setTimeout(closeRbPops, 0); }));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRbPops(); });
-function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand') {
-  const items: [string, (() => void) | null][] = [
-    [t === 'Abstand' ? tt('Between features') : tt('From polygon model'), () => (t === 'Abstand' ? startDistanceMode() : startFitMode(t))],
-    [`🔗 ${tt('Construction')}`, t !== 'Abstand' && constructionsFor(t).length ? () => startConstruct(t) : null],
-    [`📍 ${tt('Anchor')}${ANCHOR_N[t] ? ` (${ANCHOR_N[t]} ${tt('pts')})` : ''}`, ANCHOR_N[t] ? () => startAnchor(t) : null],
-    [t === 'Abstand' ? tt('From CAD reference (later)') : tt('From CAD'), t === 'Abstand' ? null : () => startFitMode(t, 'soll')]];
+function splitMenu(anchorEl: HTMLElement, t: GeomType | 'Abstand', at?: DOMRect) {
+  const row = nominalMethodRow(t, { con: t !== 'Abstand' && constructionsFor(t).length > 0, anchor: ANCHOR_N[t] != null });
+  const label: Record<string, string> = {
+    mesh: t === 'Abstand' ? tt('Between features') : tt('From polygon model'),
+    con: `🔗 ${tt('Construction')}`,
+    anchor: `📍 ${tt('Anchor')}${ANCHOR_N[t] ? ` (${ANCHOR_N[t]} ${tt('pts')})` : ''}`,
+    cad: t === 'Abstand' ? tt('From CAD reference (later)') : tt('From CAD'),
+    derive: `🔗 ${tt('Derived from Analyze')}`,
+  };
+  const run: Record<string, () => void> = {
+    mesh: () => (t === 'Abstand' ? startDistanceMode() : startFitMode(t)),
+    con: () => startConstruct(t as GeomType),
+    anchor: () => startAnchor(t),
+    cad: () => startFitMode(t === 'Abstand' ? 'auto' : t, 'soll'),
+    derive: () => { (document.querySelector('.tab[data-tab="analyze"]') as HTMLButtonElement)?.click(); toast(tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).')); },
+  };
+  const items: [string, (() => void) | null][] = row.map((r) => [label[r.key], r.enabled ? run[r.key] : null]);
   ctxMenu.className = 'ctx-menu';
   ctxMenu.innerHTML = items.map(([l, f], i) => `<button data-i="${i}" ${f ? '' : 'disabled'}>${l}</button>`).join('');
   ctxMenu.querySelectorAll<HTMLButtonElement>('button').forEach((x) => (x.onclick = () => { ctxMenu.classList.add('hidden'); items[+x.dataset.i!][1]?.(); }));
-  const r = anchorEl.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px';
+  const r = at ?? anchorEl.getBoundingClientRect(); ctxMenu.style.left = Math.min(r.left, innerWidth - 220) + 'px'; ctxMenu.style.top = r.bottom + 2 + 'px';
 }
 $('#btn-distance').onclick = () => startDistanceMode();
 $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
@@ -659,10 +666,20 @@ let auxT = 0, auxSeq = 0, auxBusy = false, hoverType: string | null = null;
 let hoverNominal: { role: 'soll' | 'ist'; type: string; fit: FitResult | null; cadId?: number; cadPoint?: V3 } | null = null;
 let cadHoverT = 0, cadHoverSeq = 0;
 function clearAuxHover() { clearTimeout(auxT); clearTimeout(cadHoverT); auxSeq++; cadHoverSeq++; viewer.showHoverSets([]); if (state.preview?.role !== 'soll') cadHighlight(-1); const had = !!(hoverType || hoverNominal); hoverType = null; hoverNominal = null; if (had) renderModeBar(); }
-function edgeTol(): number {
-  if (state.opts.pick > 0) return state.opts.pick;
-  const r = viewer.radius || cad.faces.reduce((s, f) => Math.max(s, Math.sqrt(f.area)), 0);
-  return Math.min(8, Math.max(2, r * 0.015 || 2));
+/** Last nominal pointer was a finger. Refit uses the same edge window as that tap. */
+let lastNominalTouch = false;
+function edgeTol(touch = false): number {
+  const base = state.opts.pick > 0 ? state.opts.pick : (() => {
+    const r = viewer.radius || cad.faces.reduce((s, f) => Math.max(s, Math.sqrt(f.area)), 0);
+    return Math.min(8, Math.max(2, r * 0.015 || 2));
+  })();
+  const h = Math.max(1, viewer.renderer.domElement.clientHeight || 1);
+  const dist = viewer.camera.position.distanceTo(viewer.controls.target);
+  const fov = (viewer.camera.fov * Math.PI) / 180;
+  return edgeWindowMm(base, (2 * dist * Math.tan(fov / 2)) / h, touch);
+}
+function nominalPointerNote(): string {
+  return tt('Tap a face for a surface, or an edge for a circle, slot, line or polyline. Create nominal adds it to the tree. Circle, slot, line and polyline use the same confirm step.');
 }
 function creationAim(x: number, y: number, soften = false) {
   const c = cad.faces.length ? cadPickHit(x, y, soften) : null;
@@ -675,13 +692,15 @@ function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
   clearTimeout(cadHoverT); const seq = ++cadHoverSeq;
   cadHoverT = window.setTimeout(() => {
     if (seq !== cadHoverSeq || state.preview) return;
-    const face = cad.faces[c.id]; const geom = face?.geom;
-    cadHighlight(c.id);
-    if (!geom) { hoverNominal = { role: 'soll', type: face?.type ?? '', fit: null }; renderModeBar(); return; }
+    const face = cad.faces[c.id];
     const want = (state.mode as FitMode).type;
-    const nom = nominalFromCad(geom, c.p, want, edgeTol());
-    const next = { role: 'soll' as const, type: nom?.fit.type ?? (face.type === 'NURBS' ? '' : face.type), fit: nom && !nom.freeform ? nom.fit : null, cadId: c.id, cadPoint: [...c.p] as V3 };
-    const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type && hoverNominal.cadId === c.id;
+    const found = nominalAtPointer(cad.faces.map((f) => ({ id: f.id, geom: f.geom ?? null })), c.id, c.p, want, edgeTol(false));
+    const owner = found ? cad.faces[found.id] : face;
+    cadHighlight(found?.id ?? c.id);
+    if (!owner?.geom && !found) { hoverNominal = { role: 'soll', type: face?.type ?? '', fit: null }; renderModeBar(); return; }
+    const nom = found?.pick ?? null;
+    const next = { role: 'soll' as const, type: nom?.fit.type ?? (owner?.type === 'NURBS' ? '' : owner?.type ?? ''), fit: nom && !nom.freeform ? nom.fit : null, cadId: found?.id ?? c.id, cadPoint: [...c.p] as V3 };
+    const same = hoverNominal?.role === 'soll' && hoverNominal.type === next.type && hoverNominal.cadId === next.cadId;
     hoverNominal = next; hoverType = next.type; if (!same) { renderModeBar(); renderDialog(); } renderScene();
   }, 60);
 }
@@ -693,19 +712,21 @@ function freeformNominal(positions: ArrayLike<number>, normals: ArrayLike<number
   const nb = fitFreeform(P, N.length === P.length ? N : P.map(() => [0, 0, 1] as Vec3), null, { nu: 6, nv: 6, deg: 3, smooth: 1e-3, iterations: 2 });
   return { type: 'Freiformfläche', center: nb.frame.o, normal: nb.frame.n, nurbs: { surface: nb.surface, boundary: nb.boundary, kind: nb.kind, trimUV: nb.trimUV, corners: nb.corners, params: { nu: 6, nv: 6, deg: 3, smooth: 1e-3 }, std: nb.std, mean: nb.mean }, rms: nb.rms, form: nb.form, maxPos: nb.maxPos, maxNeg: nb.maxNeg, n: nb.n };
 }
-async function previewFromCad(c: { id: number; p: V3 }) {
-  const face = cad.faces[c.id]; const geom = face?.geom;
-  cadHighlight(c.id);
-  if (!geom) { status(tt('This CAD face has no analytic geometry.')); renderAll(); return; }
+async function previewFromCad(c: { id: number; p: V3 }, touch = lastNominalTouch) {
+  const hitFace = cad.faces[c.id];
   const want = (state.mode as FitMode).type;
-  let nom = nominalFromCad(geom, c.p, want, edgeTol());
+  const found = nominalAtPointer(cad.faces.map((f) => ({ id: f.id, geom: f.geom ?? null })), c.id, c.p, want, edgeTol(touch));
+  const face = found ? cad.faces[found.id] : hitFace;
+  cadHighlight(found?.id ?? c.id);
+  if (!face?.geom) { status(tt('This CAD face has no analytic geometry.')); renderAll(); return; }
+  let nom = found?.pick ?? null;
   if (!nom) { status(tt('No {0} on this CAD face ({1}).', want === 'auto' ? tt('matching feature') : typeName(want), face.type)); renderModeBar(); renderScene(); return; }
   if (nom.freeform) {
     try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; }
     catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; }
   }
   const tess = face.res?.tess ?? face.tess;
-  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: c.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
+  state.preview = { fit: nom.fit, indices: new Uint32Array(0), candidates: [], method: 'Klick', role: 'soll', cadFace: face.id, cadSeed: samplePositions(tess.positions, 240), cadPoint: c.p,
     aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined };
   hoverNominal = null;
   status(tt('Nominal preview: {0}. Create nominal adds it to the tree – the scan is not used yet.', typeName(nom.fit.type)));
@@ -758,6 +779,7 @@ window.addEventListener('pointerup', async (e) => {
   down = null;
   const gesture = pickGesture({ pointerType: ptype, moved, dt, multi, dragged: false, wide: touch && !!cam });
   if (gesture !== 'pick') return;
+  lastNominalTouch = touch;
   if (cam) {
     viewer.camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
     viewer.controls.target.set(cam.tgt[0], cam.tgt[1], cam.tgt[2]);
@@ -889,7 +911,13 @@ function setMethod(m: 'Klick' | 'Pinsel') {
 }
 // ------------------------------------------------------------------ Bottom context panel (one for all modes and previews)
 initCtxPanel(viewer.el); initProgress(viewer.el); initLayout(); initPanelsMenu(viewer.el, (s) => tt(s), (p, on) => { if (isPhone()) togglePanel(p, on); });
-const typeOptions = (cur: string, withAuto = true) => [...(withAuto ? ['auto'] : []), ...FIT_TYPES].map((x) => `<option value="${x}" ${x === cur ? 'selected' : ''}>${typeName(x)}</option>`).join('');
+const typeOptions = (cur: string, withAuto = true) => {
+  const list: string[] = [...(withAuto ? ['auto'] : []), ...FIT_TYPES];
+  if ((cur === 'Linienzug' || state.opts.side === 'soll') && !list.includes('Linienzug')) {
+    const i = list.indexOf('Linie'); list.splice(i < 0 ? list.length : i + 1, 0, 'Linienzug');
+  }
+  return list.map((x) => `<option value="${x}" ${x === cur ? 'selected' : ''}>${typeName(x)}</option>`).join('');
+};
 const formName = (t: GeomType) => FORM_NAME[t];
 const patchKind = (k: string) => (k === 'vierseitig' ? tt('four-sided') : k === 'getrimmt' ? tt('trimmed') : k);
 function sizeRows(f: FitResult): [string, string][] {
@@ -957,10 +985,10 @@ function ctxSpec(): CtxSpec | null {
   const scanCtl = `${seg}${dsel}${isLine && p ? `<span class="cp-seg" title="${tt('Which adjacent face is the auxiliary plane')}"><button data-side="0" class="${state.opts.lineSide === 0 ? 'on' : ''}">${tt('Aux: clicked face')}</button><button data-side="1" class="${state.opts.lineSide === 1 ? 'on' : ''}">${tt('Aux: adjacent face')}</button></span>` : ''}${p && MULTI_TYPES.includes(p.fit.type) && !p.aux && p.regions && p.regions.length > 1 ? `<span class="cp-hint">${p.regions.length} ${tt('regions')}</span>` : ''}${auxCtl}${bfrom}${isl}`;
   const detected = (p?.fit.type || hoverNominal?.type || hoverType || '') as string;
   const classHint = detected ? `<span class="cp-class" data-class="${featureClassWord(detected)}">${featureClassWord(detected)}</span>` : '';
-  const makeNom = sollUi && (p?.role === 'soll' || hoverNominal?.fit)
+  const makeNom = sollUi && nominalCanConfirm(p, hoverNominal?.fit)
     ? `<button type="button" data-a="makenom" class="primary" title="${tt('Create the nominal feature in the tree')}">${tt('Create nominal')}</button>` : '';
   const ctl = sollUi
-    ? `${type}${detectBadge(detected)}${classHint}${makeNom}<span class="cp-hint">${tt('CAD nominal: click a face for a surface, or an edge for a circle, slot or line. Create nominal adds it to the tree. Polyline is only the Polyline type.')}</span>`
+    ? `${type}${detectBadge(detected)}${classHint}${makeNom}<span class="cp-hint">${nominalPointerNote()}</span>`
     : m.method === 'Klick' ? scanCtl + detectBadge(detected)
     : `${seg}${type}${dsel}<label>r <input id="cp-brush" data-num="abs" type="number" min="0.05" step="0.1" value="${state.opts.brush}" inputmode="decimal"> mm</label>
        <button data-a="paint" class="${brushErase ? '' : 'on'}">🖌 ${tt('Paint')}</button><button data-a="erase" class="${brushErase ? 'on' : ''}" title="${tt('Eraser (or Shift while painting)')}">🧽 ${tt('Erase')}</button>
@@ -1015,7 +1043,7 @@ function ctxSpec(): CtxSpec | null {
       const br = el.querySelector<HTMLInputElement>('#cp-brush'); if (br) br.onchange = () => { const x = Number(br.value.replace(',', '.')); if (x > 0) setBrushRadius(x); };
     },
     ok: p ? { run: () => { if (p.role === 'soll') void confirmNominal(); else commitPreview(); }, title: p.role === 'soll' ? tt('Create nominal') : tt('Create feature (Enter)') }
-      : (sollUi && hoverNominal?.fit) ? { run: () => void confirmNominal(), title: tt('Create nominal') }
+      : (sollUi && nominalCanConfirm(null, hoverNominal?.fit)) ? { run: () => void confirmNominal(), title: tt('Create nominal') }
       : m.method === 'Pinsel' ? { run: brushCreate, disabled: !state.brushCount, title: tt('Create feature from the painted points (Enter)') } : null,
     undo: m.method === 'Pinsel' ? { run: undoBrush, disabled: !brushUndo.some((x) => x.length), title: tt('Undo brush stroke (Ctrl+Z)') } : null,
     cancel: p ? { run: discardPreview, title: tt('Discard preview (Esc)') } : { run: stopMode, title: tt('Exit mode (Esc)') },
@@ -1291,14 +1319,16 @@ async function previewFromBrush() {
 async function refitPreview(t: GeomType | 'auto') {
   const p = state.preview; if (!p || p.method === 'Konstruiert') return;
   if (p.role === 'soll' && p.cadFace != null && p.cadPoint) {
-    const face = cad.faces[p.cadFace]; const geom = face?.geom;
-    if (!geom) return;
-    let nom = nominalFromCad(geom, p.cadPoint, t, edgeTol());
-    if (!nom) { status(tt('No {0} on this CAD face ({1}).', t === 'auto' ? tt('matching feature') : typeName(t), face.type)); return; }
+    const found = nominalAtPointer(cad.faces.map((f) => ({ id: f.id, geom: f.geom ?? null })), p.cadFace, p.cadPoint, t, edgeTol(lastNominalTouch));
+    const face = found ? cad.faces[found.id] : cad.faces[p.cadFace];
+    if (!face?.geom || !found) { status(tt('No {0} on this CAD face ({1}).', t === 'auto' ? tt('matching feature') : typeName(t), face?.type ?? '')); return; }
+    let nom = found.pick;
     if (nom.freeform) { try { const tess = face.res?.tess ?? face.tess; nom = { fit: freeformNominal(tess.positions, tess.normals) }; } catch (e: any) { status(tt('Freeform nominal failed: {0}', e.message)); return; } }
-    state.preview = { ...p, fit: nom.fit, aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: 'soll' };
+    state.preview = { ...p, fit: nom.fit, aux: nom.aux ? { plane: nom.aux, indices: new Uint32Array(0), source: tt('From CAD') } : undefined, role: 'soll', cadFace: face.id };
+    cadHighlight(face.id);
     renderAll(); return;
   }
+  if (t === 'Linienzug') { status(tt('A polyline has no nominal on the polygon model. Use From CAD, or derive it in Analyze.')); return; }
   if (t === 'Freiformfläche') { await previewNurbs(p.method === 'Klick' && p.hit ? { hit: p.hit } : { indices: p.indices }, p.method); return; }
   if (p.hit && t === 'auto' && p.method === 'Klick') { const m = state.mode; await previewByClickAs(p.hit, 'auto'); void m; return; }
   if (p.hit && t === 'Ebene' && p.method === 'Klick') {
@@ -2562,14 +2592,15 @@ function renderFitDialog(d: HTMLElement) {
   const showB = !sollUi && m.method === 'Klick' && (GEOM_ZONE.includes(p?.fit.type ?? '') || GEOM_ZONE.includes(m.type));
   if (sollUi) {
     const shown = p?.fit ?? hoverNominal?.fit ?? null;
-    const ready = !!(p?.role === 'soll' || hoverNominal?.fit);
-    d.innerHTML = `<h3>${ICON[shown?.type ?? m.type] ?? ''} ${tt('Create feature')}: ${tt('nominal')}</h3>
-      <p class="note">${tt('Nominal or Measured is chosen explicitly and stays for the next feature. A CAD nominal is the pointer only: a face is a surface (including freeform), an edge is a circle, slot or line. Create nominal adds it to the tree. Polyline is only the Polyline type.')}</p>
+    const ready = nominalCanConfirm(p, hoverNominal?.fit);
+    d.innerHTML = `<h3>${ICON[shown?.type ?? m.type] ?? ''} ${tt('Create feature')}: ${tt('nominal')}</h3>${methodSeg(m.type, 'mesh')}
+      <p class="note">${tt('Nominal or Measured stays as chosen. A CAD nominal is the pointer only: a face is a surface (including freeform), an edge is a circle, slot, line or polyline. Create nominal adds it to the tree.')}</p>
       <div class="row"><label>${tt('Type')}</label><select id="d-type">${typeOptions(shown ? shown.type : m.type)}</select></div>
       <div class="row"><label>${tt('Nominal / measured')}</label><select id="d-side"><option value="soll" ${state.opts.side === 'soll' ? 'selected' : ''}>${tt('Nominal')}</option><option value="ist" ${state.opts.side === 'ist' ? 'selected' : ''}>${tt('Measured')}</option></select></div>
       ${nominalAdvancedControls(state.opts.brush)}
       ${shown ? `<h4>${tt('Preview')}: ${typeName(shown.type)} · ${featureClassWord(shown.type)}</h4>${detectBadge(shown.type)}${kv(fitRows(shown, 0, false))}` : `<p class="note">${tt('No nominal yet. Click the CAD model.')}</p>`}
       ${ready ? `<div class="row"><button class="btn primary" id="d-create-nom">${tt('Create nominal')}</button></div>` : ''}`;
+    bindMethodSeg(d, m.type);
     d.querySelector<HTMLSelectElement>('#d-type')!.onchange = (e) => { const v = (e.target as HTMLSelectElement).value as GeomType | 'auto'; m.type = v; if (state.preview) refitPreview(v); else renderAll(); };
     d.querySelector<HTMLSelectElement>('#d-side')!.onchange = (e) => { state.opts.side = (e.target as HTMLSelectElement).value as SideMode; if (state.opts.side === 'soll' && m.method === 'Pinsel') { setMethod('Klick'); return; } if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview(); else renderAll(); };
     d.querySelector('#d-create-nom')?.addEventListener('click', () => { void confirmNominal(); });
@@ -2587,7 +2618,7 @@ function renderFitDialog(d: HTMLElement) {
       ${state.features.filter((f) => f.type === 'Ebene').map((f) => `<option value="${f.id}" ${state.opts.aux === f.id ? 'selected' : ''}>${tt('Existing plane')}: ${f.name}</option>`).join('')}
       <option value="none" ${state.opts.aux === 'none' ? 'selected' : ''}>${tt('None (3D fit)')}</option></select></div>
     ${state.opts.aux === 'ring' ? `<div class="row"><label>${tt('Ring gap [mm]')}</label><input id="d-rg" data-num="abs" value="${state.opts.ring.gap}" inputmode="decimal"></div><div class="row"><label>${tt('Ring width [mm]')}</label><input id="d-rw" data-num="abs" value="${state.opts.ring.width}" inputmode="decimal"></div><p class="note">${tt('Only the plane points in a ring (circle), stadium band (slot) or band along the edge (line) are used: starting at the gap outside the edge, with the given width. Useful when the face is not flat far away from the hole.')}</p>` : ''}
-    <p class="note">${m.type === 'Linie' ? tt('Click on the edge between two faces. The line is the intersection edge fitted inside the auxiliary plane; choose which adjacent face is the auxiliary plane in the Action Bar.') : tt('Click near the transition face/wall (or on the wall): the wall points are projected into the plane and the feature is fitted in the plane. The center lies in the plane, orientation = plane normal.')}</p>` : ''}`
+    <p class="note">${tt('Click near the edge between the wall and the face. Circle, slot and line use the same auxiliary-plane controls. The feature lies in that plane.')}</p>` : ''}`
     : `<h4>${tt('Brush')}</h4><p class="note">${tt('Paint: stroke over the mesh. Erase: Erase button or hold Shift. Undo: Ctrl+Z. Esc clears the selection, a second Esc returns to Click & grow.')}</p>`}
     ${p ? `<h4>${tt('Preview')}: ${typeName(p.fit.type)}</h4>${p.aux ? auxStats(p) : ''}${kv(fitRows(p.fit, p.indices.length))}
       ${p.candidates.length ? `<h4>${tt('Detection (RMS per type)')}</h4>${kv(p.candidates.map((c) => [typeName(c.type), fmt(c.rms)] as [string, string]))}` : ''}`
@@ -3841,7 +3872,7 @@ function nurbsAccuracy(fit: FitResult) {
   }
   return { max: +mx.toFixed(5), rms: +Math.sqrt(s / Math.max(1, n)).toFixed(5), samples: n };
 }
-Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, previewFromCad, nominalFromCad, creationSide, nearerTarget, extractActualFromNominal, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, boundaryKind, drawsPointHighlight, coneDisplayShell, cylinderDisplayShell, analyticShell, analyticSphere, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
+Object.assign((window as any).__app, { setNavPause: (on: boolean) => setNavPause(on), brushCreate, brushAt, scheduleBrushFit, brushLive: () => brushLive, placeGear, placeFloaters, clearSelection, setMethod, viewTrans, setViewTrans, treePins, showDatumInfo, showDocs, ovm, applyExtract, setShowZone, analyze, addDerived, DERIVES, addPlaneRegion, parseNum, ensureFeature, addControl, TRAIN_FEATS, hitAt, previewByClick, setContour, trimFor, previewLoops, islandAt: (h: Hit) => islandAt(h), islSel: () => islSel, setSmoothTol, startFitMode, commitPreview, previewFromCad, nominalFromCad, nominalAtPointer, nominalCanConfirm, creationSide, nearerTarget, extractActualFromNominal, nurbsAccuracy, renderAll, togglePanel, evaluate, ctx: () => ctx, startTraining, centerOn, showProperties, openContext, renderDialog, setDatum, saveProject, openProjectFile, restoreLast, projectJSON, analyzeControl, newProject, emptyProject, projectDirty: () => dirty, paintExclude, auxDisplayIndices, boundaryKind, drawsPointHighlight, coneDisplayShell, cylinderDisplayShell, analyticShell, analyticSphere, evaluateControl: (id: number) => { const c = state.controls.find((x) => x.id === id); return c ? evaluate(c, featMap(), ctx) : null; } });
 viewer.controls.addEventListener('end', () => scheduleAutosave());
 
 
@@ -4634,21 +4665,36 @@ function conSpec(m: ConMode): CtxSpec {
     cancel: { run: stopMode, title: tt('Exit (Esc)') },
   };
 }
-/** Method choice shown at the top of the create dialogs. */
-/** Method choice shown at the top of the create dialogs: From polygon model | Construction | Anchor | From CAD reference (later). */
+/** Method choice shown at the top of the create dialogs. Circle, slot, line and polyline share one row. */
 function methodSeg(out: GeomType | 'auto' | 'Abstand', cur: 'mesh' | 'con' | 'anchor') {
-  const con = out !== 'auto' && out !== 'Abstand' && constructionsFor(out as GeomType).length > 0, mesh = out !== 'Winkel' && out !== 'Abstand' || out === 'Abstand', anc = ANCHOR_N[out as GeomType] != null;
-  const meshLbl = out === 'Abstand' ? tt('Between features') : tt('From polygon model');
+  const row = nominalMethodRow(out, { con: out !== 'auto' && out !== 'Abstand' && constructionsFor(out as GeomType).length > 0, anchor: ANCHOR_N[out as GeomType] != null });
+  const meshOn = cur === 'mesh' && state.opts.side !== 'soll';
+  const cadOn = cur === 'mesh' && state.opts.side === 'soll';
+  const title: Record<string, string> = {
+    mesh: out === 'Abstand' ? tt('Distance between two existing features') : out === 'Linienzug' ? tt('A polyline has no nominal on the polygon model. Use From CAD, or derive it in Analyze.') : tt('Fit the feature to mesh points (click & grow or brush)'),
+    con: tt('Construct from other features (intersection, axis, mid plane …)'),
+    anchor: ANCHOR_N[out as GeomType] ? tt('Pick the minimum number of points on the mesh: {0}', ANCHOR_N[out as GeomType]!) : tt('Not available for this type'),
+    cad: tt('Nominal from the CAD model (analytic face or edge). The scan is not used until you extract the actual.'),
+    derive: tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).'),
+  };
+  const text: Record<string, string> = {
+    mesh: out === 'Abstand' ? tt('Between features') : tt('From polygon model'),
+    con: `🔗 ${tt('Construction')}`,
+    anchor: `📍 ${tt('Anchor')}`,
+    cad: out === 'Abstand' ? tt('From CAD reference (later)') : tt('From CAD'),
+    derive: `🔗 ${tt('Derived from Analyze')}`,
+  };
+  const on = (key: string) => key === 'mesh' ? meshOn : key === 'con' ? cur === 'con' : key === 'anchor' ? cur === 'anchor' : key === 'cad' ? cadOn : false;
   return `<div class="row method-seg"><span class="cp-seg seg" role="radiogroup">`
-    + `<button data-meth="mesh" class="${cur === 'mesh' ? 'on' : ''}" ${mesh ? '' : 'disabled'} title="${out === 'Abstand' ? tt('Distance between two existing features') : tt('Fit the feature to mesh points (click & grow or brush)')}">${meshLbl}</button>`
-    + `<button data-meth="con" class="${cur === 'con' ? 'on' : ''}" ${con ? '' : 'disabled'} title="${tt('Construct from other features (intersection, axis, mid plane …)')}">🔗 ${tt('Construction')}</button>`
-    + `<button data-meth="anchor" class="${cur === 'anchor' ? 'on' : ''}" ${anc ? '' : 'disabled'} title="${anc ? tt('Pick the minimum number of points on the mesh: {0}', ANCHOR_N[out as GeomType]!) : tt('Not available for this type')}">📍 ${tt('Anchor')}</button>`
-    + `<button data-meth="cad" class="${state.opts.side === 'soll' ? 'on' : ''}" ${out !== 'Abstand' && out !== 'Winkel' ? '' : 'disabled'} title="${tt('Nominal from the CAD model (analytic face or edge). The scan is not used until you extract the actual.')}">${tt('From CAD')}</button></span></div>`;
+    + row.map((r) => `<button data-meth="${r.key}" class="${on(r.key) ? 'on' : ''}" ${r.enabled ? '' : 'disabled'} title="${title[r.key]}">${text[r.key]}</button>`).join('')
+    + `</span></div>`;
 }
 function bindMethodSeg(d: HTMLElement, out: GeomType | 'auto' | 'Abstand') {
   d.querySelectorAll<HTMLButtonElement>('[data-meth]').forEach((b) => (b.onclick = () => {
     const k = b.dataset.meth;
+    if (k === 'derive') { (document.querySelector('.tab[data-tab="analyze"]') as HTMLButtonElement)?.click(); toast(tt('Analyze a cylinder/cone (axis view), then 🔗 Derive › Derived median line (Polyline).')); return; }
     if (k === 'cad') { startFitMode(out === 'auto' || out === 'Winkel' ? 'auto' : out as GeomType, 'soll'); return; }
+    if (k === 'mesh' && out === 'Linienzug') { status(tt('A polyline has no nominal on the polygon model. Use From CAD, or derive it in Analyze.')); return; }
     if (k === 'mesh') state.opts.side = 'ist';
     if (k === 'con') startConstruct(out as GeomType); else if (k === 'anchor') startAnchor(out as GeomType | 'Abstand');
     else if (out === 'Abstand') startDistanceMode(); else startFitMode(out === 'Winkel' ? 'auto' : out);

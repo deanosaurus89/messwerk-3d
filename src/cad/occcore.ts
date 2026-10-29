@@ -3,6 +3,7 @@
 // Reine Funktionen auf dem OC-Modul `oc` – laufen im Worker (Browser) und in vitest (Node).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { CadAnalytic, CadCurve } from './analytic';
+import { classifyCurvePoints } from './curvetype';
 type OC = any;
 export type V3 = [number, number, number];
 export type FaceType = 'Ebene' | 'Zylinder' | 'Kegel' | 'Kugel' | 'Torus' | 'NURBS';
@@ -70,7 +71,19 @@ function faceCurves(oc: OC, f: any): CadCurve[] {
         out.push({ kind: 'circle', mid, length, center: p3(circ.Location()), normal: d3(ax.Direction()), radius: circ.Radius() });
       } else if (ty === CT.GeomAbs_Line) {
         out.push({ kind: 'line', mid, length, a: p3(curvePoint(c, oc, u0)), b: p3(curvePoint(c, oc, u1)) });
-      } else out.push({ kind: 'other', mid, length });
+      } else {
+        // B-splines and other trimmed curves (typical of IGES) still carry a line or a circle.
+        const samples: V3[] = [];
+        const n = 16;
+        for (let i = 0; i < n; i++) {
+          const u = u0 + (u1 - u0) * (i / (n - 1));
+          try { samples.push(p3(curvePoint(c, oc, u))); } catch { /* one bad sample is not the edge */ }
+        }
+        const cls = classifyCurvePoints(samples);
+        if (cls?.kind === 'line' && cls.a && cls.b) out.push({ kind: 'line', mid, length: length || cls.length, a: cls.a, b: cls.b });
+        else if (cls?.kind === 'circle' && cls.center && cls.normal && cls.radius != null) out.push({ kind: 'circle', mid, length: length || cls.length, center: cls.center, normal: cls.normal, radius: cls.radius });
+        else out.push({ kind: 'other', mid, length });
+      }
     } finally { c.delete?.(); }
   }
   return out;
