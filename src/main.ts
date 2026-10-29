@@ -135,8 +135,8 @@ import { Engine, PolyEngine } from './engine';
 import { Viewer, Hit } from './viewer';
 import { FitResult, GeomType, anchorFit, signedDistance } from './core/fit';
 import { boundaryKind, coneDisplayShell, cylinderDisplayShell, drawsPointHighlight, zoneSrcFor } from './core/geombound';
-import { SURFACE_HIGHLIGHT, TREE_GROUPS, boundaryExclusionFor, compactStatHtml, detectBadge, fbActionOn, featureBuilderHost, featureBuilderLayout, featureClassWord, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, roleWord, showPickRing, stickySide } from './core/nominalui';
-import { facePatch, loopsFromMesh } from './core/facetrim';
+import { SURFACE_HIGHLIGHT, TREE_GROUPS, boundaryExclusionFor, compactStatHtml, creationLines, detectBadge, fbActionOn, featureBuilderHost, featureBuilderLayout, featureClassWord, featureTreeParts, nominalAdvancedControls, nominalCanConfirm, nominalMethodRow, orientationText, pathEnabled, resolveSide, roleWord, showPickRing, sideChoices, slotCaption, stickySide } from './core/nominalui';
+import { facePatch, trimLoops } from './core/facetrim';
 import { applyComputedNominal, editNominal, nominalControlKinds, nominalIsModified, nominalOfFit, resetNominal } from './core/nominalvalue';
 import { importTarget } from './core/importpath';
 import { resolveTess, type TessTol } from './cad/tesspolicy';
@@ -161,7 +161,7 @@ import { Tour, TourStep } from './training';
 import { type Vec3, sub, scale, dot, norm, add, basis, cross, unit } from './core/linalg';
 import type { LabelSpec } from './overlay';
 import { ICON } from './icons';
-import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionIsNominal, constructionsFor, parentFit, recomputeOrder, runConstruction, slotFor } from './core/construct';
+import { CONSTRUCTIONS, CON_OUTS, Construction, accepts, conByKey, constructionIsNominal, constructionSide, constructionsFor, geometryForSide, parentFit, recomputeOrder, runConstruction, slotFor } from './core/construct';
 import { CSys, Axis, Frame, computeCSys, newCSys, toLocal as csLocal, dirLocal as csDir, usableAs, suggestOrigin, nextEmptyField, rotate90, smartAxis } from './core/csys';
 import { NurbsParams, evalSurface, fitFreeform, insideTrim, toIGES, toJSON, toSTEP } from './core/nurbs';
 import { creationSide, nominalAtPointer, nominalFromCad, nominalOnCad, nominalReexParams, nearerTarget, samplePositions, type SideMode, type TessFace } from './core/cadnominal';
@@ -400,9 +400,80 @@ $('#btn-distance').onclick = () => startDistanceMode();
 $('#ico-ff2').innerHTML = ICON['Freiformfläche'];
 document.querySelectorAll<HTMLButtonElement>('#ribbon [data-tab="re"] [data-ftype]').forEach((b) => (b.onclick = () => startFitMode(b.dataset.ftype as GeomType)));
 
+function dataFlags() {
+  return {
+    cad: cad.faces.length > 0,
+    mesh: !!state.data,
+    soll: state.features.some((f) => !!f.soll?.fit),
+    ist: state.features.some((f) => !!f.measured),
+  };
+}
+function syncSideToData() {
+  const d = dataFlags();
+  const next = resolveSide(state.opts.side, d.cad, d.mesh, d.soll, d.ist);
+  if (next === state.opts.side) return;
+  state.opts.side = next;
+  try { localStorage.setItem('mw3d-side', next); } catch { /* */ }
+}
+function setCreationSide(side: SideMode) {
+  const d = dataFlags();
+  const ch = sideChoices(d.cad, d.mesh, d.soll, d.ist);
+  if ((side === 'soll' && !ch.soll) || (side === 'ist' && !ch.ist)) return;
+  state.opts.side = stickySide(side, !!state.data);
+  try { localStorage.setItem('mw3d-side', state.opts.side); } catch { /* */ }
+  hoverNominal = null;
+  if (state.opts.side === 'soll' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { setMethod('Klick'); return; }
+  if (state.mode?.kind === 'con') {
+    const m = state.mode;
+    m.refs = m.refs.map((id) => {
+      if (id == null) return id;
+      const f = state.features.find((g) => g.id === id);
+      return f && geometryForSide(f, state.opts.side, false) ? id : null;
+    });
+    updateConPreview(); renderAll(); return;
+  }
+  if (state.preview?.cadFace != null) { state.preview = { ...state.preview, role: state.opts.side }; renderAll(); return; }
+  if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview();
+  else if (state.preview && state.opts.side === 'soll') discardPreview();
+  else renderAll();
+}
+/** ✓ closes the create dialog. The same slot then shows how the feature was created. */
+function finishCreate() {
+  state.mode = null;
+  setPaneOpen('dialog', true);
+  togglePanel('dialog', true);
+}
+function sidePathHtml(active: 'create' | 'construct'): string {
+  const d = dataFlags();
+  const ch = sideChoices(d.cad, d.mesh, d.soll, d.ist);
+  const side = state.opts.side;
+  const dis = (on: boolean) => (on ? '' : 'disabled');
+  return `<div class="cp-top"><span class="cp-seg cp-sidepick"><button type="button" data-sidepick="soll" class="${side === 'soll' ? 'on' : ''}" ${dis(ch.soll)}>${tt('Nominal')}</button><button type="button" data-sidepick="ist" class="${side === 'ist' ? 'on' : ''}" ${dis(ch.ist)}>${tt('Measured')}</button></span><span class="cp-seg cp-path"><button type="button" data-path="create" class="${active === 'create' ? 'on' : ''}" ${dis(pathEnabled(side, 'interactive', d))}>${tt('Create')}</button><button type="button" data-path="construct" class="${active === 'construct' ? 'on' : ''}" ${dis(pathEnabled(side, 'construct', d))}>${tt('Construct')}</button></span><button type="button" data-a="fblayout" class="cp-layout" title="${tt('Switch back to the previous Feature Builder')}">${tt('Previous layout')}</button></div>`;
+}
+function openCreatePath() {
+  if (state.mode?.kind === 'fit') return;
+  const m = state.mode;
+  const out = m?.kind === 'con' && m.out !== 'Winkel' ? m.out : 'auto';
+  startFitMode(out, state.opts.side);
+}
+function openConstructPath() {
+  if (state.mode?.kind === 'con') return;
+  const m = state.mode;
+  const detected = state.preview?.fit.type;
+  let out: GeomType = detected && detected !== 'Abstand' && constructionsFor(detected).length ? detected
+    : m?.kind === 'fit' && m.type !== 'auto' && constructionsFor(m.type).length ? m.type : 'Ebene';
+  if (m?.kind === 'fit' && m.type === 'Winkel') out = 'Winkel';
+  if (!constructionsFor(out).length) out = 'Ebene';
+  startConstruct(out);
+}
+function bindSidePath(el: ParentNode) {
+  el.querySelectorAll<HTMLButtonElement>('[data-sidepick]').forEach((b) => (b.onclick = () => setCreationSide(b.dataset.sidepick as SideMode)));
+  el.querySelectorAll<HTMLButtonElement>('[data-path]').forEach((b) => (b.onclick = () => { if (b.dataset.path === 'construct') openConstructPath(); else openCreatePath(); }));
+}
 function startFitMode(t: GeomType | 'auto', side?: SideMode) {
   if (!state.data && !cad.faces.length) { status(tt('Load a polygon model or a CAD model first.')); return; }
   if (side) { state.opts.side = stickySide(side, !!state.data); try { localStorage.setItem('mw3d-side', state.opts.side); } catch { /* */ } }
+  syncSideToData();
   pe.tool = null;
   // Typwahl im Menüband startet immer mit „Klick + Wachstum“ – ein vergessener Pinsel blockiert so nie die Extraktion
   state.mode = { kind: 'fit', type: t, method: 'Klick' };
@@ -711,10 +782,9 @@ function cadTessFaces(): TessFace[] {
     return { id: f.id, geom: f.geom ?? null, positions: cloud.positions, normals: cloud.normals };
   });
 }
-function faceLoopsOf(face: { geom?: { loops?: Vec3[][] } | null; tess: { positions: Float32Array; indices: Uint32Array }; res?: { tess: { positions: Float32Array; indices: Uint32Array } } | null }): Vec3[][] {
-  if (face.geom?.loops && face.geom.loops.length) return face.geom.loops;
-  const tess = face.res?.tess ?? face.tess;
-  return loopsFromMesh(tess.positions, tess.indices);
+function faceLoopsOf(face: { geom?: { loops?: Vec3[][] } | null }): Vec3[][] {
+  // Exact trim: the OCCT wires. The coarse display mesh is not a boundary.
+  return trimLoops(face.geom?.loops);
 }
 function scheduleCadHover(c: { id: number; p: V3; normal: V3 }) {
   clearTimeout(cadHoverT); const seq = ++cadHoverSeq;
@@ -1006,7 +1076,10 @@ function ctxSpec(): CtxSpec | null {
   const m = state.mode; if (!m) return null;
   const p = state.preview;
   if (m.kind === 'dist') return distSpec(m);
-  if (m.kind === 'con') return conSpec(m);
+  if (m.kind === 'con') {
+    if (featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog') { fbPending = conPanelSpec(m); return null; }
+    return conSpec(m);
+  }
   if (m.kind === 'anchor') return anchorSpec();
   // 0.41 Feature Builder in the 3D view context window.
   // Before the first click: only Smart Detect + ⚙. After detection: Add region (strictly additive),
@@ -1069,7 +1142,7 @@ function ctxSpec(): CtxSpec | null {
   const islN = p?.islands?.length ?? 0;
   const islDrawer = !sollUi && p && !p.aux && (p.fit.type === 'Ebene' || GEOM_ZONE.includes(p.fit.type))
     ? `<details class="cp-isl-drawer"><summary>${tt('Islands')} ${islN}</summary><div class="cp-isl-b">${islandChips(p.islands ?? [])}<button type="button" data-a="brushadd" title="${tt('Brush add: paint further points onto the SAME feature (no region growing) – the current selection stays, ✓ creates the feature from both.')}">${tt('Brush add')}</button></div></details>` : '';
-  const compactCtl = `<div class="cp-top"><span class="cp-seg cp-sidepick"><button type="button" data-sidepick="soll" class="${state.opts.side === 'soll' ? 'on' : ''}">${tt('Nominal')}</button><button type="button" data-sidepick="ist" class="${state.opts.side === 'ist' ? 'on' : ''}">${tt('Measured')}</button></span>${datumAlways}<button type="button" data-a="fblayout" class="cp-layout" title="${tt('Switch back to the previous Feature Builder')}">${tt('Previous layout')}</button></div>`
+  const compactCtl = `${sidePathHtml('create')}<div class="cp-top">${datumAlways}</div>`
     + `<div class="cp-acts">${type}<span class="cp-seg cp-selm">${smartSlim}<button data-a="addreg" class="${hi.add ? 'on' : ''}" ${p && m.method === 'Klick' ? '' : 'disabled'} title="${tt('Add region: the next click grows a further region and adds it – the original region stays; the union is fitted again. The selection only grows. A region is more of this face, not an island.')}">＋ ${tt('Add region')}</button>${sollUi ? '' : `<button data-a="brush" class="${m.method === 'Pinsel' ? 'on' : ''}" title="${tt('Brush: paint exactly the points to use – no region growing (alternative creation path)')}">🖌 ${tt('Brush')}</button>`}<button data-a="unregion" ${canUndo ? '' : 'disabled'} title="${tt('Undo the last added or excluded region')}">↶ ${tt('Region')}</button></span>${brushTools}${detectBadge(detected)}</div>`
     + (sollUi ? '' : `${auxCtl}${bfrom}`)
     + islDrawer
@@ -1113,17 +1186,8 @@ function ctxSpec(): CtxSpec | null {
       const cr = el.querySelector<HTMLSelectElement>('#cp-crit'); if (cr) cr.onchange = () => { state.opts.crit = cr.value as FitCrit; extractLive(); };
       bindIslands(el); bindSmooth(el, '#cp-smooth');
       const pd = el.querySelector<HTMLDetailsElement>('details.cp-params'); if (pd) pd.ontoggle = () => { cpParamsOpen = pd.open; };
-      const applySide = (side: SideMode) => {
-        state.opts.side = stickySide(side, !!state.data); try { localStorage.setItem('mw3d-side', state.opts.side); } catch { /* */ }
-        hoverNominal = null;
-        if (state.opts.side === 'soll' && state.mode?.kind === 'fit' && state.mode.method === 'Pinsel') { setMethod('Klick'); return; }
-        if (state.preview?.cadFace != null) { state.preview = { ...state.preview, role: state.opts.side }; renderAll(); return; }
-        if (state.preview?.role === 'soll' && state.opts.side === 'ist') discardPreview();
-        else if (state.preview && state.opts.side === 'soll') discardPreview();
-        else renderAll();
-      };
-      const sd = el.querySelector<HTMLSelectElement>('#cp-side'); if (sd) sd.onchange = () => applySide(sd.value as SideMode);
-      el.querySelectorAll<HTMLButtonElement>('[data-sidepick]').forEach((b) => (b.onclick = () => applySide(b.dataset.sidepick as SideMode)));
+      const sd = el.querySelector<HTMLSelectElement>('#cp-side'); if (sd) sd.onchange = () => setCreationSide(sd.value as SideMode);
+      bindSidePath(el);
       el.querySelectorAll<HTMLInputElement>('[data-exn]').forEach((c) => { c.onchange = () => { const v = parseNum(c.value); if (v != null && isFinite(v) && (v >= 0 || (c.dataset.exn === 'inset' && c.dataset.num === 'signed'))) { (state.opts.ex as any)[c.dataset.exn!] = v; extractLive(); } };
         c.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); c.onchange?.(new Event('change')); } }); });
       const na = el.querySelector<HTMLInputElement>('#cp-nang'); if (na) na.onchange = () => { const v = parseNum(na.value); if (v != null && v > 0 && v < 90) { state.opts.maxAngleDeg = v; const pv = state.preview; if (pv?.hit && pv.method === 'Klick' && !pv.regions) previewByClick(pv.hit); } };
@@ -1470,6 +1534,7 @@ function commitNominal(p: Preview) {
   seedNominalControls(node);
   state.preview = null; clearBrush(); resetIslands(); hoverNominal = null;
   state.sel = [node.id]; state.selControl = null; state.addFeat = node.id;
+  finishCreate();
   renderAll();
   const row = document.querySelector<HTMLElement>(`#tree [data-fid="${node.id}"]`);
   row?.classList.add('flash'); row?.scrollIntoView({ block: 'nearest' });
@@ -1499,7 +1564,7 @@ async function extractActualFromNominal(f: FeatureView) {
 function commitConstruction(p: Preview) {
   const m = state.mode as ConMode;
   const parents = m.refs.filter((id) => id != null).map((id) => state.features.find((f) => f.id === id)).filter((f): f is FeatureView => !!f);
-  const nominal = constructionIsNominal(parents);
+  const nominal = p.role === 'soll' || (p.role == null && constructionIsNominal(parents));
   const t = p.fit.type;
   const n = (state.typeCount[t] = (state.typeCount[t] ?? 0) + 1);
   const refs = m.refs.filter((x) => x != null) as number[];
@@ -1509,14 +1574,16 @@ function commitConstruction(p: Preview) {
   };
   if (!nominal) f.measured = p.fit;
   const node = asNode(f);
-  node.cons = { key: m.key, refs: [...refs], params: { ...m.params } };
+  const dialogCon = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
+  node.cons = { key: m.key, refs: [...refs], params: { ...m.params }, ...(dialogCon ? { side: nominal ? 'soll' as const : 'ist' as const } : {}) };
   if (nominal) node.soll = { source: 'constructed', fit: { ...p.fit, residuals: undefined }, method: 'Konstruiert' };
   state.features.push(node); touchProject();
   if (nominal) seedNominalControls(node);
   if (t === 'Winkel' && !nominal) addControl('Winkelwert', node.id);
   if (!nominal && node.measured?.pattern) { addControl('Durchmesser', node.id); addControl('Teilung', node.id); }
-  state.mode = { ...m, refs: [], slot: 0 }; state.preview = null;
+  state.preview = null;
   state.sel = [node.id]; state.selControl = null; state.addFeat = node.id;
+  finishCreate();
   renderAll();
   toast(`✔ ${tt('{0} created', node.name)} (${nominal ? tt('nominal') : tt('measured')} · ${tt('constructed')})`);
 }
@@ -1572,6 +1639,7 @@ function commitPreview() {
     addControl(('Abstand ' + comp) as ControlKind, f.id); refreshNominals(f); state.mode = { kind: 'dist', a: null, b: null, slot: 0, comp }; }
   if (f.cons) { if (t === 'Winkel') addControl('Winkelwert', f.id); if (f.measured!.pattern) { addControl('Durchmesser', f.id); addControl('Teilung', f.id); }
     const m = state.mode as ConMode; state.mode = { ...m, refs: [], slot: 0 }; state.preview = null; }
+  if (state.mode?.kind === 'fit') finishCreate();
   renderAll();
   const node = document.querySelector<HTMLElement>(`#tree [data-fid="${f.id}"]`);
   node?.classList.add('flash'); node?.scrollIntoView({ block: 'nearest' });
@@ -1689,8 +1757,8 @@ function recomputeDistances() {
   const order = recomputeOrder(state.features.map((f) => ({ id: f.id, refs: hardParentsOf(f) })).filter((x) => x.refs.length));
   for (const id of order) {
     const f = byId.get(id)!;
-    const nominalCon = f.soll?.source === 'constructed' && !f.measured;
-    const ps = hardParentsOf(f).map((r) => { const p = byId.get(r); return p ? parentFit(p, nominalCon) : undefined; });
+    const side = constructionSide(f);
+    const ps = hardParentsOf(f).map((r) => { const p = byId.get(r); return p ? geometryForSide(p, side, !f.cons?.side) : undefined; });
     if (ps.some((x) => !x)) { if (f.cons) f.cons.error = tt('Parent feature missing'); if (f.derived) f.derived.error = tt('Parent feature missing'); continue; }
     if (f.derived) { const par = byId.get(f.derived.parent)!, P = featPoints(par.id), hit = deriveSrc.get(f);
       if (hit && hit.m === par.measured && hit.P === P) continue;
@@ -1698,13 +1766,14 @@ function recomputeDistances() {
       continue; }
     if (f.type === 'Abstand' && !f.cons) {
       const r = computeDistance(ps[0]!, ps[1]!);
-      if (nominalCon && f.soll) f.soll.fit = r; else f.measured = r;
+      if (side === 'soll' && f.soll) f.soll.fit = r; else f.measured = r;
       refreshNominals(f); continue;
     }
     if (f.cons) {
       try {
         const r = runConstruction(f.cons.key, ps as FitResult[], f.cons.params);
-        if (nominalCon && f.soll) f.soll.fit = r; else f.measured = r;
+        if (side === 'soll') f.soll = { ...(f.soll ?? { source: 'constructed', method: 'Konstruiert' }), source: 'constructed', method: 'Konstruiert', fit: r };
+        else f.measured = r;
         refreshNominals(f);
         f.cons.error = undefined;
       }
@@ -2574,16 +2643,17 @@ function renderTree() {
     fnode.ondblclick = (e) => { e.preventDefault(); openFeatureProps(f); };
     fnode.title = tt('Double-click: Properties (editable) · right-click: menu');
     attachContext(fnode, f.id);
-    if (f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('measured')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
-      an.title = tt('Measured geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
-      an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'measured', f.id); };
-      an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
-    if (f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent3 aux-node', () => selectFeature(f.id));
-    if (f.soll?.fit) {
+    const parts = featureTreeParts(f);
+    if (parts.includes('soll') && f.soll?.fit) {
       const sn = node(`<span class="tw"></span>${ICON.soll}${tt('nominal')} <span class="sub">${typeName(f.soll.fit.type)} · ${f.soll.source === 'constructed' ? tt('Construction') : tt('From CAD')}</span>`, 'indent3', () => selectFeature(f.id));
       sn.title = tt('Nominal geometry');
       sn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'nominal', f.id); };
     }
+    if (parts.includes('ist') && f.measured) { const an = node(`<span class="tw"></span>${ICON.ist}${tt('measured')}${f.type === 'Abstand' ? ` <span class="sub">${fmt(distValue(f.measured, f.dim?.comp ?? '3D'), 3)} mm</span>` : ''}`, 'indent3', () => selectFeature(f.id));
+      an.title = tt('Measured geometry – right-click or double-click: read-only properties (points, fit results, statistics)');
+      an.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openTreeMenu(e.clientX, e.clientY, 'measured', f.id); };
+      an.ondblclick = (e) => { e.preventDefault(); showProperties(f); }; }
+    if (parts.includes('aux') && f.aux) node(`<span class="tw"></span>${ICON.aux}${tt('Aux. plane')} <span class="sub">${f.aux.refId ? '(' + nameOf(f.aux.refId) + ')' : ''}</span>`, 'indent4 aux-node', () => selectFeature(f.id));
   }
   csTree(node);
   if (state.curves.length) {
@@ -2793,11 +2863,17 @@ function renderFitDialog(d: HTMLElement) {
   });
   d.querySelectorAll<HTMLButtonElement>('#d-bfrom [data-zsrc]').forEach((b) => (b.onclick = () => { state.opts.ex.zoneSrc = b.dataset.zsrc === 'geom' ? 'geom' : 'points'; extractLive(); }));
 }
+function creationHtml(f: FeatureView): string {
+  const lines = creationLines(f);
+  if (!lines.length) return '';
+  return `<h4>${tt('Created')}</h4>${kv(lines.map((l) => [l.role === 'soll' ? tt('Nominal') : tt('Measured'), tt(l.method)] as [string, string]))}`;
+}
 function renderFeatureDialog(d: HTMLElement, f: FeatureView) {
   const ico = f.type === 'Abstand' ? ICON['Abstand 3D'] : ICON[f.type];
   const dk = datumKind(f.type);
   d.innerHTML = `<h3><span style="color:${hex(f.color)}">${ico}</span> ${f.name}${f.refs?.length ? ' <span class="chain" title="' + tt('Depends on other features') + '">🔗</span>' : ''}</h3>
     <div class="row"><label>${tt('Name')}</label><input id="d-name" value="${f.name}"></div>
+    ${creationHtml(f)}
     ${f.soll?.fit ? `<div class="note" data-soll="1"><b>${tt('nominal')}</b> · ${typeName(f.soll.fit.type)} · ${featureClassWord(f.soll.fit.type)} · ${f.soll.source === 'constructed' ? tt('Construction') : tt('From CAD')}${f.soll.faceId != null ? ` · ${tt('CAD face')} ${f.soll.faceId + 1}` : ''}</div>
       <div class="row"><button class="btn primary" id="d-from-soll" ${state.data ? '' : 'disabled'} title="${tt('Collect scan points near this nominal and fit the actual. The scan and the CAD model must already share one coordinate system (alignment is not changed here).')}">${tt('Extract actual from nominal')}</button></div>
       ${state.data ? '' : `<p class="note">${tt('Load a polygon model in the same coordinate system as the CAD model, then extract the actual. This prototype does not run an alignment.')}</p>`}` : ''}
@@ -4786,11 +4862,14 @@ function startConstruct(out: GeomType, key?: string) {
   const list = constructionsFor(out); if (!list.length) { toast(tt('{0} cannot be constructed.', typeName(out))); return; }
   pe.tool = null; state.csEdit = null;
   const c = (key ? conByKey(key) : null) ?? (state.mode?.kind === 'con' && state.mode.out === out ? conByKey(state.mode.key)! : list[0]);
+  syncSideToData();
   state.mode = { kind: 'con', out, key: c.key, refs: [], slot: 0, params: Object.fromEntries((c.params ?? []).map((p) => [p.key, p.def])) };
   // prefill from the tree selection where the types fit
-  for (const id of state.sel) { const f = state.features.find((x) => x.id === id); const s = slotFor(c, state.mode.refs.length); if (f && s && accepts(s, f.type)) state.mode.refs.push(id); }
+  for (const id of state.sel) { const f = state.features.find((x) => x.id === id); const s = slotFor(c, state.mode.refs.length); if (f && s && accepts(s, f.type) && (featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) !== 'dialog' || geometryForSide(f, state.opts.side, false))) state.mode.refs.push(id); }
   state.mode.slot = state.mode.refs.length; state.preview = null; clearBrush(); updateConPreview();
-  setPaneOpen('dialog', true); togglePanel('dialog', !isPhone()); renderAll();
+  if (featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog') { setPaneOpen('dialog', true); togglePanel('dialog', true); }
+  else { setPaneOpen('dialog', true); togglePanel('dialog', !isPhone()); }
+  renderAll();
 }
 function setConstruction(key: string) {
   const m = state.mode as ConMode, c = conByKey(key)!; const keep = m.refs.filter((id, i) => { const f = state.features.find((x) => x.id === id), s = slotFor(c, i); return f && s && accepts(s, f.type); });
@@ -4801,6 +4880,9 @@ function conPick(id: number) {
   const m = state.mode as ConMode, c = conByKey(m.key)!, f = state.features.find((x) => x.id === id); if (!f) return;
   const s = slotFor(c, m.slot);
   if (!s) { status(tt('All inputs are set – ✓ to create, or remove one first.')); return; }
+  if (featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog' && !geometryForSide(f, state.opts.side, false)) {
+    toast(state.opts.side === 'soll' ? tt('{0} has no nominal geometry.', f.name) : tt('{0} has no measured geometry.', f.name)); return;
+  }
   if (!accepts(s, f.type)) { toast(tt('{0} cannot be used as “{1}”.', typeName(f.type), tt(s.label))); return; }
   if (m.refs.includes(id)) { toast(tt('{0} is already used.', f.name)); return; }
   m.refs[m.slot] = id; m.slot = m.refs.findIndex((r) => r == null); if (m.slot < 0) m.slot = m.refs.length;
@@ -4813,11 +4895,17 @@ let conError = '';
 function updateConPreview() {
   const m = state.mode as ConMode; conError = '';
   const parents = m.refs.filter((x) => x != null).map((id) => state.features.find((f) => f.id === id)).filter((f): f is FeatureView => !!f);
-  const nominal = constructionIsNominal(parents);
-  const ps = parents.map((f) => parentFit(f, nominal)).filter((x): x is FitResult => !!x);
+  const dialog = featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog';
+  const side: 'soll' | 'ist' = dialog ? state.opts.side : (constructionIsNominal(parents) ? 'soll' : 'ist');
+  const ps = parents.map((f) => geometryForSide(f, side, !dialog));
   const c = conByKey(m.key)!, need = c.slots.length + (c.multi?.min ?? 0);
-  if (ps.length < need || ps.length < parents.length) { state.preview = null; return; }
-  try { state.preview = { fit: runConstruction(m.key, ps, m.params), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: m.refs.filter((x) => x != null) as number[], role: nominal ? 'soll' : undefined }; }
+  if (parents.length && ps.some((x) => !x)) {
+    state.preview = null;
+    conError = side === 'soll' ? tt('Pick features that have nominal geometry.') : tt('Pick features that have measured geometry.');
+    return;
+  }
+  if (ps.length < need || ps.some((x) => !x)) { state.preview = null; return; }
+  try { state.preview = { fit: runConstruction(m.key, ps as FitResult[], m.params), indices: new Uint32Array(0), candidates: [], method: 'Konstruiert', refs: m.refs.filter((x) => x != null) as number[], role: side }; }
   catch (e: any) { state.preview = null; conError = tt(e.message); }
 }
 function conStats(fit: FitResult): string {
@@ -4929,11 +5017,59 @@ function renderAnchorDialog(d: HTMLElement) {
     ${p ? `<h4>${tt('Preview')}</h4>${kv(conRows(p.fit))}` : ''}`;
   bindMethodSeg(d, m.out);
 }
+function conPanelSpec(m: ConMode): CtxSpec {
+  const c = conByKey(m.key)!, p = state.preview;
+  const n = Math.max(c.slots.length + (c.multi?.min ?? 0), m.refs.length + (c.multi ? 1 : 0));
+  const capCount = c.multi ? 0 : c.slots.length;
+  const outs = CON_OUTS.map((o) => `<option value="${o.key ?? o.out}" ${(o.key ? o.key === m.key : o.out === m.out && m.key !== 'bc-pattern') ? 'selected' : ''}>${tt(o.label)}</option>`).join('');
+  const opts = constructionsFor(m.out).map((x) => `<option value="${x.key}" ${x.key === m.key ? 'selected' : ''}>${tt(x.label)}</option>`).join('');
+  const rows = Array.from({ length: n }, (_, i) => {
+    const s = slotFor(c, i); if (!s) return '';
+    const id = m.refs[i];
+    const list = state.features.filter((g) => accepts(s, g.type) && !!geometryForSide(g, state.opts.side, false) && (g.id === id || !m.refs.includes(g.id)));
+    const options = `<option value="">${tt(s.label)} …</option>` + list.map((g) => `<option value="${g.id}" ${g.id === id ? 'selected' : ''}>${g.name.replace(/[<>&"]/g, '')}</option>`).join('');
+    return `<div class="row con-in ${m.slot === i ? 'act' : ''}"><label title="${tt(s.label)}">${tt(slotCaption(i, capCount, s.label))}</label><select data-cin="${i}">${options}</select></div>`;
+  }).join('');
+  const pars = (c.params ?? []).map((q) => q.choices
+    ? `<div class="row"><label>${tt(q.label)}</label><select data-cpar="${q.key}">${q.choices.map((ch, i) => `<option value="${i}" ${m.params[q.key] === i ? 'selected' : ''}>${tt(ch)}</option>`).join('')}</select></div>`
+    : `<div class="row"><label>${tt(q.label)}${q.unit ? ` [${q.unit}]` : ''}</label><input data-cpar="${q.key}" value="${m.params[q.key]}" inputmode="decimal" data-num="signed"></div>`).join('');
+  return {
+    title: `${tt('Construct')} ${typeName(m.out)}`, cls: 'fb-compact',
+    controls: `${sidePathHtml('construct')}<div class="cp-acts"><select id="cp-out" title="${tt('Feature type')}">${outs}</select><select id="cp-con">${opts}</select></div>${rows}${pars}<p class="note">${tt('A constructed feature keeps its dependency. Change the parent features later in the properties; the result is recomputed.')}</p>`,
+    stats: p ? conStats(p.fit) : `<span class="cp-hint">${conError ? '⚠ ' + conError : tt('Pick: {0}', tt(slotFor(c, m.slot)?.label ?? ''))}</span>`,
+    bind: (el) => {
+      bindSidePath(el);
+      const lay = el.querySelector<HTMLButtonElement>('[data-a="fblayout"]');
+      if (lay) lay.onclick = () => { try { localStorage.setItem('mw3d-fb-layout', 'classic'); } catch { /* */ } renderAll(); };
+      el.querySelector<HTMLSelectElement>('#cp-out')!.onchange = (e) => {
+        const v = (e.target as HTMLSelectElement).value;
+        const o = CON_OUTS.find((x) => (x.key ?? x.out) === v);
+        if (o) startConstruct(o.out, o.key);
+      };
+      el.querySelector<HTMLSelectElement>('#cp-con')!.onchange = (e) => setConstruction((e.target as HTMLSelectElement).value);
+      el.querySelectorAll<HTMLSelectElement>('[data-cin]').forEach((s) => (s.onchange = () => {
+        const i = +s.dataset.cin!;
+        m.refs[i] = s.value ? +s.value : null;
+        m.slot = i;
+        updateConPreview(); renderAll();
+      }));
+      el.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-cpar]').forEach((i) => (i.onchange = () => {
+        const v = Number((i as HTMLInputElement).value.replace(',', '.'));
+        if (isFinite(v)) m.params[i.dataset.cpar!] = v;
+        updateConPreview(); renderAll();
+      }));
+    },
+    ok: { run: commitPreview, disabled: !p, title: tt('Create feature (Enter)') },
+    undo: { run: () => { if (m.refs.length) { m.refs.pop(); m.slot = m.refs.length; updateConPreview(); renderAll(); } }, disabled: !m.refs.length, title: tt('Remove last input') },
+    cancel: { run: stopMode, title: tt('Exit (Esc)') },
+  };
+}
 function renderConDialog(d: HTMLElement) {
+  if (fbPending && featureBuilderHost(localStorage.getItem('mw3d-fb-layout')) === 'dialog') { mountFeatureBuilder(d, fbPending); return; }
   const m = state.mode as ConMode, c = conByKey(m.key)!, p = state.preview;
   const list = constructionsFor(m.out);
   const n = Math.max(c.slots.length + (c.multi?.min ?? 0), m.refs.length + (c.multi ? 1 : 0));
-  d.innerHTML = `<h3>${ICON[m.out] ?? ''} ${tt('Create feature')}: ${typeName(m.out)}</h3>${methodSeg(m.out, 'con')}
+  d.innerHTML = `<h3>${ICON[m.out] ?? ''} ${tt('Create feature')}: ${typeName(m.out)}</h3><p class="row"><button type="button" data-a="fblayout" class="cp-layout">${tt('New layout')}</button></p>${methodSeg(m.out, 'con')}
     <h4>${tt('Construction')}</h4><div class="con-list">${list.map((x) => `<label class="con-item"><input type="radio" name="con-k" value="${x.key}" ${x.key === m.key ? 'checked' : ''}> ${tt(x.label)}</label>`).join('')}</div>
     <h4>${tt('Inputs')}</h4>${Array.from({ length: n }, (_, i) => { const s = slotFor(c, i)!, id = m.refs[i];
       return `<div class="cs-row ${m.slot === i ? 'act' : ''}"><label>${i + 1}</label><span style="flex:1">${id != null ? nameOf(id) : `<i>${tt(s.label)}</i>`}</span><button class="btn cs-pick ${m.slot === i ? 'on' : ''}" data-cslot="${i}" title="${tt('Pick in 3D view or tree')}">⌖</button>${id != null ? `<button class="btn" data-crm="${i}" title="${tt('Remove')}">✕</button>` : ''}</div>`; }).join('')}
@@ -4944,6 +5080,7 @@ function renderConDialog(d: HTMLElement) {
     ${p ? `<h4>${tt('Preview')}</h4>${kv(conRows(p.fit))}` : ''}
     <p class="note">${tt('A constructed feature has no own mesh points; it is recomputed automatically when a parent feature changes (chain icon 🔗 in the tree).')}</p>`;
   bindMethodSeg(d, m.out);
+  d.querySelector<HTMLButtonElement>('[data-a="fblayout"]')!.onclick = () => { try { localStorage.setItem('mw3d-fb-layout', 'compact'); } catch { /* */ } renderAll(); };
   d.querySelectorAll<HTMLInputElement>('[name="con-k"]').forEach((r) => (r.onchange = () => setConstruction(r.value)));
   d.querySelectorAll<HTMLButtonElement>('[data-cslot]').forEach((b) => (b.onclick = () => { m.slot = Number(b.dataset.cslot); renderAll(); if (isPhone()) togglePanel('dialog', false); }));
   d.querySelectorAll<HTMLButtonElement>('[data-crm]').forEach((b) => (b.onclick = () => { m.refs.splice(Number(b.dataset.crm), 1); m.slot = m.refs.length; updateConPreview(); renderAll(); }));
@@ -4979,7 +5116,9 @@ function conDefinitionHTML(f: FeatureView): string {
   const c = conByKey(f.cons.key);
   const refs = f.cons.refs, n = refs.length, min = c ? (c.multi ? c.slots.length + c.multi.min : c.slots.length) : n;
   const blocked = c ? dependentsOf(state.features, [f.id]) : new Set<number>();
-  const optsFor = (i: number) => { const s = c ? slotFor(c, i) : null; return state.features.filter((g) => g.id !== f.id && !blocked.has(g.id) && !!(g.measured || g.soll?.fit) && (!s || accepts(s, g.type))); };
+  const side = f.cons?.side;
+  const hasGeom = (g: FeatureView) => side === 'soll' ? !!g.soll?.fit : side === 'ist' ? !!g.measured : !!(g.measured || g.soll?.fit);
+  const optsFor = (i: number) => { const s = c ? slotFor(c, i) : null; return state.features.filter((g) => g.id !== f.id && !blocked.has(g.id) && hasGeom(g) && (!s || accepts(s, g.type))); };
   const rows = refs.map((r, i) => { const s = c ? slotFor(c, i) : null;
     return `<div class="row con-in"><label>${s ? tt(s.label) : '#' + (i + 1)}</label><select data-cin="${i}">${optsFor(i).map((g) => `<option value="${g.id}" ${g.id === r ? 'selected' : ''}>${g.name}</option>`).join('')}</select>
       <button type="button" class="btn" data-cmv="${i}" ${i ? '' : 'disabled'} title="${tt('Swap with the input above')}">↑</button>${c?.multi && n > min ? `<button type="button" class="btn" data-crm="${i}" title="${tt('Remove this input')}">✕</button>` : ''}</div>`; }).join('');

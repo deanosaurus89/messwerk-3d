@@ -222,6 +222,19 @@ export function parentFit(f: { measured?: FitResult | null; soll?: { fit?: FitRe
   if (nominal) return f.soll?.fit ?? f.measured ?? null;
   return f.measured ?? f.soll?.fit ?? null;
 }
+/** Which component a constructed feature writes. An explicit `cons.side` wins; older files are inferred. */
+export function constructionSide(f: { measured?: FitResult | null; soll?: { source?: string; fit?: FitResult } | null; cons?: { side?: 'soll' | 'ist' } | null }): 'soll' | 'ist' {
+  if (f.cons?.side === 'soll' || f.cons?.side === 'ist') return f.cons.side;
+  return f.soll?.source === 'constructed' && !f.measured ? 'soll' : 'ist';
+}
+/**
+ * Geometry of one side. `legacyFallback` keeps pre-0.52 constructions working when a parent
+ * only has the other component. A construction that stored its side does not fall across.
+ */
+export function geometryForSide(f: { measured?: FitResult | null; soll?: { fit?: FitResult } | null }, side: 'soll' | 'ist', legacyFallback: boolean): FitResult | null {
+  if (side === 'soll') return f.soll?.fit ?? (legacyFallback ? f.measured ?? null : null);
+  return f.measured ?? (legacyFallback ? f.soll?.fit ?? null : null);
+}
 /** Every parent is nominal-only → the result is a nominal feature (e.g. nominal plane ∩ nominal plane → nominal line). */
 export function constructionIsNominal(parents: { measured?: FitResult | null; soll?: { fit?: FitResult } | null }[]): boolean {
   return parents.length > 0 && parents.every((p) => !p.measured && !!p.soll?.fit);

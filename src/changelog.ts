@@ -7,6 +7,12 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.52', date: '2026-10-29', items: [
+    'Create starts in the dialog: Nominal or Measured (the choice stays, and a side is offered only when that data exists), then Create or Construct. Create is the Feature Builder. Construct is the construction panel (From / To and ✓) in the same place, without the brush or Smart Detect. After ✓ the dialog shows how the feature was made. A construction remembers its parents; change them in the properties and the dependency stays.',
+    'A feature can be nominal only, measured only, or both. The tree lists Nominal, then Measured. The auxiliary plane of a circle, slot or line sits under Measured.',
+    'A CAD surface (plane, cylinder, cone, sphere, torus) is trimmed to the real face wires — the outer loop and the islands — on the analytic surface. The preview and the feature follow those model curves. The old fill kept whole grid cells, so the edge stepped off the CAD boundary.',
+    'Previous layout, in the panel or under Home → Options, still restores the bottom Feature Builder on a desktop and on a phone. The choice is remembered.',
+  ] },
   { version: '2026.0.51', date: '2026-10-29', items: [
     'Feature Builder opens in the right-hand dialog while a feature is being created (a side sheet on a phone, so the view cube and the view controls stay put). When you confirm or leave, the dialog shows the object properties again. Previous layout, in the panel or under Home → Options, restores the bottom Feature Builder on desktop and on a phone. The choice is remembered.',
     'The dialog builder keeps Nominal | Measured at the top, a thin stat line (type icon, flatness, standard deviation), Smart Detect, Add region, Brush and Region back. After Smart Detect, Add region is the next mode. Islands stay collapsed to a count until you open them. Brush radius sits under Advanced. Boundary exclusion is offered for Nominal only.',

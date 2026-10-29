@@ -250,6 +250,21 @@ export function nurbsSamples(oc: OC, face: any): { positions: Float32Array; norm
   } catch { return null; }
   finally { a.delete?.(); }
 }
+/** Sample `at` so every chord stays within `tol` of the curve. A straight parameter span is the two endpoints. */
+export function sampleByChord(at: (u: number) => V3, u0: number, u1: number, tol = 0.05, depth = 0): V3[] {
+  const a = at(u0), b = at(u1);
+  const dist = (p: V3, q: V3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  if (!(Number.isFinite(a[0]) && Number.isFinite(b[0]))) return [];
+  if (depth > 12 || dist(a, b) <= tol) return [a, b];
+  const um = (u0 + u1) * 0.5;
+  let m: V3;
+  try { m = at(um); } catch { return [a, b]; }
+  const mid: V3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  if (dist(m, mid) <= tol) return [a, b];
+  const L = sampleByChord(at, u0, um, tol, depth + 1);
+  const R = sampleByChord(at, um, u1, tol, depth + 1);
+  return L.length ? [...L.slice(0, -1), ...R] : R;
+}
 function sampleWire(oc: OC, wire: any): V3[] {
   const pts: V3[] = [];
   let ex: any;
@@ -261,14 +276,25 @@ function sampleWire(oc: OC, wire: any): V3[] {
       const c = new oc.BRepAdaptor_Curve_2(e);
       try {
         const u0 = c.FirstParameter(), u1 = c.LastParameter();
-        const len = edgeLen(oc, e);
-        const n = Math.max(2, Math.min(32, Math.ceil(len / 2) || 4));
-        for (let i = 0; i < n; i++) {
-          try { pts.push(p3(curvePoint(c, oc, u0 + (u1 - u0) * (i / n)))); } catch { /* skip */ }
+        const line = c.GetType() === oc.GeomAbs_CurveType.GeomAbs_Line;
+        // A line is its two endpoints. Every other edge (circle, spline, …) is sampled
+        // on the real curve until the chord error is ≤ 0.05 mm — not a fixed 32-point guess.
+        const piece = line
+          ? [p3(curvePoint(c, oc, u0)), p3(curvePoint(c, oc, u1))]
+          : sampleByChord((u) => p3(curvePoint(c, oc, u)), u0, u1, 0.05);
+        for (const p of piece) {
+          const last = pts[pts.length - 1];
+          if (last && Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]) < 1e-5) continue;
+          pts.push(p);
         }
-      } finally { c.delete?.(); }
+      } catch { /* one bad edge does not drop the wire */ }
+      finally { c.delete?.(); }
     }
   } finally { ex.delete?.(); }
+  if (pts.length > 2) {
+    const a = pts[0], b = pts[pts.length - 1];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-5) pts.pop();
+  }
   return pts;
 }
 /** Outer wire first, then holes. Empty when the kernel cannot walk the wires. */
