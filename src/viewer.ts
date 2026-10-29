@@ -512,7 +512,10 @@ export class Viewer {
     const s = this.radius;
     switch (f.type) {
       case 'Ebene': {
-        const size = solid ? Math.max(s * 0.7, (f as FitResult & { span?: number }).span ?? 0, 12) : Math.max(s * 0.25, 5);
+        const span = (f as FitResult & { span?: number }).span;
+        // A solid stand-in used to grow to 70 % of the model, so a plane looked far larger than its face
+        // whenever the exact trim was missing. A known span is the face diagonal; otherwise a small marker.
+        const size = solid ? (span && span > 0 ? span : Math.min(48, Math.max(8, s * 0.08))) : Math.max(s * 0.25, 5);
         obj = new THREE.Mesh(new THREE.PlaneGeometry(size, size, solid ? 1 : 6, solid ? 1 : 6), mat); obj.quaternion.copy(qz); break;
       }
       case 'Zylinder': {

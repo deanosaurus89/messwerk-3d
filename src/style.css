@@ -696,3 +696,28 @@ body:not(.tol-tables) .gentol { display:none !important; }
 /* 0.38 F13: ⚙ above the nav cube stays visible + clickable during feature creation (above the Creation Panel) */
 body.ctx-on #view-gear { z-index:40; }
 .lbl .lbl-an { font-weight: 700; white-space: nowrap; }
+
+/* 2026.0.53 modern Feature Builder. Classic dock (#ctx-panel, not .dlg-modern) is unchanged. */
+#dialog.dlg-modern { background:#f3f6fa; padding:10px 10px 14px; }
+#dialog.dlg-modern .fb-slim { gap:10px; }
+#dialog.dlg-modern .fb-slim .cp-top,
+#dialog.dlg-modern .fb-slim .cp-acts,
+#dialog.dlg-modern .fb-slim .cp-s,
+#dialog.dlg-modern .fb-slim .cp-isl-drawer,
+#dialog.dlg-modern .fb-slim .cp-adv,
+#dialog.dlg-modern .fb-slim .fb-actions {
+  background:#fff; border:1px solid #d7e0ea; border-radius:16px; padding:8px 10px;
+  box-shadow:0 1px 2px rgba(22, 40, 68, .05);
+}
+#dialog.dlg-modern .fb-slim .cp-seg { display:inline-flex; background:#eef3f8; border-radius:12px; padding:3px; gap:2px; }
+#dialog.dlg-modern .fb-slim .cp-seg button {
+  border:none; background:transparent; border-radius:10px; margin:0; padding:6px 10px; min-height:32px; color:#1e3a5c;
+}
+#dialog.dlg-modern .fb-slim .cp-seg button.on { background:#1f5fa8; color:#fff; box-shadow:0 1px 2px rgba(16, 40, 70, .18); }
+#dialog.dlg-modern .fb-slim .cp-s { font-variant-numeric:tabular-nums; }
+#dialog.dlg-modern .fb-slim .fb-actions { display:flex; justify-content:flex-end; gap:8px; position:sticky; bottom:0; }
+#dialog.dlg-modern .cp-ok { border-radius:12px; min-height:40px; min-width:52px; }
+#dialog.dlg-modern .fb-slim .cp-layout { border-radius:10px; }
+@media (max-width:700px) {
+  body.fb-dialog #dialog-pane { border-radius:22px 0 0 22px; box-shadow:-10px 0 28px rgba(16, 32, 48, .14); }
+}

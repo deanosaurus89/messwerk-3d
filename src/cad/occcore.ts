@@ -265,15 +265,28 @@ export function sampleByChord(at: (u: number) => V3, u0: number, u1: number, tol
   const R = sampleByChord(at, um, u1, tol, depth + 1);
   return L.length ? [...L.slice(0, -1), ...R] : R;
 }
-function sampleWire(oc: OC, wire: any): V3[] {
+/** Edge curve on the face (pcurve) when the binding has that overload, else the 3D curve. */
+function adaptEdge(oc: OC, edge: any, face?: any) {
+  if (face) {
+    for (const name of ['BRepAdaptor_Curve_3', 'BRepAdaptor_Curve_4']) {
+      const Ctor = oc[name];
+      if (!Ctor) continue;
+      try { return new Ctor(edge, face); } catch { /* not the (edge, face) overload */ }
+    }
+  }
+  return new oc.BRepAdaptor_Curve_2(edge);
+}
+function sampleWire(oc: OC, wire: any, face?: any): V3[] {
   const pts: V3[] = [];
   let ex: any;
-  try { ex = new oc.BRepTools_WireExplorer_1(wire); } catch { return pts; }
+  // _1 is the empty constructor. _2(wire) walks 3D edges. _3(wire, face) also walks pcurve-only edges (typical IGES).
+  try { ex = face ? new oc.BRepTools_WireExplorer_3(wire, face) : new oc.BRepTools_WireExplorer_2(wire); }
+  catch { try { ex = new oc.BRepTools_WireExplorer_2(wire); } catch { return pts; } }
   try {
     for (; ex.More(); ex.Next()) {
       const e = ex.Current();
       if (oc.BRep_Tool.Degenerated(e)) continue;
-      const c = new oc.BRepAdaptor_Curve_2(e);
+      const c = adaptEdge(oc, e, face);
       try {
         const u0 = c.FirstParameter(), u1 = c.LastParameter();
         const line = c.GetType() === oc.GeomAbs_CurveType.GeomAbs_Line;
@@ -307,8 +320,8 @@ export function faceLoops(oc: OC, face: any): V3[][] {
     if (!wires.length) return [];
     let outer = wires[0];
     try { const ow = oc.BRepTools.OuterWire(face); if (ow && !ow.IsNull?.()) outer = ow; } catch { /* first wire */ }
-    const loops = [sampleWire(oc, outer)];
-    for (const w of wires) if (outer.IsSame && !outer.IsSame(w)) loops.push(sampleWire(oc, w));
+    const loops = [sampleWire(oc, outer, face)];
+    for (const w of wires) if (outer.IsSame && !outer.IsSame(w)) loops.push(sampleWire(oc, w, face));
     return loops.filter((L) => L.length >= 3);
   } catch { return []; }
 }
