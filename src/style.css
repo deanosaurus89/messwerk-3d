@@ -444,6 +444,15 @@ input.ted:disabled { background:#f1f3f5; }
 @keyframes updfade { 0% { opacity:0; transform:translateY(-3px); } 10% { opacity:1; transform:none; } 70% { opacity:1; } 100% { opacity:0; } }
 .cp-params { margin-top:4px; border-top:1px solid #dde3ea; padding-top:3px; font-size:13px; }
 .cp-params summary { cursor:pointer; font-weight:600; color:#1565c0; padding:2px 0; }
+#ctx-panel.fb-compact .cp-c { flex-direction:column; align-items:stretch; }
+#ctx-panel.fb-compact .cp-top, #ctx-panel.fb-compact .cp-acts, #ctx-panel.fb-compact .cp-isl-row { display:flex; flex-wrap:wrap; gap:4px; align-items:center; width:100%; }
+#ctx-panel.fb-compact .cp-layout { border:none; background:none; color:#1565c0; font:600 11px system-ui; cursor:pointer; text-decoration:underline; padding:0 4px; }
+#ctx-panel.fb-compact button.suggest { box-shadow:0 0 0 2px #1d64c8; background:#e8f1ff; }
+#ctx-panel.fb-compact .cp-adv > summary { list-style:none; }
+#ctx-panel.fb-compact .cp-adv > summary::-webkit-details-marker { display:none; }
+#ctx-panel.fb-compact .cp-adv > summary::before { content:'▸ '; }
+#ctx-panel.fb-compact .cp-adv[open] > summary::before { content:'▾ '; }
+#ctx-panel.fb-compact .isl-chip { min-height:24px; }
 .cp-params .cp-pg { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:3px 0; }
 .cp-params .cp-pg label { display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
 .cp-params input[data-exn] { width:3.6em; }

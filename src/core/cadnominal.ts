@@ -3,7 +3,7 @@
 // the nominal is the seed, scan points near it are collected and fitted. The scan and the CAD
 // model must already share one coordinate system — this module does not align them.
 import type { CadAnalytic, CadCurve } from '../cad/analytic';
-import { FitResult, GeomType, canonical } from './fit';
+import { FitResult, GeomType, autoFit, canonical, fitType } from './fit';
 import { Vec3, add, dot, norm, scale, sub, unit } from './linalg';
 import { ReexParams, ReexResult, normReex, reextract } from './reextract';
 
@@ -120,7 +120,8 @@ function nearestLine(face: CadAnalytic, point: Vec3): { e: CadCurve | null; d: n
 /**
  * Analytic nominal under a hit on a CAD face.
  * Smart Detect: an edge hit (within edgeTol) is a curve — slot, circle or line.
- * A face hit is the surface, including freeform. Polyline is only the explicit Polyline type:
+ * A face hit is the analytic surface. Freeform is not an Auto result — only the explicit Freeform type.
+ * Polyline is only the explicit Polyline type:
  * line segments joined while they stay tangent (G1), stopping at a corner.
  * An explicit type uses that geometry when the face has it.
  * `edgeTol < 0` means “this face, anywhere” for a line or a polyline (same as an explicit circle).
@@ -189,6 +190,7 @@ export function nominalAtPointer(faces: NominalFaceRef[], hitId: number, point: 
   return direct && hit ? { id: hit.id, pick: direct } : null;
 }
 export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 'auto', edgeTol: number): NominalPick | null {
+  if (want === 'Punkt') return { fit: { type: 'Punkt', center: [point[0], point[1], point[2]], normal: unit(face.normal), ...ZERO } };
   if (want === 'Linienzug') return nominalPolyline(face, point, edgeTol);
   const circles = face.edges.filter((e) => e.kind === 'circle' && e.center && e.normal && e.radius != null);
   let best: CadCurve | null = null, bestD = Infinity;
@@ -206,8 +208,7 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
       if (line.e && line.d <= edgeTol) return lineFit(line.e);
       return null;
     }
-    if (!surf) return null;
-    if (surf.type === 'Freiformfläche') return { fit: surf, freeform: true };
+    if (!surf || surf.type === 'Freiformfläche') return null;
     return { fit: surf };
   }
   if (want === 'Kreis') return best ? circleFit(best) : null;
@@ -299,3 +300,124 @@ export function samplePositions(positions: ArrayLike<number>, max = 240): Vec3[]
 
 /** Face type the nominal classifier expects for an explicit ribbon type (for status text). */
 export const CAD_SURFACE: Record<string, string> = surfOf;
+
+const ANALYTIC_SURF = new Set<string>(['Ebene', 'Zylinder', 'Kegel', 'Kugel', 'Torus']);
+
+function cloudExtent(p: Vec3[]): number {
+  const mn: Vec3 = [Infinity, Infinity, Infinity], mx: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const q of p) for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], q[i]); mx[i] = Math.max(mx[i], q[i]); }
+  return norm(sub(mx, mn));
+}
+/** A tessellated face is this analytic type when the residual stays inside the CAD chord (not a freeform shell). */
+export function analyticAccept(fit: FitResult, extent: number): boolean {
+  if (!ANALYTIC_SURF.has(fit.type) || !isFinite(fit.rms)) return false;
+  const lim = Math.max(0.75, Math.min(1.25, 0.004 * Math.max(extent, 1)));
+  if (fit.rms > lim) return false;
+  const r = fit.radius ?? 0;
+  if (fit.type === 'Zylinder' || fit.type === 'Kugel') {
+    if (!(r > 0.2) || r > Math.max(4 * extent, 1)) return false;
+  }
+  if (fit.type === 'Kegel') {
+    const ha = fit.halfAngle ?? 0;
+    if (ha < 0.03 || ha > 1.35) return false;
+  }
+  if (fit.type === 'Torus') {
+    const tube = fit.minorRadius ?? 0;
+    if (!(r > 0.2) || !(tube > 0.15) || r > Math.max(4 * extent, 1) || tube > extent) return false;
+  }
+  return true;
+}
+function stripFit(f: FitResult): FitResult {
+  const { residuals: _r, ...rest } = f;
+  void _r;
+  return rest;
+}
+/**
+ * Fit a plane, cylinder, cone, sphere or torus through a face tessellation.
+ * Auto never returns freeform: a face that is not one of those surfaces is null.
+ * An explicit Freeform type is handled by the caller, not here.
+ */
+export function analyticFromSamples(points: Vec3[], normals: Vec3[], want: GeomType | 'auto'): NominalPick | null {
+  if (want === 'Freiformfläche' || want === 'Punkt' || want === 'Linie' || want === 'Kreis' || want === 'Langloch' || want === 'Linienzug') return null;
+  if (points.length < 6) return null;
+  const step = Math.max(1, Math.ceil(points.length / 320));
+  const p: Vec3[] = [], n: Vec3[] = [];
+  for (let i = 0; i < points.length; i += step) {
+    p.push(points[i]);
+    if (normals.length === points.length) n.push(normals[i]);
+  }
+  const ext = cloudExtent(p);
+  const nn = n.length === p.length ? n : p.map(() => [0, 0, 1] as Vec3);
+  try {
+    if (want === 'auto') {
+      const r = autoFit(p, nn);
+      const pool = [r.best, ...r.candidates].filter((c) => analyticAccept(c, ext));
+      if (!pool.length) return null;
+      const best = analyticAccept(r.best, ext) ? r.best : pool.reduce((a, b) => (a.rms <= b.rms ? a : b));
+      return { fit: stripFit(best) };
+    }
+    if (!ANALYTIC_SURF.has(want)) return null;
+    const fit = fitType(want, p, nn, false);
+    if (!analyticAccept(fit, ext)) return null;
+    return { fit: stripFit(fit) };
+  } catch { return null; }
+}
+
+export interface TessFace { id: number; geom: CadAnalytic | null; positions?: ArrayLike<number>; normals?: ArrayLike<number> }
+const surfaceMemo = new Map<string, NominalPick | null>();
+function sampleCloud(positions: ArrayLike<number>, normals: ArrayLike<number> | undefined, max = 320): { p: Vec3[]; n: Vec3[] } {
+  const nPts = Math.floor(positions.length / 3);
+  if (!nPts) return { p: [], n: [] };
+  const step = Math.max(1, Math.ceil(nPts / max));
+  const p: Vec3[] = [], n: Vec3[] = [];
+  const hasN = !!normals && normals.length >= positions.length;
+  for (let i = 0; i < nPts; i += step) {
+    p.push([positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]]);
+    if (hasN) n.push([normals![3 * i] || 0, normals![3 * i + 1] || 0, normals![3 * i + 2] || 1]);
+  }
+  return { p, n };
+}
+/**
+ * Nominal or measured geometry for one CAD hit.
+ * Curves stay on edges. Surfaces that OpenCascade stored as NURBS are fitted through the tessellation.
+ * Auto does not offer Freeform. Point is the hit itself, on any face.
+ */
+/** Middle dimension of a face (a flat face ignores its thickness). Used so a finger window cannot eat a whole wall. */
+export function faceSpan(positions?: ArrayLike<number>): number {
+  if (!positions || positions.length < 9) return 0;
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  const step = Math.max(1, Math.floor(positions.length / 3 / 80));
+  for (let i = 0; i < positions.length / 3; i += step) for (let k = 0; k < 3; k++) {
+    const v = positions[3 * i + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v;
+  }
+  const s = [0, 1, 2].map((k) => mx[k] - mn[k]).sort((a, b) => a - b);
+  return s[1] || 0;
+}
+/** Auto keeps an edge band, but not so wide that the middle of a small face becomes a curve. */
+export function cappedEdgeTol(edgeTol: number, span: number): number {
+  if (!(span > 1) || !(edgeTol > 0)) return edgeTol;
+  return Math.min(edgeTol, Math.max(0.6, span * 0.28));
+}
+export function nominalOnCad(faces: TessFace[], hitId: number, point: Vec3, want: GeomType | 'auto', edgeTol: number): { id: number; pick: NominalPick } | null {
+  const face0 = faces.find((f) => f.id === hitId);
+  const tol = want === 'auto' ? cappedEdgeTol(edgeTol, faceSpan(face0?.positions)) : edgeTol;
+  const found = nominalAtPointer(faces.map((f) => ({ id: f.id, geom: f.geom })), hitId, point, want, tol);
+  if (want === 'Punkt') {
+    if (found) return found;
+    const face = faces.find((f) => f.id === hitId);
+    return { id: hitId, pick: { fit: { type: 'Punkt', center: [point[0], point[1], point[2]], normal: unit(face?.geom?.normal ?? [0, 0, 1]), ...ZERO } } };
+  }
+  if (found && !found.pick.freeform) return found;
+  if (want === 'Freiformfläche') return found;
+  if (want === 'Linie' || want === 'Kreis' || want === 'Langloch' || want === 'Linienzug') return found;
+  const face = faces.find((f) => f.id === hitId);
+  if (!face?.positions || face.positions.length < 9) return want === 'auto' ? null : found;
+  const key = `${hitId}|${want}|${face.positions.length}|${face.positions[0] ?? 0}|${face.positions[face.positions.length - 1] ?? 0}`;
+  if (!surfaceMemo.has(key)) {
+    const { p, n } = sampleCloud(face.positions, face.normals);
+    surfaceMemo.set(key, analyticFromSamples(p, n, want === 'auto' ? 'auto' : want));
+  }
+  const fitted = surfaceMemo.get(key) ?? null;
+  if (fitted) return { id: hitId, pick: fitted };
+  return want === 'auto' ? null : (found?.pick.freeform ? null : found);
+}

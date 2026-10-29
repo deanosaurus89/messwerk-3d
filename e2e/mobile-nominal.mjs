@@ -21,11 +21,14 @@ async function boot(page) {
 
 async function spot(page, want) {
   return page.evaluate((want) => {
-    const { cad, viewer, cadPickHit, nominalAtPointer } = window.__app;
+    const { cad, viewer, cadPickHit, nominalAtPointer, nominalOnCad } = window.__app;
     viewer.view('iso');
     const rect = viewer.renderer.domElement.getBoundingClientRect();
     const V = viewer.camera.position.constructor;
-    const faces = cad.faces.map((f) => ({ id: f.id, geom: f.geom ?? null }));
+    const faces = cad.faces.map((f) => {
+      const tess = f.res?.tess ?? f.tess;
+      return { id: f.id, geom: f.geom ?? null, positions: tess?.positions, normals: tess?.normals };
+    });
     const tol = 8;
     const project = (mid) => {
       const p = new V(mid[0], mid[1], mid[2]).project(viewer.camera);
@@ -42,8 +45,8 @@ async function spot(page, want) {
           if (document.elementFromPoint(x, y) !== viewer.renderer.domElement) continue;
           const h = cadPickHit(x, y);
           if (!h) continue;
-          const n = nominalAtPointer(faces, h.id, h.p, 'auto', 10);
-          if (n && (n.pick.fit.type === 'Ebene' || n.pick.fit.type === 'Zylinder' || n.pick.fit.type === 'Freiformfläche' || n.pick.fit.type === 'Kegel' || n.pick.fit.type === 'Kugel' || n.pick.fit.type === 'Torus'))
+          const n = nominalOnCad(faces, h.id, h.p, 'auto', 12);
+          if (n && !n.pick.freeform && (n.pick.fit.type === 'Ebene' || n.pick.fit.type === 'Zylinder' || n.pick.fit.type === 'Kegel' || n.pick.fit.type === 'Kugel' || n.pick.fit.type === 'Torus'))
             return { x, y, type: n.pick.fit.type };
         }
       }
@@ -131,12 +134,109 @@ async function polylineMenu(page, touch) {
   return errs;
 }
 
+async function spotType(page, type) {
+  return page.evaluate((type) => {
+    const { cad, viewer, cadPickHit, nominalOnCad } = window.__app;
+    const rect = viewer.renderer.domElement.getBoundingClientRect();
+    const faces = cad.faces.map((f) => {
+      const tess = f.res?.tess ?? f.tess;
+      return { id: f.id, geom: f.geom ?? null, positions: tess?.positions, normals: tess?.normals };
+    });
+    for (let y = rect.top + 30; y < rect.bottom - 90; y += 18) {
+      for (let x = rect.left + 16; x < rect.right - 16; x += 18) {
+        if (document.elementFromPoint(x, y) !== viewer.renderer.domElement) continue;
+        const h = cadPickHit(x, y);
+        if (!h) continue;
+        const n = nominalOnCad(faces, h.id, h.p, type, 12);
+        if (n && !n.pick.freeform && n.pick.fit.type === type) return { x, y, type };
+      }
+    }
+    for (const f of faces) {
+      if (!f.positions || f.positions.length < 9) continue;
+      const step = Math.max(1, Math.floor(f.positions.length / 3 / 24));
+      for (let i = 0; i < f.positions.length / 3; i += step) {
+        const p = [f.positions[3 * i], f.positions[3 * i + 1], f.positions[3 * i + 2]];
+        const n = nominalOnCad(faces, f.id, p, type, 12);
+        if (n && !n.pick.freeform && n.pick.fit.type === type) return { x: 0, y: 0, type, direct: f.id, p };
+      }
+    }
+    return null;
+  }, type);
+}
+
+async function confirmNamed(page, touch, label, type) {
+  const errs = [];
+  await page.evaluate((t) => window.__app.startFitMode(t, 'soll'), type);
+  const hit = await spotType(page, type);
+  if (!hit) { errs.push(label + ': no ' + type); return errs; }
+  console.log(label, type, JSON.stringify(hit));
+  if (hit.direct != null) {
+    await page.evaluate((h) => window.__app.previewFromCad({ id: h.direct, p: h.p }), hit);
+  } else await pick(page, hit.x, hit.y, touch);
+  try {
+    await page.waitForFunction((t) => window.__app.state.preview?.fit?.type === t, type, { timeout: 12000 });
+  } catch (e) {
+    errs.push(label + ' ' + type + ' no preview: ' + (await page.textContent('#status')));
+    return errs;
+  }
+  if (!(await page.locator('#cp-ok').isVisible().catch(() => false))) { errs.push(label + ' ' + type + ' no confirm'); return errs; }
+  if (touch) await page.tap('#cp-ok'); else await page.click('#cp-ok');
+  try {
+    await page.waitForFunction((t) => window.__app.state.features.some((f) => f.type === t && (f.soll || f.measured)), type, { timeout: 8000 });
+  } catch (e) { errs.push(label + ' ' + type + ' not in the tree'); }
+  return errs;
+}
+
+async function builderChecks(page, touch) {
+  const errs = [];
+  const tree = await page.locator('#tree').innerText();
+  for (const name of ['Data', 'Reference', 'Features', 'Coordinate Systems']) {
+    if (!tree.includes(name)) errs.push('tree missing ' + name);
+  }
+  if (/\bObjects\b/.test(tree) || tree.includes('Datenobjekte')) errs.push('tree still has the old parent');
+  await page.evaluate(() => window.__app.startFitMode('auto', 'soll'));
+  if (await page.locator('#ctx-panel #cp-brush, #ctx-panel .cp-pick').count()) errs.push('nominal shows a brush or pick radius');
+  if (!(await page.locator('#ctx-panel.fb-compact').count())) errs.push('compact Feature Builder is not the default');
+  await page.evaluate(() => window.__app.startFitMode('auto', 'ist'));
+  if (!(await page.locator('#ctx-panel .cp-pick, #ctx-panel #cp-brush').count())) errs.push('measured has no radius control');
+  await page.evaluate(() => window.__app.startFitMode('Punkt', 'soll'));
+  const face = await page.evaluate(() => {
+    const f = window.__app.cad.faces.find((x) => x.geom);
+    return f ? { id: f.id, p: f.geom.origin } : null;
+  });
+  if (!face) { errs.push('no face for a point'); return errs; }
+  await page.evaluate((h) => window.__app.previewFromCad(h), face);
+  try {
+    await page.waitForFunction(() => window.__app.state.preview?.fit?.type === 'Punkt', null, { timeout: 8000 });
+  } catch { errs.push('point preview missing'); return errs; }
+  if (touch) await page.tap('#cp-ok'); else await page.click('#cp-ok');
+  try {
+    await page.waitForFunction(() => window.__app.state.features.some((f) => f.type === 'Punkt' && f.soll), null, { timeout: 8000 });
+  } catch { errs.push('point not in the tree'); }
+  const side = await page.evaluate(() => window.__app.state.opts.side);
+  if (side !== 'soll') errs.push('point create changed the sticky side');
+  await page.evaluate(() => window.__app.startFitMode('Ebene', 'ist'));
+  if (!(await page.locator('#ctx-panel .cp-pick, #ctx-panel #cp-brush').count())) errs.push('measured plane has no radius');
+  await page.evaluate((h) => window.__app.previewFromCad(h), face);
+  try {
+    await page.waitForFunction(() => window.__app.state.preview?.role === 'ist' && window.__app.state.preview?.fit?.type === 'Ebene', null, { timeout: 8000 });
+  } catch { errs.push('measured plane preview missing'); return errs; }
+  if (touch) await page.tap('#cp-ok'); else await page.click('#cp-ok');
+  try {
+    await page.waitForFunction(() => window.__app.state.features.some((f) => f.type === 'Ebene' && f.measured && !f.soll), null, { timeout: 8000 });
+  } catch { errs.push('measured plane not in the tree'); }
+  if ((await page.evaluate(() => window.__app.state.opts.side)) !== 'ist') errs.push('measured create inferred nominal');
+  return errs;
+}
+
 async function run(name, browserType, contextOpts, touch) {
   const browser = await browserType.launch();
   const ctx = await browser.newContext(contextOpts);
   const page = await ctx.newPage();
   const errs = await boot(page);
   errs.push(...await confirmCurve(page, touch, name + ' surface', 'surface'));
+  for (const type of ['Ebene', 'Zylinder', 'Kugel']) errs.push(...await confirmNamed(page, touch, name, type));
+  errs.push(...await builderChecks(page, touch));
   errs.push(...await confirmCurve(page, touch, name + ' auto-edge', 'edge'));
   const explicit = await page.evaluate(() => window.__app.state.features.some((f) => f.type === 'Kreis') ? 'Linie' : 'Kreis');
   errs.push(...await confirmCurve(page, touch, name + ' explicit', explicit));

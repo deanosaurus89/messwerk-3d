@@ -7,6 +7,11 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.50', date: '2026-10-29', items: [
+    'Feature Builder is tighter: Nominal or Measured on the first row, with Datum / Reference beside it. Smart Detect, Add region (offered as soon as a face is recognised), Brush and Region back sit on the next row. Islands are small chips with ✕. Advanced is one chevron. Options, or Previous layout in the panel, restores the previous Feature Builder. The choice is remembered.',
+    'The tree is flat: Data, Reference, Features and Coordinate Systems are the same level. There is no Objects folder. Each group has an eye that shows or hides everything inside it. Pin stays on Data and Reference.',
+    'CAD plane, cylinder, cone, sphere and torus — including IGES faces stored as splines — highlight as a solid surface and ✓ creates Nominal or Measured, in Auto and as an explicit type. A Point can be picked anywhere on the CAD model. Auto does not offer Freeform; that type is only the Freeform button. Nominal keeps a pointer and no brush. Measured keeps the brush and the radius.',
+  ] },
   { version: '2026.0.49', date: '2026-10-29', items: [
     'Mobile CAD nominal: a tap on an edge or curve (circle, slot, line, polyline) highlights it, shows the preview and ✓ / Create nominal, then adds a Nominal in the tree. The same confirm step works for surfaces. Auto (Smart Detect) and an explicit type both confirm. A fingertip of slack reaches the edge; the middle of a face stays a surface. A real drag still orbits. Nominal or Measured stays the choice you made.',
     'Straight and circular CAD edges stored as splines (typical of IGES) are recognised as a line or a circle, so a curve tap is no longer only a lit face with no Create button. If the ray lands on the neighbouring face, the edge still wins.',
