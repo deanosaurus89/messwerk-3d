@@ -535,7 +535,8 @@ export class Viewer {
       }
       case 'Linienzug': {
         const P = (f.pts ?? []).map((p) => new THREE.Vector3(p[0] - c.x, p[1] - c.y, p[2] - c.z)), grp = new THREE.Group();
-        if (P.length >= 2) grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(P, false, 'centripetal', 0), Math.max(8, 4 * P.length), s / (selected ? 350 : 500), 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })));
+        if (P.length === 2) grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(P[0], P[1]), 1, s / (selected ? 350 : 500), 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })));
+        else if (P.length > 2) grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(P, false, 'centripetal', 0), Math.max(8, 4 * P.length), s / (selected ? 350 : 500), 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })));
         for (const p of P) { const m = new THREE.Mesh(new THREE.SphereGeometry(s / (selected ? 250 : 350), 8, 6), new THREE.MeshBasicMaterial({ color, depthTest: !selected })); m.position.copy(p); grp.add(m); }
         obj = grp; break;
       }

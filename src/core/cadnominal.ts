@@ -123,7 +123,71 @@ function nearestLine(face: CadAnalytic, point: Vec3): { e: CadCurve | null; d: n
  * A face hit is the surface, including freeform. Polyline is only the explicit Polyline type:
  * line segments joined while they stay tangent (G1), stopping at a corner.
  * An explicit type uses that geometry when the face has it.
+ * `edgeTol < 0` means “this face, anywhere” for a line or a polyline (same as an explicit circle).
  */
+export function curveProximity(face: CadAnalytic, point: Vec3): { circle: number; line: number; slot: number } {
+  let circle = Infinity;
+  for (const e of face.edges) {
+    if (e.kind === 'circle' && e.center && e.normal && e.radius != null)
+      circle = Math.min(circle, distCircle(point, e.center, e.normal, e.radius));
+  }
+  const slot = detectSlot(face.edges);
+  const line = nearestLine(face, point);
+  return { circle, line: line.e ? line.d : Infinity, slot: slot ? slotDist(point, slot) : Infinity };
+}
+const CURVE_WANT = new Set(['Kreis', 'Langloch', 'Linie', 'Linienzug']);
+function isCurveGeom(t: string): boolean { return CURVE_WANT.has(t); }
+function wantedDist(face: CadAnalytic, point: Vec3, want: string): number {
+  const p = curveProximity(face, point);
+  if (want === 'Kreis') return p.circle;
+  if (want === 'Langloch') return p.slot;
+  return p.line;
+}
+export interface NominalFaceRef { id: number; geom: CadAnalytic | null }
+/**
+ * Nominal under a pointer. Auto prefers a curve within `edgeTol` on the hit face, then on a
+ * neighbour (the ray often lands beside the edge the finger covered). An explicit curve uses
+ * the nearest match within `edgeTol`, and otherwise the hit face’s own geometry.
+ * Surfaces and curves both return a pick the confirm step can commit.
+ */
+export function nominalAtPointer(faces: NominalFaceRef[], hitId: number, point: Vec3, want: GeomType | 'auto', edgeTol: number): { id: number; pick: NominalPick } | null {
+  const hit = faces.find((f) => f.id === hitId) ?? null;
+  if (want === 'auto') {
+    const direct = hit?.geom ? nominalFromCad(hit.geom, point, 'auto', edgeTol) : null;
+    if (direct && isCurveGeom(direct.fit.type)) return { id: hitId, pick: direct };
+    let best: { id: number; pick: NominalPick; d: number } | null = null;
+    for (const f of faces) {
+      if (!f.geom) continue;
+      const prox = curveProximity(f.geom, point);
+      const d = Math.min(prox.circle, prox.line, prox.slot);
+      if (!(d <= edgeTol)) continue;
+      const n = nominalFromCad(f.geom, point, 'auto', edgeTol);
+      if (!n || !isCurveGeom(n.fit.type)) continue;
+      if (!best || d < best.d) best = { id: f.id, pick: n, d };
+    }
+    if (best) return { id: best.id, pick: best.pick };
+    return direct && hit ? { id: hit.id, pick: direct } : null;
+  }
+  if (CURVE_WANT.has(want)) {
+    let best: { id: number; pick: NominalPick; d: number } | null = null;
+    for (const f of faces) {
+      if (!f.geom) continue;
+      const n = nominalFromCad(f.geom, point, want, edgeTol);
+      if (!n) continue;
+      const d = wantedDist(f.geom, point, want);
+      if (!(d <= edgeTol)) continue;
+      if (!best || d < best.d) best = { id: f.id, pick: n, d };
+    }
+    if (best) return { id: best.id, pick: best.pick };
+    if (hit?.geom) {
+      const n = nominalFromCad(hit.geom, point, want, -1);
+      if (n) return { id: hit.id, pick: n };
+    }
+    return null;
+  }
+  const direct = hit?.geom ? nominalFromCad(hit.geom, point, want, edgeTol) : null;
+  return direct && hit ? { id: hit.id, pick: direct } : null;
+}
 export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 'auto', edgeTol: number): NominalPick | null {
   if (want === 'Linienzug') return nominalPolyline(face, point, edgeTol);
   const circles = face.edges.filter((e) => e.kind === 'circle' && e.center && e.normal && e.radius != null);
@@ -151,10 +215,10 @@ export function nominalFromCad(face: CadAnalytic, point: Vec3, want: GeomType | 
   if (want === 'Freiformfläche') return surf ? { fit: { ...surf, type: 'Freiformfläche' }, freeform: face.type === 'NURBS' || surf.type !== 'Freiformfläche' } : null;
   if (surf && surf.type === want) return { fit: surf };
   if (want === 'Linie') {
-    const lines = face.edges.filter((e) => e.kind === 'line' && e.a && e.b);
-    let L: CadCurve | null = null, ld = Infinity;
-    for (const e of lines) { const d = distSeg(point, e.a!, e.b!); if (d < ld) { ld = d; L = e; } }
-    return L && ld <= edgeTol ? lineFit(L) : null;
+    if (!line.e) return null;
+    // Negative tolerance: the face has a line, same as an explicit circle anywhere on its face.
+    if (edgeTol < 0 || line.d <= edgeTol) return lineFit(line.e);
+    return null;
   }
   return null;
 }
@@ -163,7 +227,7 @@ export function nominalPolyline(face: CadAnalytic, point: Vec3, edgeTol: number)
   const lines = face.edges.filter((e) => e.kind === 'line' && e.a && e.b);
   let seedI = -1, bd = Infinity;
   for (let i = 0; i < lines.length; i++) { const d = distSeg(point, lines[i].a!, lines[i].b!); if (d < bd) { bd = d; seedI = i; } }
-  if (seedI < 0 || bd > edgeTol) return null;
+  if (seedI < 0 || (edgeTol >= 0 && bd > edgeTol)) return null;
   const ang = Math.cos((12 * Math.PI) / 180);
   const tol = Math.max(0.05, 0.002 * (lines[seedI].length || 1));
   const same = (p: Vec3, q: Vec3) => norm(sub(p, q)) < tol;

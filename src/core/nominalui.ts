@@ -35,6 +35,30 @@ export function featureClassWord(type: string): string {
   return c === 'curve' ? t('curve') : c === 'surface' ? t('surface') : '';
 }
 
+/** ✓ / Create nominal is available once a nominal preview or a live CAD fit exists. Surfaces and curves share this gate. */
+export function nominalCanConfirm(preview: { role?: string } | null | undefined, hoverFit: unknown): boolean {
+  return preview?.role === 'soll' || !!hoverFit;
+}
+
+export type NominalMethodKey = 'mesh' | 'con' | 'anchor' | 'cad' | 'derive';
+/**
+ * Create-menu rows. Circle, slot and line share one row. Polyline uses the same rows;
+ * polygon / construction / anchor stay off (no mesh nominal) and From CAD stays on.
+ * Derive is the scan path for a polyline.
+ */
+export function nominalMethodRow(type: string, avail: { con: boolean; anchor: boolean }): { key: NominalMethodKey; enabled: boolean }[] {
+  const poly = type === 'Linienzug';
+  const blocked = type === 'Abstand' || type === 'Winkel';
+  const row: { key: NominalMethodKey; enabled: boolean }[] = [
+    { key: 'mesh', enabled: !poly && type !== 'Winkel' },
+    { key: 'con', enabled: !poly && avail.con },
+    { key: 'anchor', enabled: !poly && avail.anchor },
+    { key: 'cad', enabled: !blocked },
+  ];
+  if (poly) row.push({ key: 'derive', enabled: true });
+  return row;
+}
+
 /** CAD nominal is pointer-only: no brush, no fit criterion, no normal angle. Measured keeps all three. */
 export function scanControls(nominal: boolean): { fitCriterion: boolean; normalAngle: boolean; brushRadius: boolean } {
   return nominal
