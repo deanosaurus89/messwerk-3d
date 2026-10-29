@@ -70,10 +70,12 @@ describe('nominal from a described face', () => {
     expect(poly.fit.pts!.length).toBe(3);
     expect(poly.fit.length).toBeCloseTo(20);
   });
-  it('explicit Kreis uses the circular edge even away from it; explicit Ebene stays a plane', () => {
-    expect(nominalFromCad(disk, [0, 0, 10], 'Kreis', 2)!.fit.type).toBe('Kreis');
+  it('explicit Kreis is the edge, not the face; explicit Ebene stays a plane', () => {
+    expect(nominalFromCad(disk, [0, 0, 10], 'Kreis', 2)).toBeNull();
+    expect(nominalFromCad(disk, [10, 0, 10.4], 'Kreis', 2)!.fit.type).toBe('Kreis');
     expect(nominalFromCad(disk, [10, 0, 10], 'Ebene', 2)!.fit.type).toBe('Ebene');
     expect(nominalFromCad(disk, [0, 0, 10], 'Zylinder', 2)).toBeNull();
+    expect(nominalFromCad(disk, [1, 1, 10], 'Punkt', 2)!.fit.type).toBe('Punkt');
   });
   it('slot contour near the edge, plane in the middle of the floor', () => {
     const edges: CadCurve[] = [
@@ -87,7 +89,8 @@ describe('nominal from a described face', () => {
     expect(detectSlot(edges)?.width).toBeCloseTo(10);
     expect(nominalFromCad(face, [10, 5, 0.2], 'auto', 2)!.fit.type).toBe('Langloch');
     expect(nominalFromCad(face, [0, 0, 0], 'auto', 2)!.fit.type).toBe('Ebene');
-    const typed = nominalFromCad(face, [0, 0, 0], 'Langloch', 2)!;
+    expect(nominalFromCad(face, [0, 0, 0], 'Langloch', 2)).toBeNull();
+    const typed = nominalFromCad(face, [10, 5, 0.2], 'Langloch', 2)!;
     expect(typed.fit.type).toBe('Langloch');
     expect(typed.fit.length).toBeCloseTo(30);
     expect(typed.fit.width).toBeCloseTo(10);

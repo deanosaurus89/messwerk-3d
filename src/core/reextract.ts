@@ -15,7 +15,7 @@ import { Vec3, basis, cross, dot, norm, scale, sub, unit } from './linalg';
 import { fillOuterBoundary, insetPlane, rasterTris } from './fillplane';
 import { fitInPlane } from './aux';
 import { FrozenBoundary, frozenCells, frozenTester } from './frozen';
-import { surfaceAxial } from './trim';
+import { inNominalArc, surfaceAxial } from './trim';
 
 export interface ReexParams {
   /** search distance ± [mm]: normal thickness of the search region (and band for All inside boundary) */
@@ -161,7 +161,7 @@ export function inRegion(R: SearchRegion, q: Vec3): boolean {
     case 'torus': return Math.abs(signedDistance(R.fit, q)) <= R.d;
     case 'band': { const f = R.fit, a = unit(f.normal), w = sub(q, f.center), t = dot(w, a); if (t < R.t0 || t > R.t1) return false;
       const r = sub(w, scale(a, t));
-      if (R.type === 'Kreis') return Math.abs(norm(r) - f.radius!) <= R.d;
+      if (R.type === 'Kreis') return Math.abs(norm(r) - f.radius!) <= R.d && inNominalArc(f, q);
       const dx = unit(f.direction!), y = unit(cross(a, dx));
       return Math.abs(stadiumDist(dot(r, dx), dot(r, y), f.length! / 2 - f.radius!, f.radius!)) <= R.d; }
     case 'tube': { const w = sub(q, R.c), t = dot(w, R.a); return t >= R.t0 && t <= R.t1 && norm(sub(w, scale(R.a, t))) <= R.d; }

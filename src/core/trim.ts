@@ -41,6 +41,30 @@ function stadium(c: Vec3, dx: Vec3, y: Vec3, hl: number, r: number) {
     let a = Math.atan2(yy, x + hl); if (a < Math.PI / 2) a += 2 * Math.PI; return 4 * hl + Math.PI * r + (a - Math.PI / 2) * r; };
   return { P, at, param };
 }
+/**
+ * Nominal circle trimmed to a CAD arc. True for a full circle (no arc stored) and for a
+ * point whose angle about the axis lies on the stored sweep. Measured circles have no arc.
+ */
+export function inNominalArc(f: FitResult, q: Vec3, pad = 0.03): boolean {
+  if (f.type !== 'Kreis' || f.arc0 == null || f.arcSweep == null || f.arcSweep >= Math.PI * 2 - 0.05) return true;
+  const n = unit(f.normal), [u, v] = basis(n), w = sub(q, f.center);
+  const a = Math.atan2(dot(w, v), dot(w, u));
+  const T = Math.PI * 2;
+  let d = a - f.arc0; d = ((d % T) + T) % T;
+  return d <= f.arcSweep + pad || d >= T - pad;
+}
+/** Polyline of a nominal arc, relative to the centre, or null for a full circle. */
+export function nominalArcLocal(f: FitResult): Vec3[] | null {
+  if (f.type !== 'Kreis' || f.radius == null || f.arc0 == null || f.arcSweep == null || f.arcSweep >= Math.PI * 2 - 0.05) return null;
+  const n = unit(f.normal), [u, v] = basis(n);
+  const N = Math.max(8, Math.ceil(72 * f.arcSweep / (Math.PI * 2)));
+  const out: Vec3[] = [];
+  for (let i = 0; i <= N; i++) {
+    const a = f.arc0 + (f.arcSweep * i) / N;
+    out.push(add(scale(u, f.radius * Math.cos(a)), scale(v, f.radius * Math.sin(a))));
+  }
+  return out;
+}
 /** Covered part of a curve feature as line segments, or null when the points cover the whole closed curve
  *  (largest gap < minGapDeg of the perimeter). */
 export function trimmedCurve(f: FitResult, pts: Vec3[], minGapDeg = 15): Float32Array | null {

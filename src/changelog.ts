@@ -7,6 +7,13 @@ export const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { version: '
 export const versionText = () => `${t('Version')} ${BUILD.version} · ${BUILD.date}`;
 /** Newest first. Keep entries short; shown after a deploy and under Help › What's new. */
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  { version: '2026.0.54', date: '2026-10-29', items: [
+    'Islands opens and stays open. A chip selects that island; ✕ dismisses it. Neither click closes the list.',
+    'A measured point is placed with a click or the brush. Smart Detect does not grow a plane or a cylinder under it. A nominal point is the spot under the cursor, with the face normal. The face is not highlighted.',
+    'A nominal plane is trimmed to the CAD wires of the face. An untrimmed surface rectangle is dropped on its own; the real outline and the islands stay. Several coplanar regions are one plane.',
+    'A half cylinder, cone or sphere stays a half until Add region brings the other half. The two regions become one analytic feature. When they close the wall, the feature is the full surface.',
+    'Circle, slot, line and polyline on a nominal look at edges only. The face under the cursor is not selected and is not highlighted. An auxiliary plane does not drive that pick. A nominal circle follows the CAD arc, not the full circle, so a later extraction stays in that sector.',
+  ] },
   { version: '2026.0.53', date: '2026-10-29', items: [
     'The create dialog is a bit rounder: cards for Nominal or Measured, Create or Construct, and the tools, on the desktop dialog and on the phone sheet. Previous layout is unchanged.',
     'After the green check the Feature Builder stays open. The pick and the preview reset so the next feature can be created; Nominal or Measured and Create or Construct stay until you cancel.',

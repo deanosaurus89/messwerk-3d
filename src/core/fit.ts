@@ -19,6 +19,11 @@ export interface FitResult {
   apex?: Vec3;
   /** polyline (Linienzug): vertices in order (world) */
   pts?: Vec3[];
+  /** Nominal circle trimmed to a CAD edge. Start angle about `normal` (basis) and sweep in (0, 2π]. Omitted = full circle. */
+  arc0?: number;
+  arcSweep?: number;
+  /** Add region closed a half shell (cylinder, cone, sphere) into the full analytic solid. */
+  closedSolid?: boolean;
   rms: number;           // Standardabweichung der orth. Abstände
   form: number;          // Formabweichung max-min
   maxPos: number;        // größte positive Abweichung (außerhalb Material bzw. vom Mittel weg)

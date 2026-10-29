@@ -3,7 +3,7 @@
 // Reine Funktionen auf dem OC-Modul `oc` – laufen im Worker (Browser) und in vitest (Node).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { CadAnalytic, CadCurve } from './analytic';
-import { classifyCurvePoints } from './curvetype';
+import { circleArc, classifyCurvePoints } from './curvetype';
 import { defaultDisplayDeflection, type TessTol } from './tesspolicy';
 type OC = any;
 export type V3 = [number, number, number];
@@ -69,7 +69,10 @@ function faceCurves(oc: OC, f: any): CadCurve[] {
       const ty = c.GetType(); const length = edgeLen(oc, e);
       if (ty === CT.GeomAbs_Circle) {
         const circ = c.Circle(); const ax = circ.Axis();
-        out.push({ kind: 'circle', mid, length, center: p3(circ.Location()), normal: d3(ax.Direction()), radius: circ.Radius() });
+        const center = p3(circ.Location()), normal = d3(ax.Direction()), radius = circ.Radius();
+        const start = p3(curvePoint(c, oc, u0)), end = p3(curvePoint(c, oc, u1));
+        const arc = circleArc(center, normal, start, mid, end, length, radius);
+        out.push({ kind: 'circle', mid, length, center, normal, radius, ...arc });
       } else if (ty === CT.GeomAbs_Line) {
         out.push({ kind: 'line', mid, length, a: p3(curvePoint(c, oc, u0)), b: p3(curvePoint(c, oc, u1)) });
       } else {

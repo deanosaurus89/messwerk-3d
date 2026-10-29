@@ -461,6 +461,11 @@ input.ted:disabled { background:#f1f3f5; }
 #dialog .cp-ok { background:#2e9d3a; color:#fff; border-color:#2e9d3a; min-width:48px; font-size:18px; }
 #dialog .cp-isl-drawer { border-top:1px solid #e3e8ee; }
 #dialog .cp-isl-drawer > summary { cursor:pointer; font-weight:600; }
+#dialog .cp-isl-drawer[open] > .cp-isl-b { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.isl-pair { display:inline-flex; align-items:stretch; }
+.isl-pair > .isl-x { min-width:28px; min-height:28px; padding:0 6px; border:1px solid #ff8c1a; background:#fff; color:#9a4d00; border-radius:0 8px 8px 0; margin:0; }
+.isl-pair > .isl-chip { border-radius:8px 0 0 8px; }
+.isl-pair > .isl-chip.drop { text-decoration:line-through; opacity:.55; }
 #dialog .cp-adv > summary { cursor:pointer; font-weight:600; }
 #dialog .cp-adv > summary::before { content:'▸ '; }
 #dialog .cp-adv[open] > summary::before { content:'▾ '; }
@@ -719,5 +724,11 @@ body.ctx-on #view-gear { z-index:40; }
 #dialog.dlg-modern .cp-ok { border-radius:12px; min-height:40px; min-width:52px; }
 #dialog.dlg-modern .fb-slim .cp-layout { border-radius:10px; }
 @media (max-width:700px) {
-  body.fb-dialog #dialog-pane { border-radius:22px 0 0 22px; box-shadow:-10px 0 28px rgba(16, 32, 48, .14); }
+  /* Feature Builder stays a full-height side sheet so Islands and Place stay on screen. */
+  body.fb-dialog #dialog-pane {
+    top:36px; left:auto; right:0; bottom:0; width:min(88vw, 320px); height:auto; max-height:none;
+    transform:translateX(105%); border-radius:22px 0 0 22px; border-top:none; border-left:1px solid var(--line);
+    box-shadow:-10px 0 28px rgba(16, 32, 48, .14);
+  }
+  body.fb-dialog.show-dialog #dialog-pane { transform:none; }
 }

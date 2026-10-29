@@ -119,25 +119,105 @@ function loopSpan(loop: Vec3[]): number {
   return Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
 }
 
+function cloudAabb(pos: ArrayLike<number>): { mn: number[]; mx: number[]; span: number } {
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  const n = Math.floor(pos.length / 3);
+  const step = Math.max(1, Math.floor(n / 5000));
+  for (let i = 0; i < n; i += step) for (let k = 0; k < 3; k++) {
+    const v = pos[3 * i + k];
+    if (v < mn[k]) mn[k] = v;
+    if (v > mx[k]) mx[k] = v;
+  }
+  return { mn, mx, span: Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) };
+}
+
+/**
+ * A wire is the untrimmed surface rectangle when it runs well past the display
+ * mesh. A real trim curve stays within a few millimetres of that mesh.
+ * Only that wire is dropped — a smaller trim loop on the same face is kept.
+ */
+export function wireOversized(loop: Vec3[], meshPos: ArrayLike<number>): boolean {
+  const w = loopSpan(loop), m = cloudAabb(meshPos);
+  if (!(m.span > 1) || loop.length < 3) return false;
+  const pad = Math.max(3, 0.08 * m.span);
+  if (w > m.span * 1.45 + pad) return true;
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (const p of loop) for (let k = 0; k < 3; k++) { if (p[k] < mn[k]) mn[k] = p[k]; if (p[k] > mx[k]) mx[k] = p[k]; }
+  let far = 0;
+  for (let k = 0; k < 3; k++) {
+    const extra = Math.max(0, m.mn[k] - pad - mn[k]) + Math.max(0, mx[k] - m.mx[k] - pad);
+    if (extra > pad) far++;
+  }
+  return far >= 2;
+}
+
 /**
  * Wires used to trim a face.
  * Exact CAD curves (outer loop, then islands) win when they match the face.
- * A 3D curve that is the untrimmed surface rectangle is much larger than the
- * display mesh; that wire is not the face boundary, so the mesh outline is used
- * instead of drawing an oversized patch.
+ * An untrimmed surface rectangle is dropped on its own. The trim wires that
+ * sit on the face stay, so a plane is cut to those curves and not to the mesh.
+ * The display-mesh outline is only the fallback when every wire was untrimmed.
  */
 export function wiresForFace(wires: Vec3[][] | null | undefined, meshPos?: ArrayLike<number> | null, meshIdx?: ArrayLike<number> | null): Vec3[][] {
   const clean = trimLoops(wires);
   if (!meshPos || !meshIdx || meshIdx.length < 3 || meshPos.length < 9) return clean;
   const mesh = loopsFromMesh(meshPos, meshIdx).filter((L) => L.length >= 3);
-  if (!mesh.length) return clean;
   if (!clean.length) return mesh;
-  if (loopSpan(clean[0]) > loopSpan(mesh[0]) * 1.2 + 1) return mesh;
-  return clean;
+  const kept = clean.filter((L) => !wireOversized(L, meshPos));
+  if (kept.length) return kept;
+  return mesh.length ? mesh : clean;
+}
+
+/** Largest distance from a wire vertex to the patch boundary. */
+export function wireToEdgeGap(loops: Vec3[][], edges: Float32Array): number {
+  let worst = 0, n = 0;
+  for (const L of loops) for (const p of L) {
+    let best = Infinity;
+    for (let i = 0; i < edges.length; i += 6) {
+      const a: Vec3 = [edges[i], edges[i + 1], edges[i + 2]];
+      const b: Vec3 = [edges[i + 3], edges[i + 4], edges[i + 5]];
+      const ab = sub(b, a), ap = sub(p, a), L2 = dot(ab, ab) || 1;
+      const t = Math.max(0, Math.min(1, dot(ap, ab) / L2));
+      best = Math.min(best, norm(sub(ap, scale(ab, t))));
+    }
+    if (best < Infinity) { worst = Math.max(worst, best); n++; }
+  }
+  return n ? worst : Infinity;
 }
 
 type Uv = [number, number];
 const cross2 = (a: Uv, b: Uv, c: Uv) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+/** Closed-loop Douglas–Peucker. Sag is measured on the real 3D curve, so a bowed NURBS trim is not flattened onto the plane. */
+function dpOpen(pts: Vec3[], tol: number): Vec3[] {
+  if (pts.length < 3) return pts.map((p) => [p[0], p[1], p[2]]);
+  const a = pts[0], b = pts[pts.length - 1], ab = sub(b, a);
+  const L2 = dot(ab, ab) || 1;
+  let im = 1, dm = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const ap = sub(pts[i], a);
+    const t = Math.max(0, Math.min(1, dot(ap, ab) / L2));
+    const d = norm(sub(ap, scale(ab, t)));
+    if (d > dm) { dm = d; im = i; }
+  }
+  if (dm <= tol) return [[a[0], a[1], a[2]], [b[0], b[1], b[2]]];
+  const L = dpOpen(pts.slice(0, im + 1), tol);
+  const R = dpOpen(pts.slice(im), tol);
+  return [...L.slice(0, -1), ...R];
+}
+function dpClosed(loop: Vec3[], tol: number): Vec3[] {
+  if (loop.length < 4) return loop.map((p) => [p[0], p[1], p[2]]);
+  const a = loop[0];
+  let im = 1, dm = 0;
+  for (let i = 1; i < loop.length; i++) {
+    const d = norm(sub(loop[i], a));
+    if (d > dm) { dm = d; im = i; }
+  }
+  if (im < 1 || im >= loop.length - 1) return dpOpen(loop, tol);
+  const A = dpOpen(loop.slice(0, im + 1), tol);
+  const B = dpOpen([...loop.slice(im), a], tol);
+  const out = [...A.slice(0, -1), ...B.slice(0, -1)];
+  return out.length >= 3 ? out : loop.map((p) => [p[0], p[1], p[2]]);
+}
 function dedupeUv(loop: Uv[]): Uv[] {
   const out: Uv[] = [];
   for (const p of loop) {
@@ -218,38 +298,88 @@ function bridgeHoles(outer: Uv[], holes: Uv[][]): Uv[] {
   }
   return poly;
 }
-function earClip(poly: Uv[]): Uv[][] {
-  const pts = poly.map((p) => [p[0], p[1]] as Uv);
-  const tris: Uv[][] = [];
-  const ccw = signedArea(pts) >= 0;
-  let guard = pts.length * pts.length + 4;
-  while (pts.length > 3 && guard-- > 0) {
-    let cut = false;
-    for (let i = 0; i < pts.length; i++) {
-      const n = pts.length;
-      const prev = pts[(i + n - 1) % n], cur = pts[i], next = pts[(i + 1) % n];
-      const cr = cross2(prev, cur, next);
-      if (Math.abs(cr) <= 1e-12) {
-        const dotp = (cur[0] - prev[0]) * (next[0] - prev[0]) + (cur[1] - prev[1]) * (next[1] - prev[1]);
-        const len2 = (next[0] - prev[0]) ** 2 + (next[1] - prev[1]) ** 2;
-        if (dotp >= -1e-8 && dotp <= len2 + 1e-8) { pts.splice(i, 1); cut = true; break; }
-        continue;
-      }
-      if (ccw ? cr <= 1e-12 : cr >= -1e-12) continue;
-      let ear = true;
-      for (let j = 0; j < n; j++) {
-        if (j === i || j === (i + n - 1) % n || j === (i + 1) % n) continue;
-        if (nearUv(pts[j], prev) || nearUv(pts[j], cur) || nearUv(pts[j], next)) continue;
-        if (pointInTri(prev, cur, next, pts[j]) || onSeg(prev, next, pts[j])) { ear = false; break; }
-      }
-      if (!ear) continue;
-      tris.push([[prev[0], prev[1]], [cur[0], cur[1]], [next[0], next[1]]]);
-      pts.splice(i, 1); cut = true; break;
-    }
-    if (!cut) break;
+function visibleSplit(poly: Uv[]): [number, number] | null {
+  const n = poly.length;
+  let best: [number, number] | null = null, bestD = Infinity;
+  const step = Math.max(1, Math.floor(n / 80));
+  for (let i = 0; i < n; i += step) for (let j = i + 2; j < n; j += step) {
+    if (i === 0 && j >= n - 1) continue;
+    if (!visible(poly, i, poly[j]) || !visible(poly, j, poly[i])) continue;
+    const d = Math.hypot(poly[i][0] - poly[j][0], poly[i][1] - poly[j][1]);
+    if (d < bestD) { bestD = d; best = [i, j]; }
   }
-  if (pts.length === 3) tris.push([[pts[0][0], pts[0][1]], [pts[1][0], pts[1][1]], [pts[2][0], pts[2][1]]]);
+  return best;
+}
+function earClip(poly: Uv[]): Uv[][] {
+  const tris: Uv[][] = [];
+  const rec = (src: Uv[], depth: number) => {
+    const pts = src.map((p) => [p[0], p[1]] as Uv);
+    if (pts.length < 3 || depth > 24) return;
+    const ccw = signedArea(pts) >= 0;
+    let guard = pts.length * pts.length + 4;
+    while (pts.length > 3 && guard-- > 0) {
+      let cut = false;
+      for (let i = 0; i < pts.length; i++) {
+        const n = pts.length;
+        const prev = pts[(i + n - 1) % n], cur = pts[i], next = pts[(i + 1) % n];
+        const cr = cross2(prev, cur, next);
+        if (Math.abs(cr) <= 1e-9) {
+          const dotp = (cur[0] - prev[0]) * (next[0] - prev[0]) + (cur[1] - prev[1]) * (next[1] - prev[1]);
+          const len2 = (next[0] - prev[0]) ** 2 + (next[1] - prev[1]) ** 2;
+          if (dotp >= -1e-6 && dotp <= len2 + 1e-6) { pts.splice(i, 1); cut = true; break; }
+          continue;
+        }
+        if (ccw ? cr <= 1e-9 : cr >= -1e-9) continue;
+        let ear = true;
+        for (let j = 0; j < n; j++) {
+          if (j === i || j === (i + n - 1) % n || j === (i + 1) % n) continue;
+          if (nearUv(pts[j], prev) || nearUv(pts[j], cur) || nearUv(pts[j], next)) continue;
+          if (pointInTri(prev, cur, next, pts[j]) || onSeg(prev, next, pts[j])) { ear = false; break; }
+        }
+        if (!ear) continue;
+        tris.push([[prev[0], prev[1]], [cur[0], cur[1]], [next[0], next[1]]]);
+        pts.splice(i, 1); cut = true; break;
+      }
+      if (!cut) break;
+    }
+    if (pts.length === 3) { tris.push([[pts[0][0], pts[0][1]], [pts[1][0], pts[1][1]], [pts[2][0], pts[2][1]]]); return; }
+    if (pts.length < 4) return;
+    const sp = visibleSplit(pts);
+    if (!sp) return;
+    const [i, j] = sp;
+    const A = pts.slice(i, j + 1);
+    const B = pts.slice(j).concat(pts.slice(0, i + 1));
+    if (A.length < 3 || B.length < 3 || A.length >= pts.length || B.length >= pts.length) return;
+    rec(A, depth + 1);
+    rec(B, depth + 1);
+  };
+  rec(poly, 0);
   return tris;
+}
+/** Largest loop that contains another is the outer; a loop inside it is an island. Disjoint loops are separate outers. */
+function groupLoops(loops: Uv[][]): { outer: Uv[]; holes: Uv[][] }[] {
+  const area = loops.map((L) => Math.abs(signedArea(L)));
+  const order = loops.map((_, i) => i).sort((a, b) => area[b] - area[a]);
+  const groups: { outer: Uv[]; holes: Uv[][] }[] = [];
+  const cent = (L: Uv[]): Uv => {
+    let x = 0, y = 0;
+    for (const p of L) { x += p[0]; y += p[1]; }
+    return [x / L.length, y / L.length];
+  };
+  for (const i of order) {
+    const L = loops[i];
+    if (L.length < 3 || area[i] < 1e-8) continue;
+    const c = cent(L);
+    let host = -1, hostA = Infinity;
+    for (let g = 0; g < groups.length; g++) {
+      const A = Math.abs(signedArea(groups[g].outer));
+      if (A <= area[i] * 1.02) continue;
+      if (inside(groups[g].outer, c[0], c[1]) && A < hostA) { host = g; hostA = A; }
+    }
+    if (host >= 0) groups[host].holes.push(orient(L, false));
+    else groups.push({ outer: orient(L, true), holes: [] });
+  }
+  return groups;
 }
 function signedArea(p: Uv[]): number {
   let a = 0;
@@ -322,21 +452,53 @@ export function facePatch(fit: FitResult, loops: Vec3[][], div = 24): { tri: Flo
   const clean = loops.filter((L) => L.length >= 3);
   if (!clean.length) return null;
   const chord = Math.max(0.05, 2 / Math.max(4, div));
-  const uv = clean.map((L) => thinUv(fit, unwrap(fit, L), chord));
-  if (uv[0].length < 3) return null;
-  const outer = orient(uv[0], true);
-  const holes = uv.slice(1).filter((h) => h.length >= 3).map((h) => orient(h, false));
-  const raw = earClip(bridgeHoles(outer, holes)).filter((tr) => {
-    const c: Uv = [(tr[0][0] + tr[1][0] + tr[2][0]) / 3, (tr[0][1] + tr[1][1] + tr[2][1]) / 3];
-    return inside(outer, c[0], c[1]) && holes.every((h) => !inside(h, c[0], c[1]));
-  });
+  const plane = fit.type === 'Ebene';
+  const nrm = unit(fit.normal);
+  const bow = plane ? Math.max(...clean.map((L) => L.reduce((m, p) => Math.max(m, Math.abs(dot(sub(p, fit.center), nrm))), 0))) : 0;
+  // A true plane wire sits on the plane (projected). A NURBS face that only fits as a plane can bow off it;
+  // that trim is drawn on the curve, not flattened.
+  const followCurve = plane && bow > 0.35;
+  const clipOf = (loops: Vec3[][]): Uv[][] => {
+    const uv = loops.map((L) => (followCurve ? dedupeUv(L.map((p) => paramOf(fit, p))) : thinUv(fit, unwrap(fit, L), chord))).filter((L) => L.length >= 3);
+    const groups = groupLoops(uv);
+    const raw: Uv[][] = [];
+    for (const g of groups) {
+      raw.push(...earClip(bridgeHoles(g.outer, g.holes)).filter((tr) => {
+        const c: Uv = [(tr[0][0] + tr[1][0] + tr[2][0]) / 3, (tr[0][1] + tr[1][1] + tr[2][1]) / 3];
+        return inside(g.outer, c[0], c[1]) && g.holes.every((h) => !inside(h, c[0], c[1]));
+      }));
+    }
+    return raw;
+  };
+  // A plane keeps the 3D trim curve (a NURBS face stored as a spline can bow off the fitted plane).
+  let src = followCurve ? clean.map((L) => dpClosed(L, 0.12)) : clean;
+  let raw = clipOf(src);
+  if (followCurve) {
+    const n = src.reduce((s, L) => s + L.length, 0);
+    if (raw.length < Math.max(4, n / 6)) { src = clean.map((L) => dpClosed(L, 0.45)); raw = clipOf(src); }
+  }
   if (!raw.length) return null;
-  let mesh = refineSurface(fit, raw, fit.type === 'Ebene' ? Infinity : chord);
+  let mesh = refineSurface(fit, raw, plane ? Infinity : chord);
   if (fit.type !== 'Ebene') {
-    const limit = loopSpan(clean[0]) * 1.05 + 1;
+    const limit = Math.max(...clean.map(loopSpan)) * 1.05 + 1;
     const drawn = loopSpan(mesh.p);
     // Refinement walked off the face (a parameter seam). The wire triangulation stays inside the boundary.
     if (drawn > limit) mesh = refineSurface(fit, raw, Infinity);
+  }
+  if (followCurve) {
+    const nodes = src.flatMap((L) => L.map((p) => ({ uv: paramOf(fit, p), p })));
+    mesh = {
+      ...mesh,
+      p: mesh.p.map((q) => {
+        const [s, t] = paramOf(fit, q);
+        let best = q, bd = 2e-3;
+        for (const n of nodes) {
+          const d = Math.hypot(n.uv[0] - s, n.uv[1] - t);
+          if (d < bd) { bd = d; best = n.p; }
+        }
+        return bd < 2e-3 ? best : q;
+      }),
+    };
   }
   const tri: number[] = [];
   for (let i = 0; i < mesh.tris.length; i += 3) {
@@ -354,4 +516,12 @@ export function facePatch(fit: FitResult, loops: Vec3[][], div = 24): { tri: Flo
   const edges: number[] = [];
   for (const [a, b, n] of cnt.values()) if (n === 1) edges.push(...mesh.p[a], ...mesh.p[b]);
   return { tri: new Float32Array(tri), edges: new Float32Array(edges) };
+}
+
+/** Islands (holes) inside an outer wire. A second coplanar region is an outer, not an island. */
+export function interiorIslands(fit: FitResult, loops: Vec3[][]): number {
+  const clean = loops.filter((L) => L.length >= 3);
+  if (clean.length < 2) return 0;
+  const uv = clean.map((L) => thinUv(fit, unwrap(fit, L), 0.2)).filter((L) => L.length >= 3);
+  return groupLoops(uv).reduce((n, g) => n + g.holes.length, 0);
 }

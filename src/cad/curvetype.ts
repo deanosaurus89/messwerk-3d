@@ -95,5 +95,26 @@ export function classifyCurvePoints(pts: V3[]): CadCurve | null {
   if (!circ) return null;
   if (circ.radius < 0.2 || circ.radius > 1e5 || circ.radius > length * 80) return null;
   if (circ.rms > Math.max(0.15, 0.02 * circ.radius)) return null;
-  return { kind: 'circle', mid, length, center: circ.center, normal: circ.normal, radius: circ.radius };
+  const arc = circleArc(circ.center, circ.normal, P[0], P[P.length >> 1], P[P.length - 1], length, circ.radius);
+  return { kind: 'circle', mid, length, center: circ.center, normal: circ.normal, radius: circ.radius, ...arc };
+}
+
+/**
+ * Arc of a circular edge. A full turn (length ≈ 2πr, or the midpoint lies on the long way
+ * only when the ends meet) omits the angles so the nominal stays a full circle.
+ * Sweep is the short sector that contains the midpoint.
+ */
+export function circleArc(center: Vec3, normal: Vec3, start: Vec3, mid: Vec3, end: Vec3, length: number, radius: number): { ang0: number; sweep: number } | undefined {
+  if (!(radius > 0)) return undefined;
+  if (length >= Math.PI * 2 * radius * 0.985) return undefined;
+  const [u, v] = basis(unit(normal));
+  const ang = (p: Vec3) => Math.atan2(dot(sub(p, center), v), dot(sub(p, center), u));
+  const wrap = (d: number) => { const T = Math.PI * 2; d %= T; return d < 0 ? d + T : d; };
+  const a0 = ang(start), am = ang(mid), a1 = ang(end);
+  const ccw = wrap(a1 - a0);
+  const midIn = wrap(am - a0) <= ccw + 1e-3;
+  const sweep = midIn ? ccw : Math.PI * 2 - ccw;
+  const ang0 = midIn ? a0 : a1;
+  if (!(sweep > 1e-3) || sweep >= Math.PI * 2 - 0.05) return undefined;
+  return { ang0, sweep };
 }
