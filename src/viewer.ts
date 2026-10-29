@@ -462,8 +462,9 @@ export class Viewer {
   showCursor(hit: Hit | null, radius: number, highlight = false) {
     if (this.brushHi) { this.scene.remove(this.brushHi); this.brushHi.geometry.dispose(); this.brushHi = null; }
     if (!hit) { this.cursor.visible = false; return; }
+    const pointer = radius <= 0;
     const bt = (this.model?.geometry as any)?.boundsTree;
-    if (highlight && bt) {
+    if (highlight && !pointer && bt) {
       const c = new THREE.Vector3(...hit.point), n = new THREE.Vector3(...hit.normal), sph = new THREE.Sphere(c, radius); const out: number[] = [];
       const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fnrm = new THREE.Vector3(), cam = this.camera.position.clone();
       bt.shapecast({ intersectsBounds: (box: THREE.Box3) => box.intersectsSphere(sph),
@@ -478,7 +479,7 @@ export class Viewer {
     }
     this.cursor.visible = true;
     this.cursor.position.set(...hit.point);
-    this.cursor.scale.setScalar(radius);
+    this.cursor.scale.setScalar(pointer ? Math.max(this.radius * 0.012, 0.45) : radius);
     this.cursor.lookAt(new THREE.Vector3(...hit.point).add(new THREE.Vector3(...hit.normal)));
   }
 
@@ -495,9 +496,11 @@ export class Viewer {
 
   clearPrims() { this.texts = []; for (const c of [...this.prims.children]) { this.prims.remove(c); (c as any).geometry?.dispose?.(); } }
 
-  /** Gefittete Geometrie als Drahtmodell/halbtransparent zeichnen. */
-  addPrimitive(f: FitResult, color: number, selected: boolean, opacity?: number) {
-    const mat = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: opacity ?? (selected ? 0.95 : 0.55), depthTest: !selected });
+  /** Fitted geometry. `solid` draws an opaque surface (CAD face highlight), otherwise a wireframe. */
+  addPrimitive(f: FitResult, color: number, selected: boolean, opacity?: number, solid = false) {
+    const mat = solid
+      ? new THREE.MeshBasicMaterial({ color, transparent: true, opacity: opacity ?? 0.86, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+      : new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: opacity ?? (selected ? 0.95 : 0.55), depthTest: !selected });
     const lineMat = new THREE.LineBasicMaterial({ color, depthTest: !selected });
     const c = new THREE.Vector3(...f.center), n = new THREE.Vector3(...f.normal).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
@@ -506,8 +509,8 @@ export class Viewer {
     const s = this.radius;
     switch (f.type) {
       case 'Ebene': {
-        const size = Math.max(s * 0.25, 5);
-        obj = new THREE.Mesh(new THREE.PlaneGeometry(size, size, 6, 6), mat); obj.quaternion.copy(qz); break;
+        const size = solid ? Math.max(s * 0.7, (f as FitResult & { span?: number }).span ?? 0, 12) : Math.max(s * 0.25, 5);
+        obj = new THREE.Mesh(new THREE.PlaneGeometry(size, size, solid ? 1 : 6, solid ? 1 : 6), mat); obj.quaternion.copy(qz); break;
       }
       case 'Zylinder': {
         obj = new THREE.Mesh(new THREE.CylinderGeometry(f.radius!, f.radius!, f.length || f.radius!, 36, 4, true), mat); obj.quaternion.copy(q); break;

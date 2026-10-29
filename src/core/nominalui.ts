@@ -59,6 +59,44 @@ export function nominalMethodRow(type: string, avail: { con: boolean; anchor: bo
   return row;
 }
 
+/** Sticky Nominal / Measured. The presence of a data object does not change it. */
+export function stickySide(choice: 'soll' | 'ist', _hasDataObject = false): 'soll' | 'ist' {
+  return choice;
+}
+
+export type FbLayout = 'compact' | 'classic';
+/** Approved compact Feature Builder is the default. 'classic' is the previous panel. */
+export function featureBuilderLayout(stored: string | null | undefined): FbLayout {
+  return stored === 'classic' ? 'classic' : 'compact';
+}
+
+/** Add Region is offered as soon as Smart Detect has a preview and the feature is not confirmed yet. */
+export function addRegionSuggested(hasPreview: boolean, multi: boolean): boolean {
+  return hasPreview && !multi;
+}
+
+/**
+ * Bottom line of the compact Feature Builder: role word, type icon only, form, standard deviation.
+ * The geometry name (Plane, …) is not written beside the role.
+ */
+export function compactStatHtml(role: 'soll' | 'ist', roleLabel: string, icon: string, formLabel: string, form: string, stdLabel: string, std: string): string {
+  return `<span class="cp-side ${role}" data-side="${role}" data-label="${roleLabel}">${roleLabel}</span>`
+    + `<span class="cp-type">${icon}</span>`
+    + `<span class="cp-kv" data-kv="form"><small>${formLabel}</small><b>${form}</b></span>`
+    + `<span class="cp-kv" data-kv="std"><small>${stdLabel}</small><b>${std}</b></span>`;
+}
+
+/** Top-level tree. No parent group. Pin only Data and Reference. Every group has an eye. */
+export const TREE_GROUPS: { id: 'data' | 'ref' | 'feat' | 'cs'; name: string; pin: boolean; eye: true }[] = [
+  { id: 'data', name: 'Data', pin: true, eye: true },
+  { id: 'ref', name: 'Reference', pin: true, eye: true },
+  { id: 'feat', name: 'Features', pin: false, eye: true },
+  { id: 'cs', name: 'Coordinate Systems', pin: false, eye: true },
+];
+
+/** Selected CAD surface: opaque enough to read as a face, not a faint wireframe. */
+export const SURFACE_HIGHLIGHT = { color: 0xff6a00, opacity: 0.86, emissive: 0xe65100 };
+
 /** CAD nominal is pointer-only: no brush, no fit criterion, no normal angle. Measured keeps all three. */
 export function scanControls(nominal: boolean): { fitCriterion: boolean; normalAngle: boolean; brushRadius: boolean } {
   return nominal

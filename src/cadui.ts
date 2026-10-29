@@ -7,6 +7,7 @@ import type { CadReq } from './cadworker';
 import type { CadAnalytic } from './cad/analytic';
 import type { TrimOp, V3, FaceType, Tess } from './cad/occcore';
 import { cadPickSamples } from './ui/cadpick';
+import { SURFACE_HIGHLIGHT } from './core/nominalui';
 
 class CadEngine {
   private w: Worker | null = null; private seq = 0;
@@ -102,8 +103,21 @@ export function cadPaint() {
   for (const f of cad.faces) {
     const m = meshes[f.id]; if (!m) continue; const mat = m.material as THREE.MeshStandardMaterial;
     m.visible = f.visible; const sel = cad.sel.has(f.id), hov = cad.hover === f.id;
-    mat.color.setHex(sel ? 0xffb300 : TYPE_COLOR[f.type]); if (hov && !sel) mat.color.offsetHSL(0, 0, 0.12); mat.emissive.setHex(sel ? 0x3a2600 : hov ? 0x202020 : 0);
-    const tr = cadOpacity < 1; if (mat.transparent !== tr || mat.opacity !== cadOpacity) { mat.transparent = tr; mat.opacity = cadOpacity; mat.depthWrite = !tr; mat.needsUpdate = true; }
+    const edge = m.children.find((c) => c.userData.cadEdge) as THREE.LineSegments | undefined;
+    if (hov && !sel) {
+      mat.color.setHex(SURFACE_HIGHLIGHT.color);
+      mat.emissive.setHex(SURFACE_HIGHLIGHT.emissive);
+      mat.emissiveIntensity = 0.95;
+      const op = Math.max(cadOpacity, SURFACE_HIGHLIGHT.opacity);
+      if (mat.transparent !== op < 0.995 || mat.opacity !== op) { mat.transparent = op < 0.995; mat.opacity = op; mat.depthWrite = op > 0.9; mat.needsUpdate = true; }
+    } else {
+      mat.color.setHex(sel ? 0xffb300 : TYPE_COLOR[f.type]);
+      mat.emissive.setHex(sel ? 0x3a2600 : 0);
+      mat.emissiveIntensity = 1;
+      const tr = cadOpacity < 1;
+      if (mat.transparent !== tr || mat.opacity !== cadOpacity) { mat.transparent = tr; mat.opacity = cadOpacity; mat.depthWrite = !tr; mat.needsUpdate = true; }
+    }
+    if (edge) (edge.material as THREE.LineBasicMaterial).color.setHex(hov ? 0x7c2d12 : 0x23303d);
     const g = ghosts[f.id]; if (g) g.visible = f.visible && cad.showRemoved;
   }
 }
