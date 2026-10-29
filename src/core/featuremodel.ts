@@ -32,6 +32,8 @@ export interface SollState {
   faceId?: number;
   /** samples of the CAD face, world coordinates — seed of a later actual extraction */
   seed?: Vec3[];
+  /** face boundary: outer loop, then islands. Trims the drawn analytic patch. */
+  loops?: Vec3[][];
   aux?: { plane: FitResult; source: string };
 }
 

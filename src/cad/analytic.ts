@@ -24,4 +24,6 @@ export interface CadAnalytic {
   /** extent along the axis, measured from `origin` (cylinder) or from the apex (cone) */
   t0?: number; t1?: number;
   edges: CadCurve[];
+  /** Outer loop first, then islands. Polylines on the face, used to trim the analytic patch. */
+  loops?: V3[][];
 }

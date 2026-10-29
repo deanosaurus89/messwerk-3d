@@ -4,6 +4,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { CadAnalytic, CadCurve } from './analytic';
 import { classifyCurvePoints } from './curvetype';
+import { defaultDisplayDeflection, type TessTol } from './tesspolicy';
 type OC = any;
 export type V3 = [number, number, number];
 export type FaceType = 'Ebene' | 'Zylinder' | 'Kegel' | 'Kugel' | 'Torus' | 'NURBS';
@@ -178,10 +179,8 @@ export function meshAreaCenter(t: Tess): { area: number; center: V3 } {
  * Chordal error stays ≤ 0.75 mm so a ray hit remains inside the nominal edge window (≥ 2 mm).
  */
 export function displayDeflection(diag: number): { linear: number; angular: number } {
-  const linear = Math.min(0.75, Math.max(0.15, (Number.isFinite(diag) ? diag : 1) / 250));
-  // 0.8 rad with surface-deflection control: the chord stays within `linear`.
-  // Finer angles (the old 0.35) spend most of their time in the mesher setup on trimmed NURBS.
-  return { linear, angular: 0.8 };
+  // Coarse display mesh (2026.0.51). Analytic create does not read these triangles.
+  return defaultDisplayDeflection(diag);
 }
 export function bboxDiag(oc: OC, sh: any): number {
   const b = new oc.Bnd_Box_1(); oc.BRepBndLib.Add(sh, b, true); const p = b.CornerMin(), q = b.CornerMax(); const d = p.Distance(q); b.delete(); return d;
@@ -215,20 +214,85 @@ function readTess(oc: OC, sh: any, natural: boolean): Tess {
   for (let v = 0; v < nor.length; v += 3) { const x = nor[v], y = nor[v + 1], z = nor[v + 2]; const l = Math.hypot(x, y, z) || 1; nor[v] = x / l; nor[v + 1] = y / l; nor[v + 2] = z / l; }
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), normals: new Float32Array(nor) };
 }
-export interface LoadedFace { id: number; type: FaceType; detail: string; area: number; center: V3; geom: CadAnalytic | null; tess: Tess; }
+export interface LoadedFace { id: number; type: FaceType; detail: string; area: number; center: V3; geom: CadAnalytic | null; tess: Tess; /** NURBS recognition cloud; absent for analytic faces */ fitCloud?: { positions: Float32Array; normals: Float32Array } | null; }
 /** One display mesh per face. Exact area/centre of mass is not computed here — that dominated import time. */
-function meshShape(oc: OC, shape: any, linear: number, angular: number) {
+function meshShape(oc: OC, shape: any, linear: number, angular: number, relative = false) {
   const p = new oc.IMeshTools_Parameters();
-  p.Deflection = linear; p.Angle = angular; p.ControlSurfaceDeflection = true; p.InParallel = false;
-  p.Relative = false; p.CleanModel = true; p.AllowQualityDecrease = true;
+  p.Deflection = linear; p.Angle = angular; p.ControlSurfaceDeflection = !relative; p.InParallel = false;
+  p.Relative = relative; p.CleanModel = true; p.AllowQualityDecrease = true;
   const mesher = new oc.BRepMesh_IncrementalMesh_3(shape, p, new oc.Message_ProgressRange_1());
   mesher.delete?.(); p.delete?.();
 }
-export function loadDisplayFaces(oc: OC, shape: any, onProgress?: (i: number, n: number) => void): { faces: LoadedFace[]; diag: number; defl: { linear: number; angular: number } } {
-  const orig = faces(oc, shape); const diag = bboxDiag(oc, shape); const defl = displayDeflection(diag);
+/** Samples of a NURBS face from the surface itself (not the display mesh), for analytic recognition. */
+export function nurbsSamples(oc: OC, face: any): { positions: Float32Array; normals: Float32Array } | null {
+  const a = new oc.BRepAdaptor_Surface_2(face, true);
+  try {
+    if (a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_BSplineSurface && a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_BezierSurface
+      && a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_SurfaceOfRevolution && a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_SurfaceOfExtrusion
+      && a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_OffsetSurface && a.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_OtherSurface) {
+      // elementary faces are created from the adaptor; a sample cloud is only the NURBS fallback
+    }
+    const u0 = a.FirstUParameter(), u1 = a.LastUParameter(), v0 = a.FirstVParameter(), v1 = a.LastVParameter();
+    if (![u0, u1, v0, v1].every((x) => Number.isFinite(x)) || Math.abs(u1 - u0) > 1e6 || Math.abs(v1 - v0) > 1e6) return null;
+    const N = 8, pos: number[] = [], nor: number[] = [], rev = face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const u = u0 + (u1 - u0) * ((i + 0.5) / N), v = v0 + (v1 - v0) * ((j + 0.5) / N);
+      try {
+        const p = new oc.gp_Pnt_1(), du = new oc.gp_Vec_1(), dv = new oc.gp_Vec_1();
+        a.D1(u, v, p, du, dv);
+        const cr = cross([du.X(), du.Y(), du.Z()], [dv.X(), dv.Y(), dv.Z()]);
+        const nn = norm(cr); if (Math.hypot(nn[0], nn[1], nn[2]) < 1e-9) continue;
+        let nrm = nn; if (rev) nrm = [-nrm[0], -nrm[1], -nrm[2]];
+        pos.push(p.X(), p.Y(), p.Z()); nor.push(nrm[0], nrm[1], nrm[2]);
+      } catch { /* trimmed corner */ }
+    }
+    return pos.length >= 18 ? { positions: new Float32Array(pos), normals: new Float32Array(nor) } : null;
+  } catch { return null; }
+  finally { a.delete?.(); }
+}
+function sampleWire(oc: OC, wire: any): V3[] {
+  const pts: V3[] = [];
+  let ex: any;
+  try { ex = new oc.BRepTools_WireExplorer_1(wire); } catch { return pts; }
+  try {
+    for (; ex.More(); ex.Next()) {
+      const e = ex.Current();
+      if (oc.BRep_Tool.Degenerated(e)) continue;
+      const c = new oc.BRepAdaptor_Curve_2(e);
+      try {
+        const u0 = c.FirstParameter(), u1 = c.LastParameter();
+        const len = edgeLen(oc, e);
+        const n = Math.max(2, Math.min(32, Math.ceil(len / 2) || 4));
+        for (let i = 0; i < n; i++) {
+          try { pts.push(p3(curvePoint(c, oc, u0 + (u1 - u0) * (i / n)))); } catch { /* skip */ }
+        }
+      } finally { c.delete?.(); }
+    }
+  } finally { ex.delete?.(); }
+  return pts;
+}
+/** Outer wire first, then holes. Empty when the kernel cannot walk the wires. */
+export function faceLoops(oc: OC, face: any): V3[][] {
+  try {
+    const wires: any[] = [];
+    const ex = new oc.TopExp_Explorer_2(face, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+    for (; ex.More(); ex.Next()) wires.push(oc.TopoDS.Wire_1(ex.Current()));
+    ex.delete();
+    if (!wires.length) return [];
+    let outer = wires[0];
+    try { const ow = oc.BRepTools.OuterWire(face); if (ow && !ow.IsNull?.()) outer = ow; } catch { /* first wire */ }
+    const loops = [sampleWire(oc, outer)];
+    for (const w of wires) if (outer.IsSame && !outer.IsSame(w)) loops.push(sampleWire(oc, w));
+    return loops.filter((L) => L.length >= 3);
+  } catch { return []; }
+}
+export function loadDisplayFaces(oc: OC, shape: any, onProgress?: (i: number, n: number) => void, tol?: Partial<TessTol>): { faces: LoadedFace[]; diag: number; defl: TessTol } {
+  const orig = faces(oc, shape); const diag = bboxDiag(oc, shape); const base = displayDeflection(diag);
+  const defl: TessTol = { linear: tol?.linear ?? base.linear, angular: tol?.angular ?? base.angular, relative: !!tol?.relative };
   onProgress?.(0, orig.length);
   // One mesher for the whole model. Per-face IncrementalMesh repeated the edge setup on every face.
-  meshShape(oc, shape, defl.linear, defl.angular);
+  // The shape stays meshed for a later tolerance change (no second file read).
+  meshShape(oc, shape, defl.linear, defl.angular, defl.relative);
   const out: LoadedFace[] = [];
   for (let i = 0; i < orig.length; i++) {
     if (i === 0 || i === orig.length - 1 || i % 25 === 0) onProgress?.(i, orig.length);
@@ -236,11 +300,21 @@ export function loadDisplayFaces(oc: OC, shape: any, onProgress?: (i: number, n:
     let tess = readTess(oc, f, false);
     if (!tess.indices.length) tess = tessellate(oc, f, defl.linear, false, defl.angular);
     let geom: CadAnalytic | null = null; try { geom = faceAnalytic(oc, f); } catch { geom = null; }
+    if (geom) { const loops = faceLoops(oc, f); if (loops.length) geom = { ...geom, loops }; }
     const cls = faceClass(oc, f); const ac = meshAreaCenter(tess);
     const center = ac.area > 0 ? ac.center : (geom?.origin ?? [0, 0, 0]);
-    out.push({ id: i, type: cls.type, detail: cls.detail, area: ac.area, center, geom, tess });
+    const fitCloud = geom?.type === 'NURBS' ? nurbsSamples(oc, f) : null;
+    out.push({ id: i, type: cls.type, detail: cls.detail, area: ac.area, center, geom, tess, fitCloud });
   }
   return { faces: out, diag, defl };
+}
+/** Remesh the shape already in memory. Analytic geometry is unchanged. */
+export function remeshDisplay(oc: OC, shape: any, tol: TessTol): Tess[] {
+  meshShape(oc, shape, tol.linear, tol.angular, tol.relative);
+  return faces(oc, shape).map((f) => {
+    const t = readTess(oc, f, false);
+    return t.indices.length ? t : tessellate(oc, f, tol.linear, false, tol.angular);
+  });
 }
 function compound(oc: OC, list: any[]): any { const c = new oc.TopoDS_Compound(); const b = new oc.BRep_Builder(); b.MakeCompound(c); for (const s of list) b.Add(c, s); return c; }
 function listOf(oc: OC, list: any[]): any { const l = new oc.TopTools_ListOfShape_1(); for (const s of list) l.Append_1(s); return l; }

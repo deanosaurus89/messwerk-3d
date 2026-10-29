@@ -69,6 +69,25 @@ export type FbLayout = 'compact' | 'classic';
 export function featureBuilderLayout(stored: string | null | undefined): FbLayout {
   return stored === 'classic' ? 'classic' : 'compact';
 }
+/** Compact lives in the right-hand dialog. Classic keeps the bottom dock, on desktop and on a phone. */
+export function featureBuilderHost(stored: string | null | undefined): 'dialog' | 'dock' {
+  return featureBuilderLayout(stored) === 'classic' ? 'dock' : 'dialog';
+}
+/** One strong highlight. After Smart Detect, Add region (multi) is that highlight.
+ *  Choosing Smart Detect again lights only Smart Detect. */
+export function fbActionOn(hasPreview: boolean, multi: boolean): { smart: boolean; add: boolean } {
+  if (hasPreview && multi) return { smart: false, add: true };
+  if (hasPreview) return { smart: true, add: false };
+  return { smart: !multi, add: false };
+}
+/** Boundary exclusion is a nominal control. Measured hides it. */
+export function boundaryExclusionFor(nominal: boolean): 'enabled' | 'hidden' {
+  return nominal ? 'enabled' : 'hidden';
+}
+/** Nominal uses the system cursor. Measured keeps the pick/brush ring. */
+export function showPickRing(nominal: boolean): boolean {
+  return !nominal;
+}
 
 /** Add Region is offered as soon as Smart Detect has a preview and the feature is not confirmed yet. */
 export function addRegionSuggested(hasPreview: boolean, multi: boolean): boolean {

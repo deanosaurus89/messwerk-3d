@@ -1,13 +1,15 @@
 // CAD-Worker: OpenCascade (WASM, ~50 MB, gzip ~14 MB) wird erst beim ersten CAD-Import geladen.
 import * as C from './cad/occcore';
 import type { TrimOp } from './cad/occcore';
+import type { TessTol } from './cad/tesspolicy';
 
 export type CadReq =
-  | { op: 'load'; bytes: Uint8Array; name: string }
+  | { op: 'load'; bytes: Uint8Array; name: string; tol?: Partial<TessTol> }
+  | { op: 'retess'; tol: TessTol }
   | { op: 'apply'; ops: TrimOp[] }
   | { op: 'export'; fmt: 'step' | 'iges'; faces: number[] };
 
-let oc: any = null, orig: any[] = [], diag = 100;
+let oc: any = null, orig: any[] = [], shape: any = null, diag = 100;
 const cache = new Map<number, { key: string; shape: any; area: number }>();
 async function getOC() {
   if (oc) return oc;
@@ -24,14 +26,21 @@ self.onmessage = async (e: MessageEvent<{ id: number; req: CadReq }>) => {
       const t0 = performance.now(); const first = !oc; if (first) prog('Loading OpenCascade …', { step: 1, steps: 3 });
       const o = await getOC(); const tInit = performance.now() - t0;
       prog('Reading file …', { step: first ? 2 : 1, steps: first ? 3 : 2 }); const sh = C.readCAD(o, req.bytes, req.name); const tRead = performance.now() - t0 - tInit;
-      orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
-      const defl = C.displayDeflection(diag);
+      shape = sh; orig = C.faces(o, sh); cache.clear(); diag = C.bboxDiag(o, sh);
       prog(`Tessellating ${orig.length} faces …`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: 0 });
       let lastP = 0;
-      const loaded = C.loadDisplayFaces(o, sh, (i, n) => { if (performance.now() - lastP > 200) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${n}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / Math.max(1, n) }); } });
+      const loaded = C.loadDisplayFaces(o, sh, (i, n) => { if (performance.now() - lastP > 200) { lastP = performance.now(); prog(`Tessellating face ${i + 1}/${n}`, { step: first ? 3 : 2, steps: first ? 3 : 2, frac: i / Math.max(1, n) }); } }, req.tol);
       diag = loaded.diag;
-      for (const f of loaded.faces) tr.push(f.tess.positions.buffer, f.tess.indices.buffer, f.tess.normals.buffer);
-      r = { faces: loaded.faces, diag, defl, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
+      for (const f of loaded.faces) {
+        tr.push(f.tess.positions.buffer, f.tess.indices.buffer, f.tess.normals.buffer);
+        if (f.fitCloud) tr.push(f.fitCloud.positions.buffer, f.fitCloud.normals.buffer);
+      }
+      r = { faces: loaded.faces, diag, defl: loaded.defl, ms: { init: tInit, read: tRead, tess: performance.now() - t0 - tInit - tRead }, firstLoad: first };
+    } else if (req.op === 'retess') {
+      if (!shape || !oc) throw new Error('No CAD model loaded');
+      const meshes = C.remeshDisplay(oc, shape, req.tol);
+      for (const t of meshes) tr.push(t.positions.buffer, t.indices.buffer, t.normals.buffer);
+      r = { meshes, tol: req.tol };
     } else if (req.op === 'apply') {
       // je Fläche nur neu rechnen, wenn sich ihre Operationskette geändert hat
       const o = oc; const changed: any[] = []; const errors: (string | null)[] = req.ops.map(() => null);

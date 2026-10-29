@@ -8,6 +8,7 @@ import type { CadAnalytic } from './cad/analytic';
 import type { TrimOp, V3, FaceType, Tess } from './cad/occcore';
 import { cadPickSamples } from './ui/cadpick';
 import { SURFACE_HIGHLIGHT } from './core/nominalui';
+import { resolveTess, type TessTol } from './cad/tesspolicy';
 
 class CadEngine {
   private w: Worker | null = null; private seq = 0;
@@ -24,11 +25,11 @@ class CadEngine {
     this.pending.clear(); this.w?.terminate(); this.w = null; this.seq = 0;
   }
   call<T = any>(req: CadReq, prog?: (t: string) => void, tr: Transferable[] = []): Promise<T> { if (!this.w) this.make(); const id = ++this.seq;
-    progressBegin(req.op === 'load' ? 'CAD laden' : req.op === 'apply' ? 'CAD beschneiden' : 'CAD exportieren');
+    progressBegin(req.op === 'load' ? 'CAD laden' : req.op === 'retess' ? 'CAD tessellate' : req.op === 'apply' ? 'CAD beschneiden' : 'CAD exportieren');
     return new Promise<T>((res, rej) => { this.pending.set(id, { res, rej, prog }); this.w!.postMessage({ id, req }, tr); }).finally(progressEnd); }
 }
 
-interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; dropped?: boolean; tess: Tess; geom?: CadAnalytic | null; res: null | { tess: Tess; area: number; pieces: number }; }
+interface CadFace { id: number; type: FaceType; detail: string; area: number; center: V3; visible: boolean; dropped?: boolean; tess: Tess; geom?: CadAnalytic | null; fitCloud?: { positions: Float32Array; normals: Float32Array } | null; res: null | { tess: Tess; area: number; pieces: number }; }
 type Tool = null | 'offset' | 'cut' | 'circle' | 'rect' | 'export';
 export interface CadCtx {
   viewer: Viewer; toast: (t: string) => void; status: (t: string) => void; renderTree: () => void; renderDialog: () => void;
@@ -180,11 +181,26 @@ export async function cadUndo() { const s = cad.undo.pop(); if (!s) { X.toast('N
 export async function cadRedo() { const s = cad.redo.pop(); if (!s) return; cad.undo.push(cad.ops); cad.ops = s; await apply(); }
 async function removeOp(k: number) { snapshot(); cad.ops.splice(k, 1); cad.opSel = -1; await apply(); }
 
+const TESS_KEY = 'mw3d-tess';
+export function savedTess(): Partial<TessTol> | null {
+  try { const j = JSON.parse(localStorage.getItem(TESS_KEY) || 'null'); return j && typeof j === 'object' ? j : null; } catch { return null; }
+}
+function saveTess(t: TessTol) { try { localStorage.setItem(TESS_KEY, JSON.stringify(t)); } catch { /* */ } }
+export async function cadRetess(tol: TessTol) {
+  if (!cad.faces.length || cad.busy) return;
+  saveTess(tol); cad.busy = true; X.renderDialog();
+  try {
+    const r = await eng.call<any>({ op: 'retess', tol }, (t) => X.status(t));
+    cad.faces.forEach((f, i) => { const m = r.meshes?.[i]; if (m) { f.tess = m; buildFace(f); } });
+    cadPaint(); X.status(`Display mesh updated (${tol.relative ? 'relative' : tol.linear.toFixed(2) + ' mm'}, angle ${(tol.angular * 180 / Math.PI).toFixed(0)}°).`);
+  } catch (e: any) { X.toast('Tessellation failed: ' + e.message); }
+  cad.busy = false; X.renderDialog();
+}
 export async function cadOpen(file: File) {
   const t0 = performance.now(); cad.busy = true; document.body.classList.add('busy');
   try {
     const bytes = new Uint8Array(await file.arrayBuffer()); const first = !eng.loaded;
-    const r = await eng.call<any>({ op: 'load', bytes, name: file.name }, (t) => { X.status(t); if (!/face \d/i.test(t)) X.toast(t); }, [bytes.buffer]);
+    const r = await eng.call<any>({ op: 'load', bytes, name: file.name, tol: savedTess() ?? undefined }, (t) => { X.status(t); if (!/face \d/i.test(t)) X.toast(t); }, [bytes.buffer]);
     for (const m of meshes) if (m) { group.remove(m); m.geometry.dispose(); } for (const g of ghosts) if (g) group.remove(g); meshes = []; ghosts = [];
     cad.name = file.name; cad.faces = r.faces.map((f: any) => ({ ...f, visible: true, res: null })); cad.sel.clear(); cad.ops = []; cad.undo = []; cad.redo = []; cad.errors = []; cad.tool = null; cad.draft = [];
     for (const f of cad.faces) buildFace(f); cadPaint();
@@ -301,7 +317,12 @@ export function cadDialog(d: HTMLElement): boolean {
   if (!cadActive() && !cad.sel.size) return false;
   const sel = [...cad.sel].map((i) => cad.faces[i]); const t = cad.tool; const b = cad.busy ? 'disabled' : '';
   const op = X.cadOpacity?.() ?? { on: false, amt: 60 };
-  let h = `<h3>📐 ${cad.name}</h3><p class="note">Front side (face normal) in type color, <b style="color:#9e5c14">back side ochre</b>.</p>
+  const tolNow = resolveTess(Math.max(1, ...cad.faces.map((f) => Math.sqrt(Math.max(f.area, 1)))), savedTess());
+  let h = `<h3>📐 ${cad.name}</h3><p class="note">Front side (face normal) in type color, <b style="color:#9e5c14">back side ochre</b>. The display mesh is for the view and for picking. Nominal create uses the analytic face.</p>
+    <h4>Display mesh</h4><div class="row" title="Chordal tolerance of the display mesh. Changing it remeshes the model already in memory — the IGES/STEP file is not read again."><label>Linear</label><input id="cad-defl" type="number" min="0.15" max="2.5" step="0.05" value="${tolNow.linear.toFixed(2)}" style="width:5em"> mm
+      <label>Angle °</label><input id="cad-ang" type="number" min="20" max="70" step="1" value="${(tolNow.angular * 180 / Math.PI).toFixed(0)}" style="width:4em">
+      <label title="Deflection relative to the part size"><input id="cad-rel" type="checkbox" ${tolNow.relative ? 'checked' : ''}> relative</label>
+      <button class="btn" id="cad-retess" ${b}>Apply</button></div>
     <div class="row" title="CAD model opacity. Independent of the data object. Default is opaque."><label><input type="checkbox" id="cad-op-on" ${op.on ? 'checked' : ''}> CAD transparent</label> <input type="range" id="cad-op" min="5" max="95" step="5" value="${op.amt}" style="flex:1"> <span>${op.amt}%</span></div>`;
   if (t === 'offset') h += `<h4>Boundary offset</h4><p class="note">Offset the boundary of the selected face(s) inwards by the distance (spatial distance to the boundary edge, on the face). Shared edges of several selected faces are kept.</p>
     <div class="row"><input type="range" id="cad-d-r" min="0.1" max="10" step="0.1" value="${cad.offsetD}" style="flex:1"><input type="number" data-num="abs" id="cad-d" min="0.01" max="100" step="0.1" value="${cad.offsetD}" style="width:5em"> mm</div>
@@ -330,6 +351,13 @@ export function cadDialog(d: HTMLElement): boolean {
   on('#cad-ex-go', () => cadExport(cad.exportFmt)); d.querySelectorAll<HTMLButtonElement>('[data-exfmt]').forEach((x) => (x.onclick = () => { cad.exportFmt = x.dataset.exfmt as 'step' | 'iges'; X.renderDialog(); }));
   d.querySelectorAll<HTMLInputElement>('[name="cad-ex"]').forEach((r) => (r.onchange = () => (cad.exportAll = r.value === 'all')));
   on('#cad-undo', () => cadUndo()); on('#cad-redo', () => cadRedo()); on('#cad-close', () => setTool(null));
+  on('#cad-retess', () => {
+    const lin = Number((d.querySelector<HTMLInputElement>('#cad-defl')?.value ?? '1').replace(',', '.'));
+    const deg = Number(d.querySelector<HTMLInputElement>('#cad-ang')?.value ?? '50');
+    const rel = !!d.querySelector<HTMLInputElement>('#cad-rel')?.checked;
+    const tol = resolveTess(1000, { linear: lin, angular: (deg * Math.PI) / 180, relative: rel });
+    void cadRetess(tol);
+  });
   const cop = d.querySelector<HTMLInputElement>('#cad-op'), con = d.querySelector<HTMLInputElement>('#cad-op-on');
   if (cop && con) {
     con.onchange = () => X.setCadOpacityUi?.(con.checked, Number(cop.value));

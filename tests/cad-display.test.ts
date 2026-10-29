@@ -7,7 +7,7 @@ describe('CAD display deflection', () => {
     for (const diag of [40, 120, 360]) {
       const d = displayDeflection(diag);
       expect(d.linear).toBeGreaterThan((diag / 1500) * 3);
-      expect(d.linear).toBeLessThanOrEqual(0.75);
+      expect(d.linear).toBeLessThanOrEqual(1.25);
       expect(d.linear).toBeGreaterThanOrEqual(0.15);
       expect(d.angular).toBeGreaterThan(0.35);
       expect(d.angular).toBeLessThanOrEqual(0.9);

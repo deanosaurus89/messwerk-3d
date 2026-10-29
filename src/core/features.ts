@@ -51,7 +51,10 @@ export interface Control {
   id: number;
   kind: ControlKind;
   featureIds: number[];       // ein Merkmal (Abstände sind eigene Merkmale)
-  nominal: number | null;     // Sollwert (von Hand)
+  nominal: number | null;     // Sollwert (von Hand oder aus der Soll-Geometrie)
+  /** value computed from the Soll geometry; a hand edit sets nominalEdited */
+  nominalFrom?: number | null;
+  nominalEdited?: boolean;
   tolUp: number;
   tolLo: number;              // negativ, z. B. -0.1
   datumIds?: number[];        // Bezüge (Merkmal-IDs) in Reihenfolge primär|sekundär|tertiär
